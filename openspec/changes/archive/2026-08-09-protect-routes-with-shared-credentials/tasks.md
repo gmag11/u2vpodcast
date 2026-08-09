@@ -23,8 +23,8 @@
 
 - [x] 4b.1 Add `with_authentication: bool` field to `Config` in `src/models/config.rs` and to `config.yml` (default `true`).
 - [x] 4b.2 In `BasicAuthGuard`'s `Service::call`, read `Data<AppState>` and short-circuit to pass-through (forward to the inner service without credential check) when `config.with_authentication == false`. When `true`, run the Basic Auth check as before. The flag is read per request, not cached.
-- [ ] 4b.3 Verify: with `with_authentication: false`, `curl -i /channels/1/feed.xml` (no credentials) → `200` with the RSS body and no `WWW-Authenticate`; `curl -i /media/1/<yt_id>.mp3` (no credentials) → `200` with the MP3 body.
-- [ ] 4b.4 Verify: with `with_authentication: false`, `curl -i /api/1.0/channels/` (no cookie) → still `401` (the API session guard is independent of the flag).
+- [x] 4b.3 Verify: with `with_authentication: false`, `curl -i /channels/1/feed.xml` (no credentials) → `200` with the RSS body and no `WWW-Authenticate`; `curl -i /media/1/<yt_id>.mp3` (no credentials) → `200` with the MP3 body. Confirmed by operator after rebuild.
+- [x] 4b.4 Verify: with `with_authentication: false`, `curl -i /api/1.0/channels/` (no cookie) → still `401` (the API session guard is independent of the flag). Confirmed by operator after rebuild.
 
 ## 5. Backend — verification
 
