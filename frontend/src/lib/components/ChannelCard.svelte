@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { GradientButton } from 'flowbite-svelte';
-	import { EditSolid, TrashBinSolid } from 'flowbite-svelte-icons';
+	import { EditSolid, TrashBinSolid, LinkOutline } from 'flowbite-svelte-icons';
+	import { base_endpoint } from '$lib/global';
 	import type { Channel } from '$lib/utils/types';
 
 	export let channel: Channel;
@@ -41,6 +42,11 @@
 		</div>
 	</a>
 	<div>
+		<a href={`${base_endpoint}/channels/${channel.id}/feed.xml`} target="_blank" rel="noopener noreferrer">
+			<GradientButton class="mb-2" color="purpleToBlue" pill>
+				<LinkOutline class="w-6 h-6" />
+			</GradientButton>
+		</a>
 		<GradientButton
 			class="mb-2"
 			color="cyanToBlue"

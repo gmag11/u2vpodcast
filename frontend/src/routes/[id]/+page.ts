@@ -25,6 +25,7 @@ export const load: PageLoad = async ({ fetch, route, params }) => {
         loggedInUser.set(response.user);
     }
     return {
-        episodes: response.data as Episode[]
+        episodes: response.data as Episode[],
+        channel_id: Number(params.id),
     };
 };
