@@ -33,7 +33,7 @@ async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {
     let url = &config.url;
     let channel_id = path.channel_id;
     match Channel::read(&data.pool, channel_id).await {
-        Ok(channel) => match Episode::read_all(&data.pool).await {
+        Ok(channel) => match Episode::read_episodes_for_channel(&data.pool, channel_id).await {
             Ok(episodes) => {
                 let mut items = Vec::new();
                 for episode in episodes {
