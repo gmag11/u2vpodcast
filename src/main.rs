@@ -190,10 +190,12 @@ async fn main() -> Result<(), Error> {
                     .cookie_secure(true)
                     .build()
                 }else{
-                    SessionMiddleware::new(
+                    SessionMiddleware::builder(
                         CookieSessionStore::default(),
                         Key::from(config.secret_key.as_bytes()).clone()
                     )
+                    .cookie_secure(false)
+                    .build()
                 }
             )
             .wrap(
