@@ -6,6 +6,7 @@ mod episodes;
 mod users;
 mod options;
 mod feed;
+mod config;
 
 
 use actix_web::web;
@@ -51,11 +52,9 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .service(channels::create)
                                     .service(channels::update)
                                     .service(channels::delete)
+                                    .service(config::get_config)
                             )
                     )
-            ).service(
-                web::scope("/config")
-                    //.configure(config_users)
             )
     );
 }
