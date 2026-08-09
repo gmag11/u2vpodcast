@@ -212,6 +212,16 @@ impl User{
         .map_err(|e| e.into())
     }
 
+    pub async fn delete_all(pool: &SqlitePool) -> Result<(), Error>{
+        info!("delete_all");
+        let sql = "DELETE FROM users";
+        query(sql)
+            .execute(pool)
+            .await
+            .map_err(|e| e.into())
+            .map(|_| ())
+    }
+
     pub async fn update(pool: &SqlitePool, user: &Self) -> Result<Self, Error>{
         info!("update");
         let updated_at = Utc::now();

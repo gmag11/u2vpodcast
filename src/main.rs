@@ -138,11 +138,13 @@ async fn main() -> Result<(), Error> {
     let url = config.url.clone();
     let port = config.port;
 
-    if !db_exists {
-        User::default(&pool, &config.admin_username, &config.admin_password)
-            .await
-            .expect("Cant create admin user");
-    }
+    // Ensure the only user is the admin from the configuration on every startup.
+    User::delete_all(&pool)
+        .await
+        .expect("Cant delete existing users");
+    User::default(&pool, &config.admin_username, &config.admin_password)
+        .await
+        .expect("Cant create admin user");
 
 
     let pool2 = pool.clone();
