@@ -3,13 +3,13 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ChannelDialog from '$lib/components/ChannelDialog.svelte';
 	import ChannelCard from '$lib/components/ChannelCard.svelte';
-	import { Button, Pagination, PaginationItem } from 'flowbite-svelte';
+	import { PaginationItem } from 'flowbite-svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { ChevronLeftOutline, ChevronRightOutline } from 'flowbite-svelte-icons';
 	import { GradientButton } from 'flowbite-svelte';
 	import { CirclePlusSolid } from 'flowbite-svelte-icons';
 	import type { Channel } from '$lib/types';
-	import { per_page } from '$lib/global';
 	import { base_endpoint } from '$lib/global';
 	export let showConfirmDialog = false;
 	export let showChannelDialog = false;
@@ -19,6 +19,7 @@
 	let onDialogButtonClicked: any;
 
 	let channels: Channel[] = data.channels as Channel[];
+	let perPage: number = data.per_page ?? 3;
 
 	async function deleteChannel(channelToDelete: any) {
 		console.log('deleteChannel');
@@ -103,83 +104,66 @@
 		showChannelDialog = true;
 	}
 
-	function getCurrentPage() {
+	function getCurrentPage(currentPageString: string | null) {
 		let currentPage = 1;
-		const currentPageString = $page.url.searchParams.get('page');
 		if (currentPageString != null) {
 			currentPage = parseInt(currentPageString);
 		}
+		if (!Number.isFinite(currentPage) || currentPage < 1) currentPage = 1;
 		console.log(`currentPage: ${currentPage}`);
 		return currentPage;
 	}
 
-	function getPaginatedChannels() {
-		const total = channels.length;
-		let start = (currentPage - 1) * per_page;
-		if (start > total - 1) {
-			start = total - 1;
-		}
-		let end = start + per_page;
-		if (end > total) {
-			end = total;
-		}
+	function getPaginatedChannels(pageNumber: number, channelList: Channel[]) {
+		const total = channelList.length;
+		let start = (pageNumber - 1) * perPage;
+		if (start >= total) start = 0;
+		let end = start + perPage;
 		console.log(`start: ${start}, end: ${end}, total: ${total}`);
-		return channels.slice(start, end);
+		return channelList.slice(start, end);
 	}
 
-	function getPages() {
-		const path = $page.url.pathname;
-		const href = $page.url.href;
-		console.log(`url: ${path}`);
-		const pages = [];
-		const max_page = channels.length / per_page;
-		for (let i = currentPage - 2; i <= currentPage + 2; i++) {
-			if (i > 0 && i <= max_page) {
-				console.log(`page ${i}`);
-                console.log($page.url);
-				console.log(`${href}?page=${i}`);
-				pages.push({ name: `${i}`, href: `${href}?page=${i}`, page: i });
-			}
-		}
-		console.log(pages);
-		return pages;
+	function pageUrl(pageNumber: number) {
+		const url = new URL($page.url.href);
+		url.searchParams.set('page', `${pageNumber}`);
+		return `${url.pathname}${url.search}`;
 	}
-	$: currentPage = getCurrentPage();
-	$: paginatedChannels = getPaginatedChannels();
-	$: pages = getPages();
+
+	function goToPage(pageNumber: number) {
+		const maxPage = Math.max(1, Math.ceil(channels.length / perPage));
+		if (pageNumber >= 1 && pageNumber <= maxPage) {
+			goto(pageUrl(pageNumber));
+		}
+	}
+
+	$: currentPage = getCurrentPage($page.url.searchParams.get('page'));
+	$: paginatedChannels = getPaginatedChannels(currentPage, channels);
+	$: maxPage = Math.max(1, Math.ceil(channels.length / perPage));
+	$: pageNumbers = Array.from({ length: maxPage }, (_, idx) => idx + 1);
 </script>
 
 <div id="channels" class="grid justify-items-center">
 	<GradientButton on:click={onNewChannelButtonClicked} class="mb-4">
 		<CirclePlusSolid />
 	</GradientButton>
-	{#each paginatedChannels as channel}
+	{#each paginatedChannels as channel (channel.id)}
 		<ChannelCard {channel} {onUpdateChannelButtonClicked} {onDeleteChannelButtonClicked} />
 	{/each}
 </div>
-<div class="grid justify-items-center">
-    {#each pages as page}
-        <Button on:click={
-            () => {
-                currentPage = page.page;
-                console.log(currentPage);
-                paginatedChannels = getPaginatedChannels();
-            }
-        }>{page.name}</Button>
-    {/each}
-</div>
-
-<div class="grid justify-items-center">
-	<Pagination {pages} large>
-		<svelte:fragment slot="prev">
-			<span class="sr-only">Previous</span>
-			<ChevronLeftOutline class="w-6 h-6" />
-		</svelte:fragment>
-		<svelte:fragment slot="next">
-			<span class="sr-only">Next</span>
-			<ChevronRightOutline class="w-6 h-6" />
-		</svelte:fragment>
-	</Pagination>
+<div class="flex items-center justify-center gap-1 mt-4">
+	<PaginationItem large on:click={() => goToPage(currentPage - 1)} class="rounded-s-lg">
+		<span class="sr-only">Previous</span>
+		<ChevronLeftOutline class="w-5 h-5" />
+	</PaginationItem>
+	{#each pageNumbers as p (p)}
+		<PaginationItem large active={p === currentPage} on:click={() => goToPage(p)} class="rounded-lg">
+			{p}
+		</PaginationItem>
+	{/each}
+	<PaginationItem large on:click={() => goToPage(currentPage + 1)} class="rounded-e-lg">
+		<span class="sr-only">Next</span>
+		<ChevronRightOutline class="w-5 h-5" />
+	</PaginationItem>
 </div>
 
 <ChannelDialog bind:open={showChannelDialog} {channel} onOkButtonClicked={onDialogButtonClicked} />

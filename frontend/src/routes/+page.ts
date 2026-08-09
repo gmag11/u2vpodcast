@@ -16,7 +16,11 @@ export const load: PageLoad = async ({ fetch, route }) => {
         isAuthenticated.set(true);
         loggedInUser.set(response.user);
     }
+    const config = await fetch(`${base_endpoint}/api/1.0/config/`);
+    const configResponse: { data: { per_page?: number } } = await config.json();
+    const per_page = configResponse.data?.per_page;
     return {
         channels: response.data as Channel[],
+        per_page: per_page ?? 3,
     };
 };
