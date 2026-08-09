@@ -2,6 +2,7 @@
 	"name": "u2vpodcast",
 	"version": "0.0.1",
 	"private": true,
+	"packageManager": "pnpm@9.15.9",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
