@@ -13,6 +13,12 @@ pub struct Config{
     pub secret_key: String,
     pub admin_username: String,
     pub admin_password: String,
+    #[serde(default = "default_with_authentication")]
+    pub with_authentication: bool,
+}
+
+fn default_with_authentication() -> bool {
+    true
 }
 
 impl Config {

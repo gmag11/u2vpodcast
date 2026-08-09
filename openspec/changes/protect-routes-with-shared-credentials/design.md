@@ -29,14 +29,16 @@ See `proposal.md - Why` for the motivation. The relevant existing state for the 
 
 ### Decision 1: Two middlewares, not one
 
-Use **two distinct middleware functions**:
+Use **two distinct middleware pairs** (`Transform` + `Service` structs, the standard actix-web 4 pattern) registered with `.wrap()`:
 
-- `require_session` — wraps an actix `wrap_fn` that calls `from_session(req)` and lets the request through on `Ok`, else short-circuits with a `401` whose body is `CustomResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized", empty_session, None)`. Applied only to an inner scope of `/api/1.0` that contains the protected endpoints.
-- `basic_auth` — wraps an `actix-web-httpauth::extractors::basic::BasicAuth` extractor and a `wrap_fn` that pulls `Data<AppState>`, resolves `BasicAuth.user_id()` / `.password()`, calls `User::get_by_name(&pool, user)` + `user.check_password(pass).await`, and short-circuits with `401` + `WWW-Authenticate: Basic realm="u2vpodcast"` on any failure. Applied to the `web_feed` scope and to `/media/**`.
+- `RequireSession` / `RequireSessionMiddleware` — `Service::call` checks `from_session(req.get_session())`; on `Ok` it forwards via the inner service (held in `Rc<S>`, cloned into the async block so the `'static` boxed future doesn't borrow `&self`); on `Err` it short-circuits with a `401` whose body is `CustomResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized", session, None)`.
+- `BasicAuthGuard` / `BasicAuthMiddleware` — extracts `BasicAuth`, pulls `Data<AppState>`, resolves `BasicAuth.user_id()` / `.password()`, calls `User::get_by_name(&pool, user)` + `user.check_password(pass).await`, and on any failure short-circuits with `401` + `WWW-Authenticate: Basic realm="u2vpodcast"`.
 
-**Why not one**: JSON API needs a *cookie* session (extracted via `Session::extract`). Feeds/media need the `Authorization` header (extracted via `BasicAuth`). Trying to fold both into one middleware means the middleware needs to detect which surface it's on, which is more code than two small middlewares.
+The bounds follow actix-web-httpauth's `HttpAuthentication` precedent: `S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static`, `S::Future: 'static`, `B: MessageBody + 'static`, and `Service::Future = Pin<Box<dyn Future<Output = Result<ServiceResponse<BoxBody>, Error>>>>` (`!Send` is fine — actix-web polls futures on a single worker thread). `poll_ready` delegates to `self.service`.
 
-**Alternative considered**: A single `Authentication` enum middleware that branches on request path. Rejected: the branch lives in `handlers/mod.rs` via the scope tree, which is clearer and matches how actix scopes are meant to be composed.
+**Why `Transform`/`Service` and not `wrap_fn`**: passing a generic `async fn` directly to `wrap_fn` fails the higher-rank-trait-bound check (`wrap_fn` requires `F: Fn(ServiceRequest, &T::Service) -> R` for *all* borrow lifetimes of `&T::Service`, but an `async fn`'s returned `impl Future` is tied to one specific lifetime — "implementation of `Fn` is not general enough"). The `Transform`/`Service` struct pattern gives a concrete `Service::Future` type and sidesteps HRTB. Registered with `.wrap(RequireSession)` / `.wrap(BasicAuthGuard)`.
+
+**Why not one**: JSON API needs a *cookie* session (via `Session`). Feeds/media need the `Authorization` header (via `BasicAuth`). Folding both into one middleware would require per-path branching, which is clearer via the scope tree.
 
 ### Decision 2: `require_session` returns a `CustomResponse` body, not an empty 401
 
@@ -69,15 +71,15 @@ The `basic_auth` middleware queries `User::get_by_name(&pool, cred.user_id())` o
 
 ### Decision 5: Scope tree restructured to keep anonymous endpoints outside the guard
 
-The change reorganizes `handlers/mod.rs`'s scope tree as follows, so `require_session` is applied only to the protected inner scope:
+The change reorganizes `handlers/mod.rs`'s scope tree as follows, so `require_session` is applied only to the protected inner scope. The feed is wrapped on the **resource** itself (via `web_feed`), not on an empty scope: `ResourceDef::prefix("")` — which an empty scope would register — matches every path, so wrapping an empty scope would intercept all routes. Registering the middleware directly on the resource keeps the guard scoped to `/channels/{channel_id}/feed.xml`.
 
 ```
 ""  (root scope)
 ├─ web::redirect("/", "/app/")                                 (unchanged)
-├─ web::scope("")
+├─ .configure(web_feed)                                        (feed.rs)
 │    └─ web::resource("/channels/{channel_id}/feed.xml")
-│          .route(web::get().to(feed::get_feed))
-│          .wrap(basic_auth)                                   ★ NEW
+│          .route(web::get().to(get_feed))
+│          .wrap_fn(basic_auth)                                 ★ NEW
 │
 └─ web::scope("/api")
      └─ web::scope("/1.0")
@@ -87,7 +89,7 @@ The change reorganizes `handlers/mod.rs`'s scope tree as follows, so `require_se
           ├─ GET  /session/        ─┘
           │
           └─ web::scope("")                                       ★ NEW inner scope
-               .wrap(require_session)
+               .wrap_fn(require_session)
                ├─ channels::{
                │     read, read_with_pagination,
                │     create, update, delete
@@ -95,6 +97,8 @@ The change reorganizes `handlers/mod.rs`'s scope tree as follows, so `require_se
                ├─ episodes::read_with_pagination
                └─ config::get_config
 ```
+
+**Ordering note (critical)**: actix's `Router::recognize` returns the **first match in registration order**. The anonymous endpoints (`/login/`, `/logout/`, `/status/`, `/session/`) are therefore registered *before* the protected empty inner scope, so they match first. The empty scope (`prefix("")`) catches only what the anonymous endpoints don't match — i.e. exactly `channels::*`, `episodes`, and `config`. The `/media` scope carries a non-empty prefix (`/media`), so its middleware only runs for `/media/*`.
 
 **Why**: The anonymous endpoints must stay reachable for anyone to log in. Wrapping the whole `/api/1.0` scope would deadlock the login flow. Inner-scope wrapping is the idiomatic actix-web pattern and matches the existing broken-out `//.wrap(Authentication)` comment.
 
@@ -105,7 +109,7 @@ Although `actix-files::Files` exposes `.wrap()`, the cleanest and most portable 
 ```rust
 cfg.service(
     web::scope("/media")
-        .wrap(basic_auth)
+        .wrap_fn(basic_auth)
         .service(af::Files::new("", "./audios"))
 );
 ```
@@ -116,7 +120,7 @@ This requires moving `/media` out of the top-level `App::new().service(af::Files
 - Acts on a confirmed-compatible composition path (a scope wrapping `Files`), avoiding a spike to confirm `Files::wrap()` on the actix 4.5.1 pinned in `Cargo.toml`.
 - Keeps all guarded surfaces declared in one place (`handlers::config_services`), which matches where `web_feed` already lives, improving locality and reviewability.
 
-**Alternative considered**: `af::Files::new("/media", "./audios").wrap(basic_auth)` directly in `main.rs`. Rejected to avoid the actix-version compatibility spike and to keep all route/middleware declarations together.
+**Alternative considered**: `af::Files::new("/media", "./audios").wrap_fn(basic_auth)` directly in `main.rs`. Rejected to keep all route/middleware declarations together in `config_services`.
 
 ### Decision 7: Add `actix-web-httpauth = "0.8"` for Basic Auth parsing
 
@@ -125,6 +129,16 @@ This requires moving `/media` out of the top-level `App::new().service(af::Files
 - Well-maintained and aligned with actix-web 4.
 
 **Alternative considered**: Hand-roll parsing of `req.headers().get(header::AUTHORIZATION)`. Rejected; the crate is small and avoids the parser.
+
+### Decision 8: `with_authentication` flag gates only the feed/media Basic Auth, evaluated per request
+
+Add a `with_authentication: bool` field to `Config` (read from `config.yml`). The `BasicAuthGuard` middleware reads it from `Data<AppState>` on every request: when `false`, it short-circuits to pass-through (forwards to the inner service without any credential check); when `true`, it runs the Basic Auth check as described in Decision 1.
+
+**Scope of the flag**: it controls only the feed (`/channels/{channel_id}/feed.xml`) and `/media/**` Basic Auth. The JSON API session guard (`RequireSession` on `/api/1.0/channels|episodes|config/*`) is NOT gated by this flag and stays enforced at all times. This keeps the data API protected while allowing a backwards-compatible rollout where the operator can serve feeds/media publicly (matching the pre-change behavior) and flip the flag on later without a redeploy of code — only a `config.yml` edit + restart.
+
+**Why per-request (not conditional `.wrap()`)**: building the route tree with a conditional `.wrap(BasicAuthGuard)` based on a startup config value would mean the flag only takes effect at startup and the middleware would need a different code path. A single `BasicAuthGuard` that checks the flag inside `Service::call` keeps the route tree static, is testable in both modes without recompiling, and matches how `actix-web-httpauth`'s `HttpAuthentication` reads config from `app_data` per request. The cost of one extra `app_data::<Data<AppState>>()` lookup + a bool read per feed/media request is negligible.
+
+**Default**: `with_authentication: true` in the shipped `config.yml`, so the default deploy is protected. Operators upgrading who need the public feed set it to `false`.
 
 ## Risks / Trade-offs
 

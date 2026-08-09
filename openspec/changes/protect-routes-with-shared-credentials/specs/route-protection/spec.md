@@ -79,3 +79,19 @@ Because the startup routine in `main.rs` deletes all users and recreates only th
 #### Scenario: Unknown username is rejected identically to wrong password
 - **WHEN** a client sends a Basic Auth header with username `notadmin` and any password to `/channels/1/feed.xml`
 - **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"`, identical (status code and header) to the response it would give for `admin` with a wrong password
+
+### Requirement: `with_authentication` config flag toggles the feed and media Basic Auth guard
+
+The system SHALL read a boolean `with_authentication` field from `config.yml` at startup and use it to toggle the HTTP Basic Auth guard on the RSS feed (`/channels/{channel_id}/feed.xml`) and on `/media/**` only. When `with_authentication` is `true`, both surfaces SHALL require valid Basic Auth as described above. When `with_authentication` is `false`, both surfaces SHALL be served without any credential check (the pre-change public behavior). The JSON API session guard (`require_session` on `/api/1.0/channels|episodes|config/*`) is NOT affected by this flag and SHALL remain enforced regardless of the flag's value. The flag MUST be evaluated on every request (no startup caching that would prevent an operator from flipping the flag between restarts).
+
+#### Scenario: Feed and media are public when the flag is false
+- **WHEN** `config.yml` sets `with_authentication: false` and a client requests `/channels/1/feed.xml` or `/media/1/<yt_id>.mp3` with no `Authorization` header
+- **THEN** the system responds `200` with the feed body (or the MP3 body) and no `WWW-Authenticate` header
+
+#### Scenario: Feed and media are guarded when the flag is true
+- **WHEN** `config.yml` sets `with_authentication: true` and a client requests `/channels/1/feed.xml` with no `Authorization` header
+- **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"`
+
+#### Scenario: API session guard is independent of the flag
+- **WHEN** `config.yml` sets `with_authentication: false` and a client requests `/api/1.0/channels/` with no cookie
+- **THEN** the system still responds `401` with the `CustomResponse` body (`user: null`), because `require_session` is not controlled by `with_authentication`

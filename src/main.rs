@@ -225,7 +225,6 @@ async fn main() -> Result<(), Error> {
                 }
             )
             .app_data(Data::clone(&data))
-            .service(af::Files::new("/media", "./audios"))
             .service(af::Files::new("/app", static_files.clone())
                 .index_file("index.html")
                 .default_handler(

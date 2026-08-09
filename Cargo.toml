@@ -13,6 +13,7 @@ actix-cors = "0.7.0"
 actix-files = "0.6.5"
 actix-session = { version = "0.9.0", features = ["cookie-session"] }
 actix-web = "4.5.1"
+actix-web-httpauth = "0.8"
 argon2 = "0.5.3"
 chrono = { version = "0.4.38", features = ["serde"] }
 filetime = "0.2.23"

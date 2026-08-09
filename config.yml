@@ -7,3 +7,7 @@ per_page: 3
 secret_key: "pxWGSDw8pie2TPZcqfFdpBgxwzp08fz4UTJ2q8pSfP80Df74PE8HcrjXV3hsOyZTgCpBvXtmn2O7qqtXigJM0Q=="
 admin_username: admin
 admin_password: nimda
+# When true, the RSS feed (/channels/{channel_id}/feed.xml) and the media files
+# (/media/**) require HTTP Basic Auth using the admin credentials above.
+# When false, they are served without authentication. Defaults to true if omitted.
+with_authentication: true

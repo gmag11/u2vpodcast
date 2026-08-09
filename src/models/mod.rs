@@ -39,6 +39,7 @@ pub use user::{
     User,
     NewUser,
     Credentials,
+    from_session,
 };
 
 pub fn default_datetime() -> DateTime<Utc> {
