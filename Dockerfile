@@ -33,6 +33,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM frontend_base AS frontend_builder
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install \
     --frozen-lockfile && \
+    pnpm dlx vitest@1.6.1 run && \
     pnpm run build
 
 ###############################################################################
