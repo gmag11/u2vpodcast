@@ -11,6 +11,8 @@ export const happyEmoji = '😊';
 export const thinkingEmoji = '🤔';
 export const eyesRoll = '🙄';
 
+export const HIGHEST_IMAGE_UPLOAD_SIZE = 1048576;
+
 export const redColor = '#dc3545';
 export const greenColor = '#198754';
 export const yellowColor = '#ffc107';
