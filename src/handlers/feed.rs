@@ -24,6 +24,11 @@ pub fn web_feed(cfg: &mut ServiceConfig) {
         web::resource("/channels/{slug}/feed.xml")
             .route(web::get().to(get_feed))
             .wrap(BasicAuthGuard),
+    )
+    .service(
+        web::resource("/{slug}/feed.xml")
+            .route(web::get().to(get_feed))
+            .wrap(BasicAuthGuard),
     );
 }
 
@@ -74,18 +79,18 @@ async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {
                     .itunes_ext(Some(itunes))
                     .items(items)
                     .build();
-                Ok(HttpResponse::Ok()
+                HttpResponse::Ok()
                     .append_header(("Content-type", "application/rss+xml; charset=utf-8"))
-                    .body(channel_builder.to_string()))
+                    .body(channel_builder.to_string())
             }
             Err(e) => {
                 error!("Error: {e}");
-                Err(e)
+                HttpResponse::InternalServerError().body("Internal server error")
             }
         },
         Err(e) => {
             error!("Error: {e}");
-            Err(e)
+            HttpResponse::NotFound().body("Feed not found")
         }
     }
 }
