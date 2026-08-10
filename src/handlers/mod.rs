@@ -19,7 +19,7 @@ use super::models::{
 };
 use super::utils::middleware::{
     RequireSession,
-    BasicAuthGuard,
+    SessionOrBasicAuth,
 };
 use feed::web_feed;
 
@@ -63,7 +63,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             )
             .service(
                 web::scope("/media")
-                    .wrap(BasicAuthGuard)
+                    .wrap(SessionOrBasicAuth)
                     .service(af::Files::new("", "./audios"))
             )
     );

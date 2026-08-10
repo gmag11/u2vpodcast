@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tracing::{error, info};
 
 use crate::models::{Channel, Episode};
-use crate::utils::middleware::BasicAuthGuard;
+use crate::utils::middleware::SessionOrBasicAuth;
 
 use super::AppState;
 
@@ -23,12 +23,12 @@ pub fn web_feed(cfg: &mut ServiceConfig) {
     cfg.service(
         web::resource("/channels/{slug}/feed.xml")
             .route(web::get().to(get_feed))
-            .wrap(BasicAuthGuard),
+            .wrap(SessionOrBasicAuth),
     )
     .service(
         web::resource("/{slug}/feed.xml")
             .route(web::get().to(get_feed))
-            .wrap(BasicAuthGuard),
+            .wrap(SessionOrBasicAuth),
     );
 }
 

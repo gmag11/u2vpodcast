@@ -182,3 +182,92 @@ fn unauthorized(req: ServiceRequest) -> ServiceResponse<BoxBody> {
             .finish(),
     )
 }
+
+// ---------- session_or_basic ----------
+
+pub struct SessionOrBasicAuth;
+
+impl<S, B> Transform<S, ServiceRequest> for SessionOrBasicAuth
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionOrBasicAuthMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SessionOrBasicAuthMiddleware {
+            service: Rc::new(service),
+        }))
+    }
+}
+
+pub struct SessionOrBasicAuthMiddleware<S> {
+    service: Rc<S>,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionOrBasicAuthMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type Future = BoxFuture;
+
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let data = match req.app_data::<Data<AppState>>().cloned() {
+            Some(data) => data,
+            None => return Box::pin(async move { Ok(unauthorized(req)) }),
+        };
+        if !data.config.with_authentication {
+            let service = Rc::clone(&self.service);
+            return Box::pin(async move {
+                let res = service.call(req).await?;
+                Ok(res.map_into_boxed_body())
+            });
+        }
+        if from_session(req.get_session()).is_ok() {
+            let service = Rc::clone(&self.service);
+            return Box::pin(async move {
+                let res = service.call(req).await?;
+                Ok(res.map_into_boxed_body())
+            });
+        }
+        let mut payload = Payload::None;
+        let extraction = BasicAuth::from_request(req.request(), &mut payload);
+        let service = Rc::clone(&self.service);
+        let pool = data.pool.clone();
+        Box::pin(async move {
+            let credentials = match extraction.await {
+                Ok(credentials) => credentials,
+                Err(_) => return Ok(unauthorized(req)),
+            };
+            let username = credentials.user_id().to_string();
+            let password = credentials
+                .password()
+                .map(|password| password.to_string())
+                .unwrap_or_default();
+            match User::get_by_name(&pool, &username).await {
+                Ok(user) => {
+                    if user.active && user.check_password(&password).await {
+                        let res = service.call(req).await?;
+                        Ok(res.map_into_boxed_body())
+                    } else {
+                        Ok(unauthorized(req))
+                    }
+                }
+                Err(_) => Ok(unauthorized(req)),
+            }
+        })
+    }
+}
