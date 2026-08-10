@@ -1,11 +1,12 @@
 ###############################################################################
 ## Backend builder
 ###############################################################################
-FROM rust:alpine3.19 AS backend_builder
+FROM rust:alpine3.24 AS backend_builder
 
 LABEL maintainer="Lorenzo Carbonell <a.k.a. atareao> lorenzo.carbonell.cerezo@gmail.com"
 
 RUN apk add --update --no-cache \
+            gcc \
             musl-dev
 
 WORKDIR /app
@@ -19,9 +20,9 @@ RUN cargo build --release && \
 ###############################################################################
 ## Frontend builder
 ###############################################################################
-FROM node:20-alpine AS frontend_base
-ENV PNPM_HOME="/pnpm" \
-    PATH="$PNPM_HOME:$PATH"
+FROM node:24-alpine AS frontend_base
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
 RUN corepack enable
 COPY ./frontend/ /app
 WORKDIR /app
@@ -33,23 +34,23 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM frontend_base AS frontend_builder
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install \
     --frozen-lockfile && \
-    pnpm dlx vitest@1.6.1 run && \
+    pnpm test && \
     pnpm run build
 
 ###############################################################################
 ## Final image
 ###############################################################################
-FROM alpine:3.19
+FROM alpine:3.24
 
 ENV USER=app
 ENV UID=10001
 
 RUN apk add --update --no-cache \
-            ffmpeg~=6.1 \
-            git~=2.43 \
-            sqlite~=3.44 \
-            python3~=3.11 \
-            py3-pip~=23.3 && \
+            ffmpeg~=8.1 \
+            git~=2.54 \
+            sqlite~=3.53 \
+            python3~=3.14 \
+            py3-pip~=26.1 && \
     rm -rf /var/cache/apk && \
     rm -rf /var/lib/app/lists*
 
