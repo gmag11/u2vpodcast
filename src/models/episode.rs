@@ -13,6 +13,8 @@ use tracing::info;
 pub struct Episode {
     pub id: i64,
     pub channel_id: i64,
+    #[serde(default)]
+    pub channel_slug: String,
     pub title: String,
     #[serde(default = "get_default_empty")]
     pub description: String,
@@ -37,6 +39,7 @@ impl Episode {
         Self {
             id: row.get("id"),
             channel_id: row.get("channel_id"),
+            channel_slug: String::new(),
             title: row.get("title"),
             description: row.get("description"),
             yt_id: row.get("yt_id"),
@@ -60,6 +63,7 @@ impl Episode {
         let mut episode = Self {
             id: -1,
             channel_id,
+            channel_slug: String::new(),
             title: title.to_string(),
             description: description.to_string(),
             yt_id: yt_id.to_string(),

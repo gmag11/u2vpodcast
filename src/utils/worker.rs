@@ -48,7 +48,7 @@ async fn clean_channel(pool: &SqlitePool, channel: &Channel) -> Result<(), Error
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     for (index, episode) in episodes.iter().enumerate(){
         if index >= max { // remove
-            let filename = format!("{}/{}/{}.mp3", FOLDER, &channel.id, episode.yt_id);
+            let filename = format!("{}/{}/{}.mp3", FOLDER, &channel.slug, episode.yt_id);
             info!("Deleting file {filename}");
             let exists = tokio::fs::metadata(&filename)
                 .await
@@ -74,8 +74,8 @@ async fn process_channel(
     channel: &Channel,
     ytdlp: &Ytdlp,
 ) -> Result<(), Error>{
-    info!("Create directory {}/{}", FOLDER, &channel.id);
-    let _ = create_dir_all(format!("{}/{}", FOLDER, &channel.id))
+    info!("Create directory {}/{}", FOLDER, &channel.slug);
+    let _ = create_dir_all(format!("{}/{}", FOLDER, &channel.slug))
         .await;
     info!("Getting new videos for channel: {}", channel);
     let first = channel.first;
@@ -122,7 +122,7 @@ async fn process_episode(
     info!("Downloading video: {:?}", ytvideo);
     let filename = format!("{}/{}/{}.mp3",
         FOLDER,
-        channel.id,
+        channel.slug,
         &ytvideo.id
     );
 

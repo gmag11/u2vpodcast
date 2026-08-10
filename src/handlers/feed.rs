@@ -16,29 +16,29 @@ use super::AppState;
 
 #[derive(Deserialize)]
 struct Info {
-    channel_id: i64,
+    slug: String,
 }
 
 pub fn web_feed(cfg: &mut ServiceConfig) {
     cfg.service(
-        web::resource("/channels/{channel_id}/feed.xml")
+        web::resource("/channels/{slug}/feed.xml")
             .route(web::get().to(get_feed))
             .wrap(BasicAuthGuard),
     );
 }
 
 async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {
-    info!("get_login");
+    info!("get_feed");
     let config = &data.config;
     let url = &config.url;
-    let channel_id = path.channel_id;
-    match Channel::read(&data.pool, channel_id).await {
-        Ok(channel) => match Episode::read_episodes_for_channel(&data.pool, channel_id).await {
+    let slug = path.slug.clone();
+    match Channel::read_by_slug(&data.pool, &slug).await {
+        Ok(channel) => match Episode::read_episodes_for_channel(&data.pool, channel.id).await {
             Ok(episodes) => {
                 let mut items = Vec::new();
                 for episode in episodes {
                     let yt_id = &episode.yt_id;
-                    let enclosure = format!("{url}/media/{channel_id}/{yt_id}.mp3");
+                    let enclosure = format!("{url}/media/{slug}/{yt_id}.mp3");
                     let itunes = ITunesItemExtensionBuilder::default()
                         .image(Some(episode.image))
                         .summary(Some(episode.description.to_string()))

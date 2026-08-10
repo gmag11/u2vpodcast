@@ -16,6 +16,7 @@ use chrono::{
     DateTime,
     Utc,
 };
+use regex::Regex;
 use sqlx::{
     sqlite::{
         SqlitePool,
@@ -36,6 +37,7 @@ pub struct Channel {
     pub id: i64,
     pub url: String,
     pub title: String,
+    pub slug: String,
     pub active: bool,
     pub description: String,
     pub image: String,
@@ -68,6 +70,13 @@ impl Display for Channel {
     }
 }
 
+fn slugify(title: &str) -> String {
+    let folded = deunicode::deunicode(title).to_lowercase();
+    let re = Regex::new(r"[^a-z0-9]+").unwrap();
+    let slug = re.replace_all(&folded, "_").to_string();
+    slug.trim_matches('_').to_string()
+}
+
 impl Channel{
     fn from_row(row: SqliteRow) -> Self{
         info!("from_row");
@@ -75,6 +84,7 @@ impl Channel{
             id: row.get("id"),
             url: row.get("url"),
             title: row.get("title"),
+            slug: row.get("slug"),
             active: row.get("active"),
             description: row.get("description"),
             image: row.get("image"),
@@ -93,12 +103,15 @@ impl Channel{
             Ok(ytinfo) => ytinfo,
             Err(_) => YTInfo::default(),
         };
-        let sql = "INSERT INTO channels (url, title, active, description,
+        let base_slug = slugify(&ytinfo.title);
+        let slug = Self::unique_slug(pool, &base_slug).await;
+        let sql = "INSERT INTO channels (url, title, slug, active, description,
                    image, first, max, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *;";
-        query(sql)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *;";
+        let mut channel_row = query(sql)
             .bind(&channel.url)
             .bind(&ytinfo.title)
+            .bind(&slug)
             .bind(channel.active)
             .bind(&ytinfo.description)
             .bind(&ytinfo.image)
@@ -109,7 +122,68 @@ impl Channel{
             .map(Self::from_row)
             .fetch_one(pool)
             .await
-            .map_err(|e| e.into())
+            .map_err(|e| Error::default(&e.to_string()))?;
+        if channel_row.slug.is_empty() {
+            let fallback = format!("channel-{}", channel_row.id);
+            let sql = "UPDATE channels SET slug = $1 WHERE id = $2 RETURNING *";
+            channel_row = query(sql)
+                .bind(&fallback)
+                .bind(channel_row.id)
+                .map(Self::from_row)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| Error::default(&e.to_string()))?;
+        }
+        Ok(channel_row)
+    }
+
+    async fn slug_exists(pool: &SqlitePool, slug: &str) -> bool {
+        let sql = "SELECT count(*) FROM channels WHERE slug = $1";
+        match query(sql)
+            .bind(slug)
+            .map(|row: SqliteRow| -> i64 { row.get(0) })
+            .fetch_one(pool)
+            .await
+        {
+            Ok(count) => count > 0,
+            Err(_) => false,
+        }
+    }
+
+    async fn unique_slug(pool: &SqlitePool, base: &str) -> String {
+        if base.is_empty() {
+            return String::new();
+        }
+        if !Self::slug_exists(pool, base).await {
+            return base.to_string();
+        }
+        let mut n = 2;
+        loop {
+            let candidate = format!("{base}-{n}");
+            if !Self::slug_exists(pool, &candidate).await {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    pub async fn read_by_slug(pool: &SqlitePool, slug: &str) -> Result<Self, Error>{
+        info!("read_by_slug");
+        let sql = "SELECT * FROM channels WHERE slug = $1";
+        query(sql)
+            .bind(slug)
+            .map(Self::from_row)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
+    }
+
+    pub async fn read_by_id_or_slug(pool: &SqlitePool, key: &str) -> Result<Self, Error>{
+        info!("read_by_id_or_slug");
+        match key.parse::<i64>(){
+            Ok(id) => Self::read(pool, id).await,
+            Err(_) => Self::read_by_slug(pool, key).await,
+        }
     }
 
     pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
@@ -178,6 +252,45 @@ impl Channel{
             .fetch_one(pool)
             .await
         .map_err(|e| e.into())
+    }
+
+    pub async fn migrate_slugs(pool: &SqlitePool, audio_folder: &str) -> Result<(), Error>{
+        info!("migrate_slugs");
+        let channels = Self::read_all(pool).await?;
+        for channel in channels.as_slice(){
+            if channel.slug.is_empty(){
+                let base_slug = slugify(&channel.title);
+                let mut slug = Self::unique_slug(pool, &base_slug).await;
+                if slug.is_empty(){
+                    slug = format!("channel-{}", channel.id);
+                }
+                let sql = "UPDATE channels SET slug = $1 WHERE id = $2";
+                query(sql)
+                    .bind(&slug)
+                    .bind(channel.id)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| Error::default(&e.to_string()))?;
+                info!("Backfilled slug {} for channel {}", &slug, channel.id);
+            }
+        }
+        let channels = Self::read_all(pool).await?;
+        for channel in channels.as_slice(){
+            if channel.slug.is_empty(){
+                continue;
+            }
+            let from = format!("{audio_folder}/{}", channel.id);
+            let to = format!("{audio_folder}/{}", channel.slug);
+            let from_exists = tokio::fs::metadata(&from).await.map(|_| true).unwrap_or(false);
+            let to_exists = tokio::fs::metadata(&to).await.map(|_| true).unwrap_or(false);
+            if from_exists && !to_exists {
+                tokio::fs::rename(&from, &to)
+                    .await
+                    .map_err(|e| Error::default(&e.to_string()))?;
+                info!("Renamed {from} -> {to}");
+            }
+        }
+        Ok(())
     }
 
     #[allow(unused)]

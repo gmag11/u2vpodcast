@@ -39,6 +39,7 @@ use models::{
     AppState,
     User,
     Ytdlp,
+    Channel,
 };
 use utils::worker::do_the_work;
 use actix_files as af;
@@ -145,6 +146,11 @@ async fn main() -> Result<(), Error> {
     User::default(&pool, &config.admin_username, &config.admin_password)
         .await
         .expect("Cant create admin user");
+
+    // Backfill slugs and rename audio directories before the worker starts.
+    Channel::migrate_slugs(&pool, "/app/audios")
+        .await
+        .expect("Cant migrate slugs");
 
 
     let pool2 = pool.clone();
