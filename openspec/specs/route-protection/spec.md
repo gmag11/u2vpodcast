@@ -28,33 +28,41 @@ The system SHALL keep `POST /api/1.0/login/`, `GET /api/1.0/logout/`, `GET /api/
 - **WHEN** a client sends `GET /api/1.0/status/` with no cookie
 - **THEN** the system responds `200 OK` and a `CustomResponse` body with `data: "Up and running"`
 
-### Requirement: RSS feed requires HTTP Basic Auth
+### Requirement: RSS feed requires a valid session or HTTP Basic Auth
 
-The system SHALL reject every request to `/channels/{channel_id}/feed.xml` that does not carry a valid `Authorization: Basic` header whose credentials resolve, via `User::get_by_name` followed by `verify_password` (argon2), to an active row in the `users` table. When rejected, the system SHALL respond with HTTP status `401 Unauthorized` and a `WWW-Authenticate: Basic realm="u2vpodcast"` response header, so podcast clients surface a credential prompt.
+The system SHALL accept a request to `/channels/{slug}/feed.xml` and `/{slug}/feed.xml` when **either** (a) the request carries a cookie session containing a `user_id` that resolves, via `from_session`, to an active row in the `users` table, **or** (b) the request carries a valid `Authorization: Basic` header whose credentials resolve, via `User::get_by_name` followed by `verify_password`, to an active row in the `users` table. When neither is present or both fail, the system SHALL respond with HTTP status `401 Unauthorized` and a `WWW-Authenticate: Basic realm="u2vpodcast"` response header, so podcast clients surface a credential prompt.
 
-#### Scenario: Feed request without credentials
-- **WHEN** a client sends `GET /channels/1/feed.xml` with no `Authorization` header
+#### Scenario: Feed request without any credentials
+- **WHEN** a client sends `GET /channels/1/feed.xml` with no cookie and no `Authorization` header
 - **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"` and no feed body
 
-#### Scenario: Feed request with wrong password
-- **WHEN** a client sends `GET /channels/1/feed.xml` with `Authorization: Basic <base64("admin:wrong")>`
-- **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"` and no feed body
-
-#### Scenario: Feed request with correct credentials
+#### Scenario: Feed request with valid Basic Auth credentials
 - **WHEN** a client sends `GET /channels/1/feed.xml` with `Authorization: Basic <base64("admin:<admin_password>")>`
 - **THEN** the system responds `200 OK` with `Content-Type: application/rss+xml; charset=utf-8` and the channel's RSS document in the body
 
-### Requirement: Static media requires HTTP Basic Auth
+#### Scenario: Feed request with valid session cookie only
+- **WHEN** a browser that has a valid session cookie for the app sends `GET /channels/1/feed.xml` with no `Authorization` header
+- **THEN** the system responds `200 OK` with the channel's RSS document, without sending a `WWW-Authenticate` header
 
-The system SHALL reject every request to `/media/**` that does not carry a valid `Authorization: Basic` header resolved in the same way as for the RSS feed. The same credential pair used for the feed MUST also be valid for media. When rejected, the system SHALL respond with `401 Unauthorized` and a `WWW-Authenticate: Basic realm="u2vpodcast"` header.
+#### Scenario: Feed request with wrong Basic Auth and invalid session
+- **WHEN** a client sends `GET /channels/1/feed.xml` with `Authorization: Basic <base64("admin:wrong")>` and an expired or absent session
+- **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"` and no feed body
 
-#### Scenario: Media request without credentials
-- **WHEN** a client sends `GET /media/1/abc123.mp3` with no `Authorization` header
+### Requirement: Static media requires a valid session or HTTP Basic Auth
+
+The system SHALL accept a request to `/media/**` when **either** (a) the request carries a valid cookie session (resolved via `from_session` to an active user) **or** (b) the request carries a valid `Authorization: Basic` header resolved in the same way as for the RSS feed. The same credential pair used for the feed and session login MUST also be valid for media. When neither is present or both fail, the system SHALL respond with `401 Unauthorized` and a `WWW-Authenticate: Basic realm="u2vpodcast"` header.
+
+#### Scenario: Media request without any credentials
+- **WHEN** a client sends `GET /media/1/abc123.mp3` with no cookie and no `Authorization` header
 - **THEN** the system responds `401 Unauthorized` with `WWW-Authenticate: Basic realm="u2vpodcast"` and no audio body
 
-#### Scenario: Media request with correct credentials
+#### Scenario: Media request with valid Basic Auth credentials
 - **WHEN** a client sends `GET /media/1/abc123.mp3` with the valid Basic Auth header
 - **THEN** the system responds `200 OK` with the MP3 file in the body and the appropriate `Content-Type`
+
+#### Scenario: Media request with valid session cookie only (SPA audio playback)
+- **WHEN** a browser that has a valid session cookie sends `GET /media/<slug>/<yt_id>.mp3` with no `Authorization` header (as the `<audio>` element does)
+- **THEN** the system responds `200 OK` with the audio file, without sending a `WWW-Authenticate` header, so the browser does not show a credentials prompt
 
 ### Requirement: Feeds and media share the JSON API's credential store
 
