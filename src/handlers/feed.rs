@@ -39,9 +39,10 @@ async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {
                 for episode in episodes {
                     let yt_id = &episode.yt_id;
                     let enclosure = format!("{url}/media/{slug}/{yt_id}.mp3");
+                    let description = format!("{}\n\n{}", episode.webpage_url, episode.description);
                     let itunes = ITunesItemExtensionBuilder::default()
                         .image(Some(episode.image))
-                        .summary(Some(episode.description.to_string()))
+                        .summary(Some(description.clone()))
                         .explicit(Some("No".to_string()))
                         .episode_type(Some("Full".to_string()))
                         .duration(Some(episode.duration))
@@ -53,10 +54,10 @@ async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {
                     let guid = GuidBuilder::default().value(episode.yt_id).build();
                     let item = ItemBuilder::default()
                         .title(Some(episode.title))
-                        .description(Some(episode.description))
+                        .description(Some(description))
                         .enclosure(Some(enclosure))
                         .guid(Some(guid))
-                        .pub_date(Some(episode.published_at.to_string()))
+                        .pub_date(Some(episode.published_at.to_rfc2822()))
                         .itunes_ext(Some(itunes))
                         .build();
                     items.push(item);
