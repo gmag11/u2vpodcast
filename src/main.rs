@@ -46,6 +46,7 @@ use actix_files as af;
 use actix_session::{
     SessionMiddleware,
     storage::CookieSessionStore,
+    config::PersistentSession,
 };
 use actix_web::{
     http::header,
@@ -196,6 +197,10 @@ async fn main() -> Result<(), Error> {
                     .cookie_http_only(true)
                     .cookie_same_site(SameSite::None)
                     .cookie_secure(true)
+                    .session_lifecycle(
+                        PersistentSession::default()
+                            .session_ttl(time::Duration::days(7))
+                    )
                     .build()
                 }else{
                     SessionMiddleware::builder(
@@ -203,6 +208,10 @@ async fn main() -> Result<(), Error> {
                         Key::from(config.secret_key.as_bytes()).clone()
                     )
                     .cookie_secure(false)
+                    .session_lifecycle(
+                        PersistentSession::default()
+                            .session_ttl(time::Duration::days(7))
+                    )
                     .build()
                 }
             )
