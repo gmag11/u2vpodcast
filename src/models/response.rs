@@ -3,7 +3,7 @@ use actix_web::{
     http::StatusCode,
     HttpResponse,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use actix_session::Session;
 
 use super::user::SessionUser;

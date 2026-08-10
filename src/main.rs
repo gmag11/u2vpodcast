@@ -68,7 +68,7 @@ static MIGRATIONS_DIR: &str = "migrations";
 #[actix_web::main]
 async fn main() -> Result<(), Error> {
 
-    let format = time::format_description::parse(
+    let format = time::format_description::parse_borrowed::<2>(
         "[year]-[month padding:zero]-[day padding:zero]T[hour]:[minute]:[second]",
     ).expect("Can't parse timer");
     let offset_in_sec = chrono::Local::now()
