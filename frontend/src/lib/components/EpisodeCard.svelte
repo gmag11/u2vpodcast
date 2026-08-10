@@ -29,7 +29,7 @@
             </p>
         </div>
     </div>
-    <AudioPlayer src="{base_endpoint}/media/{episode.channel_id}/{episode.yt_id}.mp3">
+    <AudioPlayer src="{base_endpoint}/media/{episode.channel_slug}/{episode.yt_id}.mp3">
         <CustomAudioPlayer />
     </AudioPlayer>
 </div>

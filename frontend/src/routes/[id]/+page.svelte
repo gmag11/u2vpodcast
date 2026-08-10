@@ -9,7 +9,7 @@
 </script>
 
 <div class="flex justify-end p-4">
-    <a href={`${base_endpoint}/channels/${data.channel_id}/feed.xml`} target="_blank" rel="noopener noreferrer">
+    <a href={`${base_endpoint}/channels/${data.channel_slug}/feed.xml`} target="_blank" rel="noopener noreferrer">
         <LinkOutline class="w-8 h-8 text-sky-400" />
     </a>
 </div>

@@ -25,7 +25,7 @@
 		console.log('deleteChannel');
 		console.log(channelToDelete);
 		const request = await fetch(
-			`${base_endpoint}/api/1.0/channels/?channel_id=${channelToDelete.id}`,
+			`${base_endpoint}/api/1.0/channels/${channelToDelete.slug}/`,
 			{
 				method: 'DELETE',
 				headers: {
@@ -42,7 +42,7 @@
 	async function updateChannel(channelToUpdate: Channel) {
 		console.log('updateChannel');
 		console.log(channelToUpdate);
-		const request = await fetch(`${base_endpoint}/api/1.0/channels/`, {
+		const request = await fetch(`${base_endpoint}/api/1.0/channels/${channelToUpdate.slug}/`, {
 			method: 'PUT',
 			headers: {
 				Accept: 'application/json',
@@ -91,6 +91,7 @@
 		channel = {
 			id: 0,
 			title: '',
+			slug: '',
 			description: '',
 			image: '',
 			active: true,

@@ -24,8 +24,11 @@ export const load: PageLoad = async ({ fetch, route, params }) => {
         isAuthenticated.set(true);
         loggedInUser.set(response.user);
     }
+    const episodes = response.data as Episode[];
+    const channelSlug = episodes.length > 0 ? episodes[0].channel_slug : '';
     return {
-        episodes: response.data as Episode[],
+        episodes,
         channel_id: Number(params.id),
+        channel_slug: channelSlug,
     };
 };

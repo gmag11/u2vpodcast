@@ -42,6 +42,7 @@ export interface Channel {
     id: number;
     url: string,
     title: string;
+    slug: string;
     active: boolean;
     description: string;
     image: string;
@@ -54,6 +55,7 @@ export interface Channel {
 export interface Episode {
     id: number;
     channel_id: number;
+    channel_slug: string;
     title: string;
     description: string;
     yt_id: string;
