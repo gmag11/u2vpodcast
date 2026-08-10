@@ -8,14 +8,14 @@ Channels are currently addressed in every URL by their numeric database id (e.g.
 - **Slugify rule**: lowercase, normalize unicode accents to ASCII, replace any run of non-alphanumeric characters with a single underscore, trim leading/trailing underscores. Example: "Confesiones de Gasolinera" → `confesiones_de_gasolinera`.
 - **Uniqueness on collision**: if two channels slugify to the same string, append `-2`, `-3`, … until unique.
 - **Migrate existing rows and audio directories at startup**: backfill `slug` for existing channels from their current title; rename the existing `/app/audios/{id}/` directory to `/app/audios/{slug}/` for each channel. This is a **BREAKING** change for podcast clients subscribed to the old numeric URLs — they must be re-subscribed to the new slug URLs.
-- **Address channels by slug in:**
+- **Address channels by slug in the feed and media URLs; the JSON API accepts both id and slug**:
   - Feed URL: `/channels/{slug}/feed.xml` (was `/channels/{channel_id}/feed.xml`).
   - Media URL: `/media/{slug}/{yt_id}.mp3` (was `/media/{channel_id}/{yt_id}.mp3`).
   - Audio storage: `/app/audios/{slug}/` (was `/app/audios/{channel_id}/`).
-  - JSON API: `/api/1.0/channels/{slug}/` and `/api/1.0/channels/{slug}/episodes/`.
-  - SPA routes: `/app/{slug}` (channel detail page).
-- **The Channel JSON response includes the `slug` field** so the frontend can build feed/media links.
-- **The JSON API accepts either the numeric id OR the slug** for the channel path param during a transition window is NOT offered: POST `/api/1.0/channels/` (create) returns the new channel with its slug; channel CRUD and episodes look up by slug. Internally, the numeric `id` remains the primary key and the episodes `channel_id` FK stays numeric.
+  - JSON API: a single path parameter accepts either the numeric id OR the slug — `/api/1.0/channels/{id-or-slug}/` and `/api/1.0/channels/{id-or-slug}/episodes/`, plus id-or-slug `PUT`/`DELETE`.
+  - SPA routes: **unchanged** — still `/app/{id}` (channel detail page) and API calls by id.
+- **The Channel JSON response includes the `slug` field** so the frontend can build feed/media links, and the **episode JSON response includes `channel_slug`** so the audio player can build `/media/{slug}/{yt_id}.mp3`.
+- Internally, the numeric `id` remains the primary key and the episodes `channel_id` FK stays numeric. `Channel::read_by_id_or_slug` (new) resolves a path value as id or slug for the API and feed handlers.
 
 ## Capabilities
 
@@ -29,7 +29,7 @@ Channels are currently addressed in every URL by their numeric database id (e.g.
 
 - **DB migration**: new `slug` column (UNIQUE, NOT NULL) on `channels`; backfill from title for existing rows.
 - **Filesystem migration**: rename `/app/audios/{id}/` → `/app/audios/{slug}/` for each existing channel at startup.
-- **Code**: `src/models/channel.rs` (slug field, `read_by_slug`, slugify helper, uniqueness), `src/handlers/feed.rs` (route `{slug}`), `src/handlers/channels.rs` + `episodes.rs` (route `{slug}`), `src/utils/worker.rs` (audio dir uses slug), `src/handlers/mod.rs` (route patterns), `src/models/episode.rs` (no change to FK; media URL resolution uses channel slug).
-- **Frontend**: `frontend/src/lib/components/ChannelCard.svelte`, `frontend/src/lib/components/EpisodeCard.svelte`, `frontend/src/routes/[id]/+page.svelte` and `+page.ts`, `frontend/src/routes/+page.svelte` — link/feed/media/SPA routes use `channel.slug` instead of `channel.id`.
-- **Dependencies**: possibly `slug` crate (Rust) for slugification; or hand-rolled since `regex` is already a dependency. Frontier: reuse `regex` to avoid a new crate.
-- **BREAKING**: old numeric feed/media/SPA URLs stop working. Podcast clients must be re-subscribed to the new slug URLs. No redirect layer from old to new.
+- **Code**: `src/models/channel.rs` (slug field, `read_by_slug`, `read_by_id_or_slug`, slugify helper, uniqueness), `src/handlers/feed.rs` (route `{slug}`), `src/handlers/channels.rs` + `episodes.rs` (route `{channel}` id-or-slug), `src/utils/worker.rs` (audio dir uses slug), `src/models/episode.rs` (add `channel_slug` field), `src/handlers/episodes.rs` (populate `channel_slug` in response).
+- **Frontend**: `frontend/src/lib/components/ChannelCard.svelte`, `frontend/src/lib/components/EpisodeCard.svelte`, `frontend/src/routes/[id]/+page.svelte` and `+page.ts`, `frontend/src/routes/+page.svelte` — feed/media links use `channel.slug` / `episode.channel_slug`; SPA routes stay by id; PUT/DELETE use slug in the path.
+- **Dependencies**: `deunicode` crate added for ASCII-folding accented titles (used by the slugify helper in `channel.rs`).
+- **BREAKING**: old numeric feed/media URLs stop working. Podcast clients must be re-subscribed to the new slug URLs. No redirect layer from old to new. The JSON API and SPA keep working with both id and slug.

@@ -61,11 +61,13 @@ After `Migrator::new(...).run(&pool)` and after `User::default`, run a `Channel:
 
 **Alternative considered**: a separate `migrate` binary. Rejected: more moving parts; the app already owns startup.
 
-### Decision 5: API accepts slug, not number, in channel path params
+### Decision 5: JSON API accepts id or slug via a single path parameter; SPA stays on id
 
-`handlers/channels.rs` and `handlers/episodes.rs` change `{channel_id}` → `{slug}` in the route macros, parse `Path<String>` (or a typed `Slug`), and call `Channel::read_by_slug(&pool, &slug)` (new) instead of `Channel::read(&pool, id)`. `Channel::delete` and `Channel::update` take a slug param and resolve to the row internally. The numeric `id` is no longer exposed in URLs.
+The JSON API channel routes use a single path parameter `{channel}` (e.g. `/api/1.0/channels/{channel}/`, `/api/1.0/channels/{channel}/episodes/`) that resolves via `Channel::read_by_id_or_slug` (new): parse the value as `i64` → `read(id)`, otherwise `read_by_slug`. `PUT` and `DELETE` use the same id-or-slug path parameter; update resolves the existing channel to set its numeric id before applying the `UpdateChannel` body, and delete removes `/app/audios/{channel.slug}`. The `Channel` and `Episode` structs gain serialized `slug`/`channel_slug` fields so the frontend can build the slug-based feed and media URLs. The SPA keeps routing by id (`/app/{id}`) and calling the API by id — both still work because the API accepts id.
 
-`Channel::delete` currently removes `/app/audios/{id}` via channels.rs:117 (`FOLDER/{channel.id}`) → switch to `FOLDER/{channel.slug}`.
+**Why**: the operator wants both addressing schemes for the API (id retained for compatibility, slug added for readability), and the SPA keeps id-based routing to minimize frontend churn while linking feed/media by slug.
+
+**Alternative considered**: switching the API and SPA entirely to slug. Rejected by the operator — id must keep working.
 
 ### Decision 6: Feed route and enclosure use slug
 
@@ -75,9 +77,9 @@ After `Migrator::new(...).run(&pool)` and after `User::default`, run a `Channel:
 
 `worker.rs`: `process_channel` creates `format!("{}/{}", FOLDER, &channel.slug)`; `process_episode` and `clean_channel` use `format!("{}/{}/{}.mp3", FOLDER, &channel.slug, ...)`. `Channel::delete` (channels.rs) removes `FOLDER/{slug}`.
 
-### Decision 8: SPA routes use slug
+### Decision 8: SPA links use slug for feed/media, stays on id for routes/API
 
-Rename the route folder `frontend/src/routes/[id]` → `frontend/src/routes/[slug]`. `+page.ts` fetches `/api/1.0/channels/${params.slug}/episodes/` and returns `channel_slug: params.slug`. `+page.svelte` feed link uses `data.channel_slug`. `ChannelCard.svelte` uses `channel.slug` for `/app/{slug}` and the feed link. `EpisodeCard.svelte` needs the channel slug for the media URL: pass the channel slug down (the episodes page knows it from the route), or include `channel_slug` in the episode JSON response. **Decision**: include the channel `slug` in each episode's JSON response (add `channel_slug` to the episode API payload) so `EpisodeCard` can build `/media/{channel_slug}/{yt_id}.mp3` without extra plumbing.
+The SPA route folder stays `frontend/src/routes/[id]`; `+page.ts` keeps fetching `/api/1.0/channels/${params.id}/episodes/` (works — API accepts id) and returns `channel_id` plus `channel_slug` (derived from the first episode's `channel_slug`). `ChannelCard.svelte` uses `channel.slug` for the feed link (`/channels/{slug}/feed.xml`); the channel detail link stays `/app/{id}`. `EpisodeCard.svelte` builds the media URL from `episode.channel_slug` (`/media/{channel_slug}/{yt_id}.mp3`). `+page.svelte` uses `channel.slug` in the PUT/DELETE paths (the API resolves both). The episodes API populates `channel_slug` on each episode (Decision 5).
 
 ## Risks / Trade-offs
 

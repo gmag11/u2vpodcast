@@ -44,26 +44,38 @@ On startup, the system SHALL backfill the `slug` column for any existing channel
 - **WHEN** the app restarts after a successful migration and all channels already have a `slug`
 - **THEN** no rename happens and no error is raised
 
-### Requirement: The JSON API addresses channels by slug
+### Requirement: The JSON API addresses channels by id or slug
 
-The JSON API channel routes SHALL address a channel by its slug: `/api/1.0/channels/{slug}/` (single channel read), `/api/1.0/channels/{slug}/episodes/` (episodes for a channel), and channel create/update/delete identify the channel by slug in the path or body. The Channel JSON response SHALL include the `slug` field.
+The JSON API channel routes SHALL accept a channel identified by either its numeric id or its slug in a single path parameter: `/api/1.0/channels/{id-or-slug}/` (single channel read), `/api/1.0/channels/{id-or-slug}/episodes/` (episodes for a channel), and `PUT`/`DELETE` on `/api/1.0/channels/{id-or-slug}/`. When the path value parses as an integer it SHALL be treated as a numeric id; otherwise it SHALL be treated as a slug. The Channel JSON response SHALL include the `slug` field, and the episodes JSON response SHALL include the channel's `slug` in each episode (`channel_slug`).
+
+#### Scenario: Read a channel by id
+- **WHEN** a client sends `GET /api/1.0/channels/1/` with a valid session
+- **THEN** the system responds `200` with the channel with id `1`, including its `slug` field
 
 #### Scenario: Read a channel by slug
 - **WHEN** a client sends `GET /api/1.0/channels/confesiones_de_gasolinera/` with a valid session
-- **THEN** the system responds `200` with the channel whose slug is `confesiones_de_gasolinera`
+- **THEN** the system responds `200` with the channel whose slug is `confesiones_de_gasolinera`, including its `id`
 
-#### Scenario: Episodes for a channel by slug
-- **WHEN** a client sends `GET /api/1.0/channels/confesiones_de_gasolinera/episodes/` with a valid session
-- **THEN** the system responds `200` with the episodes of the channel whose slug is `confesiones_de_gasolinera`
+#### Scenario: Episodes include the channel slug
+- **WHEN** a client sends `GET /api/1.0/channels/1/episodes/` with a valid session
+- **THEN** the system responds `200` with the episodes of channel 1, each including a `channel_slug` field
 
-### Requirement: The SPA routes address channels by slug
+#### Scenario: Update a channel by slug
+- **WHEN** a client sends `PUT /api/1.0/channels/confesiones_de_gasolinera/` with a valid session and an `UpdateChannel` body
+- **THEN** the system updates the channel whose slug is `confesiones_de_gasolinera` and responds `200` with the updated channel
 
-The SPA's channel detail route SHALL be `/app/{slug}` (was `/app/{id}`), and the feed/media links rendered by the SPA SHALL use the channel's `slug`.
+### Requirement: The SPA keeps routing by id but links feed/media by slug
 
-#### Scenario: Channel card links to the detail page by slug
-- **WHEN** the SPA renders a channel card for a channel with slug `confesiones_de_gasolinera`
-- **THEN** the "open channel" link points to `/app/confesiones_de_gasolinera`
+The SPA's channel detail route SHALL stay `/app/{id}` (channel id), and its JSON API calls SHALL keep using the numeric id (which the API still accepts). The feed and media links rendered by the SPA SHALL use the channel's `slug` (and the episode's `channel_slug`).
+
+#### Scenario: Channel card links to the detail page by id
+- **WHEN** the SPA renders a channel card for a channel with id `1` and slug `confesiones_de_gasolinera`
+- **THEN** the "open channel" link points to `/app/1`
 
 #### Scenario: Channel card links to the feed by slug
 - **WHEN** the SPA renders a channel card for a channel with slug `confesiones_de_gasolinera`
 - **THEN** the feed link points to `/channels/confesiones_de_gasolinera/feed.xml`
+
+#### Scenario: Episode player links to media by slug
+- **WHEN** the SPA renders an episode with `channel_slug` `confesiones_de_gasolinera` and `yt_id` `abc123`
+- **THEN** the audio player source is `/media/confesiones_de_gasolinera/abc123.mp3`
