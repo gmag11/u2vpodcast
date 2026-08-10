@@ -4,22 +4,20 @@
 
 	export let open: boolean = false;
 	export let channel: Channel;
-	export let onOkButtonClicked: any;
+	export let onOkButtonClicked: () => void;
 
 	function getDate() {
-        let response: string;
-		if (!channel) {
-            console.log("No channel");
-            response = new Date().toISOString().split("T")[0];
-		}else if(typeof(channel.first) == "string"){
-            response = channel.first.split('T')[0];
-        }else{
-		    response = channel.first.toISOString().split('T')[0];
-        }
-        console.log(`response: ${response}`);
-        return response;
+		const first: unknown = channel?.first;
+		if (first == null) {
+			console.log('No channel');
+			return new Date().toISOString().split('T')[0];
+		}
+		if (typeof first == 'string') {
+			return first.split('T')[0];
+		}
+		return (first as Date).toISOString().split('T')[0];
 	}
-    console.log(channel);
+	console.log(channel);
 
 	function handleOkButtonClicked() {
 		onOkButtonClicked();
@@ -42,24 +40,11 @@
 		<Toggle bind:checked={channel.active}>Active</Toggle>
 		<Label class="space-y-2">
 			<span>Url</span>
-            {#if channel.id == 0}
-			<Input
-				type="url"
-				name="url"
-				placeholder="url"
-				bind:value={channel.url}
-				required
-			/>
-            {:else}
-			<Input
-				type="url"
-				name="url"
-				placeholder="url"
-				bind:value={channel.url}
-				readonly
-				required
-			/>
-            {/if}
+			{#if channel.id == 0}
+				<Input type="url" name="url" placeholder="url" bind:value={channel.url} required />
+			{:else}
+				<Input type="url" name="url" placeholder="url" bind:value={channel.url} readonly required />
+			{/if}
 		</Label>
 		<Label class="space-y-2">
 			<span>Max number of episodes</span>
@@ -69,9 +54,10 @@
 				placeholder="max"
 				min="-1"
 				bind:value={channel.max}
-				on:input={(e) => {
-					if (e.target != null && e.target.value != null) {
-						channel.max = parseInt(e.target.value);
+				oninput={(e) => {
+					const el = e.currentTarget as HTMLInputElement;
+					if (el != null && el.value != null) {
+						channel.max = parseInt(el.value);
 					}
 				}}
 				required
@@ -84,21 +70,22 @@
 				name="first"
 				placeholder="first"
 				bind:value={firstDate}
-				on:input={(e) => {
-					if (e.target != null && e.target.value != null) {
-						channel.first = new Date(e.target.value);
+				oninput={(e) => {
+					const el = e.currentTarget as HTMLInputElement;
+					if (el != null && el.value != null) {
+						channel.first = new Date(el.value);
 					}
 				}}
 				required
 			/>
 		</Label>
-        <div class="flex flex-row md:space-y-0 md:space-x-4">
-            {#if channel.id == 0}
-                <Button on:click={handleOkButtonClicked}>Create channel</Button>
-            {:else}
-                <Button on:click={handleOkButtonClicked}>Update channel</Button>
-            {/if}
-            <Button on:click={handleCancelButtonClicked}>Cancel</Button>
-        </div>
+		<div class="flex flex-row md:space-y-0 md:space-x-4">
+			{#if channel.id == 0}
+				<Button onclick={handleOkButtonClicked}>Create channel</Button>
+			{:else}
+				<Button onclick={handleOkButtonClicked}>Update channel</Button>
+			{/if}
+			<Button onclick={handleCancelButtonClicked}>Cancel</Button>
+		</div>
 	</form>
 </Modal>

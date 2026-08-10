@@ -1,11 +1,9 @@
 <script lang="ts">
 	import { Button, Modal, Label, Input } from 'flowbite-svelte';
-    import { enhance, applyAction } from '$app/forms';
-    import { invalidateAll } from "$app/navigation";
-	import type { PageData, ActionData } from './$types';
+	import { enhance, applyAction } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	export let open: boolean;
-	export let data: PageData;
-	export let form: ActionData;
+	export let form: { missing?: boolean; username?: string } | undefined = undefined;
 	const loginEndpoint = '/api/1.0/login/';
 </script>
 
@@ -19,7 +17,8 @@
 				await invalidateAll();
 				await applyAction(result);
 			};
-		}}>
+		}}
+	>
 		{#if form?.missing}<p class="error">The email field is required</p>{/if}
 		<h3 class="mb-4 text-xl font-medium text-gray-900 dark:text-white">Sign in</h3>
 		<Label class="space-y-2">

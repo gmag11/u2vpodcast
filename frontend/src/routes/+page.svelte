@@ -13,29 +13,25 @@
 	import type { Channel } from '$lib/types';
 	import { base_endpoint } from '$lib/global';
 	import { filterBySearchWords } from '$lib/utils/helpers/list.filter';
-	export let showConfirmDialog = false;
-	export let showChannelDialog = false;
-
 	export let data: PageData;
 	let channel: Channel;
-	let onDialogButtonClicked: any;
+	let onDialogButtonClicked: () => void = () => {};
+	let showConfirmDialog = false;
+	let showChannelDialog = false;
 
 	let channels: Channel[] = data.channels as Channel[];
 	let perPage: number = data.per_page ?? 3;
 	let searchQuery: string = '';
 
-	async function deleteChannel(channelToDelete: any) {
+	async function deleteChannel(channelToDelete: Channel) {
 		console.log('deleteChannel');
 		console.log(channelToDelete);
-		const request = await fetch(
-			`${base_endpoint}/api/1.0/channels/${channelToDelete.slug}/`,
-			{
-				method: 'DELETE',
-				headers: {
-					Accept: 'application/json'
-				}
+		const request = await fetch(`${base_endpoint}/api/1.0/channels/${channelToDelete.slug}/`, {
+			method: 'DELETE',
+			headers: {
+				Accept: 'application/json'
 			}
-		);
+		});
 		const response = await request.json();
 		if (response.status) {
 			channels = channels.filter((item) => item.id != channelToDelete.id);
@@ -141,10 +137,8 @@
 	}
 
 	$: currentPage = getCurrentPage($page.url.searchParams.get('page'));
-	$: filteredChannels = filterBySearchWords(
-		channels,
-		searchQuery,
-		(c) => [c.title, c.description, c.url, c.slug].join(' ')
+	$: filteredChannels = filterBySearchWords(channels, searchQuery, (c) =>
+		[c.title, c.description, c.url, c.slug].join(' ')
 	);
 	$: paginatedChannels = getPaginatedChannels(currentPage, filteredChannels);
 	$: maxPage = Math.max(1, Math.ceil(filteredChannels.length / perPage));
@@ -153,7 +147,7 @@
 </script>
 
 <div id="channels" class="grid justify-items-center">
-	<GradientButton on:click={onNewChannelButtonClicked} class="mb-4">
+	<GradientButton onclick={onNewChannelButtonClicked} class="mb-4">
 		<CirclePlusSolid />
 	</GradientButton>
 	<SearchInput bind:value={searchQuery} placeholder="Search channels…" />
@@ -166,16 +160,21 @@
 	{/if}
 </div>
 <div class="flex items-center justify-center gap-1 mt-4">
-	<PaginationItem large on:click={() => goToPage(currentPage - 1)} class="rounded-s-lg">
+	<PaginationItem size="large" onclick={() => goToPage(currentPage - 1)} class="rounded-s-lg">
 		<span class="sr-only">Previous</span>
 		<ChevronLeftOutline class="w-5 h-5" />
 	</PaginationItem>
 	{#each pageNumbers as p (p)}
-		<PaginationItem large active={p === currentPage} on:click={() => goToPage(p)} class="rounded-lg">
+		<PaginationItem
+			size="large"
+			active={p === currentPage}
+			onclick={() => goToPage(p)}
+			class="rounded-lg"
+		>
 			{p}
 		</PaginationItem>
 	{/each}
-	<PaginationItem large on:click={() => goToPage(currentPage + 1)} class="rounded-e-lg">
+	<PaginationItem size="large" onclick={() => goToPage(currentPage + 1)} class="rounded-e-lg">
 		<span class="sr-only">Next</span>
 		<ChevronRightOutline class="w-5 h-5" />
 	</PaginationItem>
@@ -187,6 +186,5 @@
 	bind:open={showConfirmDialog}
 	title="Warning"
 	message="Are you sure?"
-	onOkButtonClicked={deleteChannel}
-	on:close={() => deleteChannel(channel.id)}
+	onOkButtonClicked={() => deleteChannel(channel)}
 ></ConfirmDialog>

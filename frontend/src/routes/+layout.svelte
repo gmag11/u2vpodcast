@@ -1,23 +1,18 @@
 <script lang="ts">
-	import {
-		Button,
-		DarkMode,
-		Navbar,
-		NavBrand,
-	} from 'flowbite-svelte';
+	import { Button, DarkMode, Navbar, NavBrand } from 'flowbite-svelte';
 	import '../app.css';
-    import { goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import logo from '$lib/assets/favicon/favicon-48x48.png';
 	let btnClass = 'text-primary-500 dark:text-primary-600 border dark:border-gray-800';
 
-    async function logout(){
-        const ans = await fetch("/api/1.0/logout/");
-        console.log(ans);
-    }
-    function handleLogout() {
-        logout();
-        goto("/app/login/");
-    }
+	async function logout() {
+		const ans = await fetch('/api/1.0/logout/');
+		console.log(ans);
+	}
+	function handleLogout() {
+		logout();
+		goto('/app/login/');
+	}
 </script>
 
 <Navbar class="mb-8">
@@ -27,7 +22,7 @@
 			U2VPodcast
 		</span>
 	</NavBrand>
-	<Button on:click={handleLogout}>Logout</Button>
-	<DarkMode {btnClass} />
+	<Button onclick={handleLogout}>Logout</Button>
+	<DarkMode class={btnClass} />
 </Navbar>
 <slot />

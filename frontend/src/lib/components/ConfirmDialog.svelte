@@ -2,7 +2,7 @@
 	import { Button, Modal } from 'flowbite-svelte';
 	import { CheckOutline, CloseOutline } from 'flowbite-svelte-icons';
 	export let open: boolean;
-	export let onOkButtonClicked: any;
+	export let onOkButtonClicked: () => void;
 	export let title: string;
 	export let message: string;
 
@@ -23,7 +23,7 @@
 		<span>{message}</span>
 	</div>
 	<div class="block space-y-4 md:space-y-0 md:space-x-4">
-		<Button on:click={handleOkButtonClicked}><CheckOutline /></Button>
-		<Button on:click={handleCancelButtonClicked}><CloseOutline /></Button>
+		<Button onclick={handleOkButtonClicked}><CheckOutline /></Button>
+		<Button onclick={handleCancelButtonClicked}><CloseOutline /></Button>
 	</div>
 </Modal>

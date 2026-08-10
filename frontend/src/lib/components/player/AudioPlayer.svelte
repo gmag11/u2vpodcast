@@ -1,101 +1,102 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from 'svelte';
-  import { setAudioContext } from '$lib/context';
-  import { derived, writable } from 'svelte/store';
+	import { onMount } from 'svelte';
+	import { setAudioContext } from '$lib/context';
+	import { derived, writable } from 'svelte/store';
 
-  /**
-   * Props
-   */
+	/**
+	 * Props
+	 */
 
-  export let src: string;
-  /**
-   * States
-   */
+	export let src: string;
+	/**
+	 * States
+	 */
 
-  let prevSrc: string = undefined;
+	let prevSrc: string | undefined;
 
-  let duration = writable(0);
-  let currentTime = writable(0);
-  let volume = writable(1);
-  let muted = writable(false);
-  let ended = writable(false);
-  let repeat = writable(false);
-  let playbackRate = writable(1);
-  let paused = writable(true);
-  let playing = derived(paused, ($paused) => !$paused);
+	let duration = writable(0);
+	let currentTime = writable(0);
+	let volume = writable(1);
+	let muted = writable(false);
+	let ended = writable(false);
+	let repeat = writable(false);
+	let playbackRate = writable(1);
+	let paused = writable(true);
+	let playing = derived(paused, ($paused) => !$paused);
 
-  let audio: HTMLAudioElement | undefined;
+	let audio: HTMLAudioElement | undefined;
 
-  /**
-   * Reactives
-   */
+	/**
+	 * Reactives
+	 */
 
-  $: {
-    if (prevSrc !== src) {
-      // fix $paused store not sync with audio.paused on src props change
-      setTimeout(() => {
-        if ($paused) {
-          audio?.pause();
-        } else {
-          audio?.play();
-        }
-      }, 0);
-    }
+	$: {
+		if (prevSrc !== src) {
+			// fix $paused store not sync with audio.paused on src props change
+			setTimeout(() => {
+				if ($paused) {
+					audio?.pause();
+				} else {
+					audio?.play();
+				}
+			}, 0);
+		}
 
-    prevSrc = src;
-  }
-  /**
-   * Mounted
-   */
-  onMount(() => {
-    $duration = audio?.duration;
-  });
+		// eslint-disable-next-line no-useless-assignment
+		prevSrc = src;
+	}
+	/**
+	 * Mounted
+	 */
+	onMount(() => {
+		$duration = audio?.duration ?? 0;
+	});
 
-  /**
-   * Methods
-   */
+	/**
+	 * Methods
+	 */
 
-  const seekBy = (n: number) => {
-    $currentTime += n;
-  };
+	const seekBy = (n: number) => {
+		$currentTime += n;
+	};
 
-  const seekTo = (t: number) => {
-    $currentTime = t;
-  };
+	const seekTo = (t: number) => {
+		$currentTime = t;
+	};
 
-  /**
-   * Context
-   */
+	/**
+	 * Context
+	 */
 
-  setAudioContext({
-    currentTime,
-    repeat,
-    duration,
-    playing,
-    volume,
-    muted,
-    ended,
-    paused,
-    playbackRate,
-    seekBy,
-    seekTo
-  });
+	setAudioContext({
+		currentTime,
+		repeat,
+		duration,
+		playing,
+		volume,
+		muted,
+		ended,
+		paused,
+		playbackRate,
+		seekBy,
+		seekTo
+	});
 </script>
 
 <div class="flex items-center justify-center">
-  <audio
-    bind:volume={$volume}
-    bind:duration={$duration}
-    bind:currentTime={$currentTime}
-    bind:muted={$muted}
-    bind:paused={$paused}
-    bind:ended={$ended}
-    bind:playbackRate={$playbackRate}
-    loop={$repeat}
-    bind:this={audio}
-    {src}
-    style="display: none;"
-  />
+	<audio
+		bind:volume={$volume}
+		bind:duration={$duration}
+		bind:currentTime={$currentTime}
+		bind:muted={$muted}
+		bind:paused={$paused}
+		bind:ended={$ended}
+		bind:playbackRate={$playbackRate}
+		loop={$repeat}
+		bind:this={audio}
+		{src}
+		style="display: none;"
+	></audio>
 
-  <slot />
+	<slot></slot>
 </div>

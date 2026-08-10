@@ -5,15 +5,13 @@
 	import type { Channel } from '$lib/utils/types';
 
 	export let channel: Channel;
-	export let onUpdateChannelButtonClicked: any;
-	export let onDeleteChannelButtonClicked: any;
+	export let onUpdateChannelButtonClicked: (channel: Channel) => void;
+	export let onDeleteChannelButtonClicked: (channel: Channel) => void;
 
 	const inactiveClass =
 		'bg-red-500 border-red-500 hover:bg-red-700 dark:border-red-700 dark:bg-red-800 dark:hover:bg-red-700';
 	const activeClass =
 		'bg-white border-gray-200 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700';
-	let firstDate;
-	//$: firstDate = channel.first.split('T')[0];
 </script>
 
 <div class="border rounded-lg shadow m-2 p-2 border-gray-500 dark:border-white">
@@ -35,14 +33,18 @@
 				<p class="mb-3 font-normal text-center line-clamp-5 dark:text-gray-100">
 					{channel.description}
 				</p>
-				<p class="text-center dark:text-gray-100 underline">
-					<a href={channel.url}>YouTube</a>
-				</p>
 			</div>
 		</div>
 	</a>
+	<p class="text-center dark:text-gray-100 underline">
+		<a href={channel.url}>YouTube</a>
+	</p>
 	<div>
-		<a href={`${base_endpoint}/channels/${channel.slug}/feed.xml`} target="_blank" rel="noopener noreferrer">
+		<a
+			href={`${base_endpoint}/channels/${channel.slug}/feed.xml`}
+			target="_blank"
+			rel="noopener noreferrer"
+		>
 			<GradientButton class="mb-2" color="purpleToBlue" pill>
 				<LinkOutline class="w-6 h-6" />
 			</GradientButton>
@@ -50,16 +52,12 @@
 		<GradientButton
 			class="mb-2"
 			color="cyanToBlue"
-			on:click={() => onUpdateChannelButtonClicked(channel)}
+			onclick={() => onUpdateChannelButtonClicked(channel)}
 			pill
 		>
 			<EditSolid class="w-6 h-6" />
 		</GradientButton>
-		<GradientButton
-			color="pinkToOrange"
-			on:click={() => onDeleteChannelButtonClicked(channel)}
-			pill
-		>
+		<GradientButton color="pinkToOrange" onclick={() => onDeleteChannelButtonClicked(channel)} pill>
 			<TrashBinSolid class="w-6 h-6" />
 		</GradientButton>
 	</div>

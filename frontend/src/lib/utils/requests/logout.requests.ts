@@ -12,27 +12,27 @@ import { post } from './posts.requests';
  * @param {string} [redirectUrl='/auth/login'] - URL to redirect to after logout.
  */
 export const logout = async (svelteKitFetch: typeof fetch, redirectUrl = '/auth/login') => {
-    const [res, err] = await post(
-        svelteKitFetch,
-        `${BASE_API_URI}/users/logout/`,
-        undefined,
-        'include'
-    );
-    if (err.length > 0) {
-        notification.set({
-            message: `${err[0].error} ${sadEmoji}...`,
-            colorName: 'rose'
-        });
-    } else {
-        const response: ApiResponse = res;
-        notification.set({
-            message: `${response.message} ${happyEmoji}...`,
-            colorName: 'green'
-        });
+	const [res, err] = await post(
+		svelteKitFetch,
+		`${BASE_API_URI}/users/logout/`,
+		undefined,
+		'include'
+	);
+	if (err.length > 0) {
+		notification.set({
+			message: `${err[0].error} ${sadEmoji}...`,
+			colorName: 'rose'
+		});
+	} else {
+		const response: ApiResponse = res;
+		notification.set({
+			message: `${response.message} ${happyEmoji}...`,
+			colorName: 'green'
+		});
 
-        isAuthenticated.set(false);
-        if (redirectUrl !== '') {
-            await goto(redirectUrl);
-        }
-    }
+		isAuthenticated.set(false);
+		if (redirectUrl !== '') {
+			await goto(redirectUrl);
+		}
+	}
 };
