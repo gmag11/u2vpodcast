@@ -3,6 +3,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ChannelDialog from '$lib/components/ChannelDialog.svelte';
 	import ChannelCard from '$lib/components/ChannelCard.svelte';
+	import SearchInput from '$lib/components/SearchInput.svelte';
 	import { PaginationItem } from 'flowbite-svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -11,6 +12,7 @@
 	import { CirclePlusSolid } from 'flowbite-svelte-icons';
 	import type { Channel } from '$lib/types';
 	import { base_endpoint } from '$lib/global';
+	import { filterBySearchWords } from '$lib/utils/helpers/list.filter';
 	export let showConfirmDialog = false;
 	export let showChannelDialog = false;
 
@@ -20,6 +22,7 @@
 
 	let channels: Channel[] = data.channels as Channel[];
 	let perPage: number = data.per_page ?? 3;
+	let searchQuery: string = '';
 
 	async function deleteChannel(channelToDelete: any) {
 		console.log('deleteChannel');
@@ -131,25 +134,36 @@
 	}
 
 	function goToPage(pageNumber: number) {
-		const maxPage = Math.max(1, Math.ceil(channels.length / perPage));
+		const maxPage = Math.max(1, Math.ceil(filteredChannels.length / perPage));
 		if (pageNumber >= 1 && pageNumber <= maxPage) {
 			goto(pageUrl(pageNumber));
 		}
 	}
 
 	$: currentPage = getCurrentPage($page.url.searchParams.get('page'));
-	$: paginatedChannels = getPaginatedChannels(currentPage, channels);
-	$: maxPage = Math.max(1, Math.ceil(channels.length / perPage));
+	$: filteredChannels = filterBySearchWords(
+		channels,
+		searchQuery,
+		(c) => [c.title, c.description, c.url, c.slug].join(' ')
+	);
+	$: paginatedChannels = getPaginatedChannels(currentPage, filteredChannels);
+	$: maxPage = Math.max(1, Math.ceil(filteredChannels.length / perPage));
 	$: pageNumbers = Array.from({ length: maxPage }, (_, idx) => idx + 1);
+	$: noSearchResults = searchQuery.trim() !== '' && filteredChannels.length === 0;
 </script>
 
 <div id="channels" class="grid justify-items-center">
 	<GradientButton on:click={onNewChannelButtonClicked} class="mb-4">
 		<CirclePlusSolid />
 	</GradientButton>
-	{#each paginatedChannels as channel (channel.id)}
-		<ChannelCard {channel} {onUpdateChannelButtonClicked} {onDeleteChannelButtonClicked} />
-	{/each}
+	<SearchInput bind:value={searchQuery} placeholder="Search channels…" />
+	{#if noSearchResults}
+		<p class="mt-4 text-gray-500 dark:text-gray-400">No results match your search.</p>
+	{:else}
+		{#each paginatedChannels as channel (channel.id)}
+			<ChannelCard {channel} {onUpdateChannelButtonClicked} {onDeleteChannelButtonClicked} />
+		{/each}
+	{/if}
 </div>
 <div class="flex items-center justify-center gap-1 mt-4">
 	<PaginationItem large on:click={() => goToPage(currentPage - 1)} class="rounded-s-lg">
