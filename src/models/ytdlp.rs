@@ -21,6 +21,8 @@ pub struct YtVideo{
     pub original_url: String,
     pub webpage_url: String,
     pub upload_date: String,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
     pub duration_string: String,
 }
 

@@ -135,7 +135,7 @@ async fn process_episode(
     let webpage_url = &ytvideo.webpage_url;
     let duration = &ytvideo.duration_string;
     info!("{}", &ytvideo.upload_date);
-    let published_at = parse_date(&ytvideo.upload_date);
+    let published_at = get_published_at(ytvideo);
     let _ = filetime::set_file_mtime(
         &filename,
         filetime::FileTime::from_unix_time(
@@ -158,12 +158,16 @@ async fn process_episode(
     Ok(())
 }
 
-fn parse_date(date: &str) -> DateTime<Utc>{
-    let format = "%Y%m%d";
-    let naive_date = NaiveDate::parse_from_str(date, format).unwrap();
-    // Add some default time to convert it into a NaiveDateTime
-    let naive_datetime: NaiveDateTime = naive_date.and_hms_opt(0,0,0).unwrap();
-    // Add a timezone to the object to convert it into a DateTime<UTC>
-    TimeZone::from_utc_datetime(&Utc, &naive_datetime)
+fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
+    if let Some(timestamp) = ytvideo.timestamp {
+        TimeZone::timestamp_opt(&Utc, timestamp, 0).unwrap()
+    } else {
+        let format = "%Y%m%d";
+        let naive_date = NaiveDate::parse_from_str(&ytvideo.upload_date, format).unwrap();
+        // Add some default time to convert it into a NaiveDateTime
+        let naive_datetime: NaiveDateTime = naive_date.and_hms_opt(0,0,0).unwrap();
+        // Add a timezone to the object to convert it into a DateTime<UTC>
+        TimeZone::from_utc_datetime(&Utc, &naive_datetime)
+    }
 }
 
