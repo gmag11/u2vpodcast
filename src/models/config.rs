@@ -6,7 +6,6 @@ use tracing::{info, debug};
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config{
     pub production: bool,
-    pub title: String,
     pub url: String,
     pub port: u16,
     pub sleep_time: u64,
@@ -49,10 +48,10 @@ pub fn ytdlp_path() -> &'static str {
 }
 
 pub fn cookies_file() -> &'static str {
-    if Path::new("/app/cookies-cp.txt").exists() {
-        "/app/cookies-cp.txt"
-    } else if Path::new("cookies-cp.txt").exists() {
-        "cookies-cp.txt"
+    if Path::new("/app/cookies.txt").exists() {
+        "/app/cookies.txt"
+    } else if Path::new("cookies.txt").exists() {
+        "cookies.txt"
     } else {
         ""
     }

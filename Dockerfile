@@ -43,8 +43,6 @@ ENV UID=10001
 
 RUN apk add --update --no-cache \
             ffmpeg~=8.1 \
-            git~=2.54 \
-            sqlite~=3.53 \
             python3~=3.14 \
             py3-pip~=26.1 && \
     rm -rf /var/cache/apk && \
