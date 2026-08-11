@@ -104,6 +104,14 @@ Clicking anywhere on a channel card SHALL navigate to that channel's episodes li
 - **WHEN** the user clicks the feed link, edit, or delete button on a channel card
 - **THEN** the button action runs (opens feed, opens dialog, prompts delete) and no navigation to the episodes page occurs
 
+### Requirement: Episodes route displays a channel header
+
+The `/:channelId` route SHALL display a header containing the viewed channel's title and a back arrow to the channel list. The header SHALL be part of the episodes page content (below the shared app header).
+
+#### Scenario: Header appears on the episodes page
+- **WHEN** the user navigates to `/app/{channelId}`
+- **THEN** the episodes page shows the channel title and a left arrow linking to `/`
+
 ### Requirement: Episode list is populated by the local worker
 
 The backend episode worker SHALL resolve the audios directory, yt-dlp binary, and cookies file from the runtime environment (Docker paths `/app/audios`, `/app/.local/bin/yt-dlp` when present; local `audios`, `yt-dlp` from PATH otherwise) so that episodes are downloaded and stored in the database when running locally, not only in Docker. A channel page SHALL display its episodes once the worker has downloaded them.
