@@ -1,9 +1,55 @@
-frontend/node_modules
-frontend/build
+# Build artifacts
 target/
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# VCS
 .git
-Dockerfile
-README.md
+.github
 .gitignore
+.gitattributes
+
+# Ops tooling
+.opencode
+opencode.json
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Runtime data (mounted as volumes in compose)
+audios/
+*.db
+*.db-shm
+*.db-wal
+cookies.txt
+cookies-cp.txt
+
+# Secrets / config (mounted read-only at runtime)
+config.yml
+.env
+.env.*
+sample.env
+
+# Docker/build files
+Dockerfile
+Dockerfile.*
+.dockerignore
+docker-compose*.yml
+docker-bake.hcl
+build-arm64.sh
+genbake.sh
+platform.sh
+
+# Docs
+README.md
+LICENSE
 .justfile
-u2vpodcast.db*
+sample.http
+sample.hurl
+
+# OS
+.DS_Store
+Thumbs.db
