@@ -19,3 +19,8 @@ media
 *.db*
 audios/
 u2vpodcast.db*
+
+.github/prompts/
+.github/skills/
+.vscode/
+opencode.json
