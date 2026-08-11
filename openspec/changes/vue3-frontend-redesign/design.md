@@ -53,7 +53,9 @@ Theme store holds `'light' | 'dark'`. On init: read `localStorage.theme`; if abs
 
 Auth store holds user state (`user` from API responses). Router `beforeEach` guard: protected routes (`/`, `/:channelId`) require `auth.isAuthenticated`, else `redirect('/login?next=' + to.fullPath)`; `/login` redirects to `/` when authenticated. API client detects `401` / `user: null` in responses and clears auth, then redirects to `/login`. `next` param restores the destination after login (preserves current behavior from `+page.ts`).
 
-**Alternatives considered:** Keep SvelteKit-style server redirect — not possible in a pure SPA without SSR; middleware — none available in Vite static serving.
+**Session restoration on reload:** on app bootstrap, `main.ts` calls `GET /api/1.0/session/` (an existing backend endpoint) and restores the user into the auth store **before** `app.mount('#app')`. This ensures the router's first navigation runs with the auth state already populated, so a page reload does not bounce an authenticated user back to `/login`.
+
+**Alternatives considered:** Keep SvelteKit-style server redirect — not possible in a pure SPA without SSR; middleware — none available in Vite static serving; restore session lazily on first API call — rejected because the router guard runs before the first API call and would redirect prematurely.
 
 ### D7: Screens map 1:1 to routes/components
 
@@ -76,6 +78,21 @@ SvelteKit `adapter-static` output (`/app/build`) replaced by Vue `vite build` ou
 ### D10: Content images from real data only
 
 Channel covers bind to `channel.image`, episode thumbnails to `episode.image`, avatar is omitted or a generic icon (no `aida-public` placeholder images). Login background is the CSS radial-gradient from the Login HTML; Add-dialog overlay uses the same gradient, not the dashboard image.
+
+### D11: Channel metadata extraction uses a browser-like User-Agent
+
+`src/models/ytinfo.rs` fetches the channel URL with `ureq` sending a browser-like `User-Agent` and `Accept-Language` (via `.header()` — ureq 3.x API). Without these, YouTube can serve a block page with no `og:*` metadata, producing empty `title`/`image`. A channel whose URL fails to resolve is still created with empty metadata and the channel card shows a placeholder mic icon instead of a missing image.
+
+### D12: Runtime paths resolve by environment for local dev
+
+The backend previously hardcoded Docker container paths (`/app/html`, `/app/audios`, `/app/.local/bin/yt-dlp`, `cookies-cp.txt`), which do not exist on a local machine and caused the episode worker to fail silently (empty episode lists). These are now resolved at runtime by environment-detecting helpers in `src/models/config.rs`, keeping Docker behavior unchanged:
+
+- `html_path` (config field): `/app/html` in Docker, else `frontend/dist`.
+- `audios_dir()`: `/app/audios` in Docker, else `audios` (relative to the project).
+- `ytdlp_path()`: `/app/.local/bin/yt-dlp` in Docker, else `yt-dlp` (from PATH).
+- `cookies_file()`: `cookies-cp.txt` if present, else empty (omits the `--cookies` flag).
+
+The episode worker (`src/utils/worker.rs`) receives these resolved paths as parameters (`folder`), and the media service and channel-delete handler use `audios_dir()`. This lets the app run locally without sudo while the Docker build still copies `dist/` into `/app/html` and works unchanged.
 
 ## Risks / Trade-offs
 

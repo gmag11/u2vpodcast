@@ -54,3 +54,13 @@
 - [x] 8.2 Update `frontend/.gitignore`, remove SvelteKit-specific configs (`svelte.config.js`, adapter deps), update `frontend/README.md`
 - [x] 8.3 Keep version sync: confirm `frontend/package.json` version matches `Cargo.toml` and `docker-bake.hcl` tag
 - [x] 8.4 Build the frontend in the Docker pipeline (`pnpm run build`) and smoke-test the served static SPA against the API
+
+## 9. Local execution and bug fixes
+
+- [x] 9.1 Make the static file directory configurable (`html_path` config field) so the backend serves the SPA locally without sudo, defaulting to `/app/html` in Docker and `frontend/dist` locally
+- [x] 9.2 Restore the session on page reload: call `GET /api/1.0/session/` in `main.ts` before `app.mount()` and set the auth store user
+- [x] 9.3 Send a browser-like `User-Agent` + `Accept-Language` in `src/models/ytinfo.rs` (ureq `.header()`) so YouTube metadata extraction reliably returns the channel cover image
+- [x] 9.4 Render a placeholder mic icon in `ChannelCard.vue` when the channel image is empty
+- [x] 9.5 Add a Vite dev proxy for `/api`, `/media`, `/channels` and switch `baseEndpoint` to a relative `''` so session cookies work same-origin in dev
+- [x] 9.6 Make the channel card navigate to its episodes (`/:channelId`) with `@click.stop` on action buttons
+- [x] 9.7 Resolve the audios directory, yt-dlp binary, and cookies file by environment (`audios_dir()`, `ytdlp_path()`, `cookies_file()` in `config.rs`) so the episode worker runs locally and populates the episodes list
