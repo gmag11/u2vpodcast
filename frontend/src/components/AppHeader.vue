@@ -26,7 +26,7 @@
 					<slot name="brand-icon" />
 				</span>
 				<span class="font-display text-2xl font-semibold tracking-tight text-text">
-					Aura<span class="text-primary-500">Pod</span>
+					U2V<span class="text-primary-500">Podcast</span>
 				</span>
 			</div>
 
