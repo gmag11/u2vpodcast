@@ -6,7 +6,7 @@ Adds live, client-side word-based search filtering to the channel list on the ho
 
 ### Requirement: Channel list is filterable by a live search input
 
-The homepage SHALL display a text search input above the channel list. As the user types, the list of visible channel cards SHALL update immediately on every keystroke (no page reload, no server request). A channel SHALL remain visible when every whitespace-separated word of the query appears, case-insensitively, in at least one of its `title`, `description`, `url`, or `slug` fields. Clearing the input SHALL restore the full channel list.
+The homepage SHALL display a text search input above the channel list. As the user types, the list of visible channel cards SHALL update immediately on every keystroke (no page reload, no server request). A channel SHALL remain visible when every whitespace-separated word of the query appears, case-insensitively, in at least one of its `title`, `description`, `url`, or `slug` fields. Clearing the input SHALL restore the full channel list. The search input SHALL live in the top navigation bar of the Vue SPA, as specified by the Stitch Channels reference screen.
 
 #### Scenario: Filtering channels as the user types
 - **WHEN** the channel list contains channels titled `Confesiones de Gasolinera` and `Linux y Tapas`, and the user types `gasolinera` in the search input
