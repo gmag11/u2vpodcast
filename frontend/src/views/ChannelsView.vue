@@ -155,7 +155,7 @@
 		</template>
 	</AppHeader>
 
-	<main class="mx-auto max-w-[1440px] px-5 py-20 md:px-16">
+	<main class="mx-auto max-w-[1440px] px-5 pb-28 pt-20 md:px-16">
 		<div class="mb-12 pt-8">
 			<h1 class="mb-2 font-display text-4xl font-semibold text-text">Dashboard</h1>
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>

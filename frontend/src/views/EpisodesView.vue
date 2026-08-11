@@ -54,7 +54,7 @@
 		</template>
 	</AppHeader>
 
-	<main class="flex min-h-screen flex-col items-center px-4 pb-20 pt-28">
+	<main class="flex min-h-screen flex-col items-center px-4 pb-28 pt-28">
 		<div class="mb-10 w-full max-w-3xl">
 			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
 		</div>
