@@ -88,29 +88,6 @@ pub struct Credentials{
     pub password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UserClaims {
-    pub id: i64,
-    pub role: Role,
-}
-
-
-#[derive(Debug, Deserialize)]
-pub struct UserSchema {
-    pub name: String,
-    pub password: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FilteredUser {
-    pub id: i64,
-    pub name: String,
-    pub role: String,
-    pub verified: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 impl User{
     fn from_row(row: SqliteRow) -> Self{
         info!("from_row");

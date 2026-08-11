@@ -137,7 +137,7 @@ impl ResponseError for Error {
         let response: CustomResponse<Option<String>> = CustomResponse::new(
             self.status_code(),
             &self.details,
-            self.session.clone().unwrap(),
+            self.session.clone(),
             None,
         );
         HttpResponse::build(self.status_code())

@@ -86,7 +86,7 @@ where
                 let response = CustomResponse::<Value>::new(
                     StatusCode::UNAUTHORIZED,
                     "Unauthorized",
-                    session,
+                    Some(session),
                     None,
                 );
                 let http_response = HttpResponse::build(StatusCode::UNAUTHORIZED).json(response);
@@ -96,84 +96,7 @@ where
     }
 }
 
-// ---------- basic_auth ----------
-
-pub struct BasicAuthGuard;
-
-impl<S, B> Transform<S, ServiceRequest> for BasicAuthGuard
-where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    S::Future: 'static,
-    B: MessageBody + 'static,
-{
-    type Response = ServiceResponse<BoxBody>;
-    type Error = Error;
-    type InitError = ();
-    type Transform = BasicAuthMiddleware<S>;
-    type Future = Ready<Result<Self::Transform, Self::InitError>>;
-
-    fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(BasicAuthMiddleware {
-            service: Rc::new(service),
-        }))
-    }
-}
-
-pub struct BasicAuthMiddleware<S> {
-    service: Rc<S>,
-}
-
-impl<S, B> Service<ServiceRequest> for BasicAuthMiddleware<S>
-where
-    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
-    S::Future: 'static,
-    B: MessageBody + 'static,
-{
-    type Response = ServiceResponse<BoxBody>;
-    type Error = Error;
-    type Future = BoxFuture;
-
-    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(ctx)
-    }
-
-    fn call(&self, req: ServiceRequest) -> Self::Future {
-        let mut payload = Payload::None;
-        let extraction = BasicAuth::from_request(req.request(), &mut payload);
-        let data = req.app_data::<Data<AppState>>().cloned();
-        let service = Rc::clone(&self.service);
-        Box::pin(async move {
-            let data = match data {
-                Some(data) => data,
-                None => return Ok(unauthorized(req)),
-            };
-            if !data.config.with_authentication {
-                let res = service.call(req).await?;
-                return Ok(res.map_into_boxed_body());
-            }
-            let credentials = match extraction.await {
-                Ok(credentials) => credentials,
-                Err(_) => return Ok(unauthorized(req)),
-            };
-            let username = credentials.user_id().to_string();
-            let password = credentials
-                .password()
-                .map(|password| password.to_string())
-                .unwrap_or_default();
-            match User::get_by_name(&data.pool, &username).await {
-                Ok(user) => {
-                    if user.active && user.check_password(&password).await {
-                        let res = service.call(req).await?;
-                        Ok(res.map_into_boxed_body())
-                    } else {
-                        Ok(unauthorized(req))
-                    }
-                }
-                Err(_) => Ok(unauthorized(req)),
-            }
-        })
-    }
-}
+// ---------- session_or_basic ----------
 
 fn unauthorized(req: ServiceRequest) -> ServiceResponse<BoxBody> {
     req.into_response(
@@ -182,8 +105,6 @@ fn unauthorized(req: ServiceRequest) -> ServiceResponse<BoxBody> {
             .finish(),
     )
 }
-
-// ---------- session_or_basic ----------
 
 pub struct SessionOrBasicAuth;
 

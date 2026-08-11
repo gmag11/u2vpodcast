@@ -24,7 +24,7 @@ impl CResponse {
     pub fn ok(session: Session, data: impl Serialize) -> HttpResponse{
         let content = serde_json::to_value(data).unwrap();
         let response: CustomResponse<Value> = CustomResponse::new(
-            StatusCode::OK, "Ok", session, Some(content));
+            StatusCode::OK, "Ok", Some(session), Some(content));
         HttpResponse::build(StatusCode::OK)
             .json(response)
     }
@@ -56,10 +56,10 @@ impl CResponse {
 }
 
 impl<T> CustomResponse<T> {
-    pub fn new(status_code: StatusCode, message: &str, session: Session, data: Option<T>) -> CustomResponse<T>{
+    pub fn new(status_code: StatusCode, message: &str, session: Option<Session>, data: Option<T>) -> CustomResponse<T>{
         let status_code =  status_code.as_u16();
         let status = status_code < 300;
-        let user = from_session(session).ok();
+        let user = session.and_then(|session| from_session(session).ok());
         Self{
             status,
             status_code,
