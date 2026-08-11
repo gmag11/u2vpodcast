@@ -26,20 +26,24 @@ use super::super::models::{
 };
 
 pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
-    let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
-    let folder = audios_dir();
     let channels = Channel::read_all(pool).await?;
     for channel in channels.as_slice(){
         info!("Processing: {}", channel.url);
-        match process_channel(pool, channel, &ytdlp, folder).await{
+        match update_channel(pool, channel.id).await{
             Ok(_) => {},
-            Err(e) => error!{"Cant process channel: {channel}. Error: {e}"},
-        }
-        match clean_channel(pool, channel, folder).await{
-            Ok(()) => info!("Channel {} cleaned", &channel.id),
-            Err(e) => error!("Can't clean channel {}. {}", &channel.id, e),
+            Err(e) => error!("Cant process channel: {channel}. Error: {e}"),
         }
     }
+    Ok(())
+}
+
+pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+    let channel = Channel::read(pool, channel_id).await?;
+    let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
+    let folder = audios_dir();
+    process_channel(pool, &channel, &ytdlp, folder).await?;
+    clean_channel(pool, &channel, folder).await?;
+    info!("Channel {} updated", &channel.id);
     Ok(())
 }
 

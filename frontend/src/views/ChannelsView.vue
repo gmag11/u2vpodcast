@@ -107,7 +107,7 @@
 			const result = await api.createChannel(channel);
 			if (result.ok && result.data) {
 				channels.value = [...channels.value, result.data];
-				notification.show('Channel created', 'success');
+				notification.show('Channel created. Update started.', 'success');
 			} else {
 				notification.show(result.message || 'Failed to create channel', 'error');
 			}

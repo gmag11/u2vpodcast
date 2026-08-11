@@ -19,12 +19,15 @@ use tracing::{
 
 use super::{
     AppState,
-    super::models::{
-        audios_dir,
-        CResponse,
-        Channel,
-        NewChannel,
-        UpdateChannel,
+    super::{
+        models::{
+            audios_dir,
+            CResponse,
+            Channel,
+            NewChannel,
+            UpdateChannel,
+        },
+        utils::worker::update_channel as refresh_channel,
     },
 };
 
@@ -53,13 +56,49 @@ async fn create(
 ) -> impl Responder {
     info!("create");
     match Channel::new(&data.pool, channel.into_inner()).await{
-            Ok(channel) => Ok(CResponse::ok(session, channel)),
+            Ok(channel) => {
+                let pool = data.pool.clone();
+                let id = channel.id;
+                actix_web::rt::spawn(async move{
+                    if let Err(e) = refresh_channel(&pool, id).await{
+                        error!("Cant refresh new channel {}: {}", id, e);
+                    }
+                });
+                Ok(CResponse::ok(session, channel))
+            },
             Err(mut e) => {
                 error!("Error: {e}");
                 e.set_session(session);
                 Err(e)
             },
         }
+}
+
+#[post("/channels/{channel}/update/")]
+async fn update_episodes(
+    data: Data<AppState>,
+    session: Session,
+    path: Path<String>,
+) -> impl Responder {
+    info!("update_episodes");
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
+        Ok(channel) => {
+            let pool = data.pool.clone();
+            let id = channel.id;
+            actix_web::rt::spawn(async move{
+                if let Err(e) = refresh_channel(&pool, id).await{
+                    error!("Cant refresh channel {}: {}", id, e);
+                }
+            });
+            Ok(CResponse::ok(session, channel))
+        },
+        Err(mut e) => {
+            error!("Error: {e}");
+            e.set_session(session);
+            Err(e)
+        },
+    }
 }
 
 #[put("/channels/{channel}/")]

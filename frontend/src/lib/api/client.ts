@@ -89,6 +89,10 @@ export const api = {
 		return request<null>(`/api/1.0/channels/${slug}/`, { method: 'DELETE' });
 	},
 
+	async refreshChannel(slug: string) {
+		return request<Channel>(`/api/1.0/channels/${slug}/update/`, { method: 'POST' });
+	},
+
 	async getEpisodes(channelId: number) {
 		return request<Array<Episode>>(`/api/1.0/channels/${channelId}/episodes/`);
 	},
