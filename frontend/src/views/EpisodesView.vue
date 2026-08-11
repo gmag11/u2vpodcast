@@ -1,7 +1,7 @@
 <script setup lang="ts">
 	import { computed, onMounted, ref } from 'vue';
 	import { useRoute, useRouter } from 'vue-router';
-	import { PhArrowsClockwise, PhMicrophoneStage } from '@phosphor-icons/vue';
+	import { PhArrowLeft, PhArrowsClockwise, PhMicrophoneStage } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
 	import { useAuthStore } from '@/stores/auth';
 	import { useNotificationStore } from '@/stores/notification';
@@ -18,6 +18,8 @@
 	const notification = useNotificationStore();
 
 	const episodes = ref<Episode[]>([]);
+	const channels = ref<Channel[]>([]);
+	const channelTitle = ref('');
 	const searchQuery = ref('');
 	const refreshing = ref(false);
 
@@ -38,24 +40,29 @@
 
 	async function load() {
 		const channelId = Number(route.params.channelId);
-		const result = await api.getEpisodes(channelId);
-		if (!result.ok || result.user == null) {
+		const [episodesResult, channelsResult] = await Promise.all([
+			api.getEpisodes(channelId),
+			api.getChannels()
+		]);
+		if (!episodesResult.ok || episodesResult.user == null) {
 			auth.setUser(null);
 			router.push({ name: 'login', query: { next: route.fullPath } });
 			return;
 		}
-		auth.setUser(result.user);
-		if (result.data) {
-			episodes.value = result.data as Array<Episode>;
+		auth.setUser(episodesResult.user);
+		if (episodesResult.data) {
+			episodes.value = episodesResult.data as Array<Episode>;
 		}
+		if (channelsResult.ok && channelsResult.data) {
+			channels.value = channelsResult.data as Array<Channel>;
+		}
+		const channel = channels.value.find((c) => c.id === channelId);
+		channelTitle.value = channel?.title ?? 'Episodes';
 	}
 
 	async function resolveSlugFallback(): Promise<string> {
 		if (channelSlug.value) return channelSlug.value;
-		const channelId = Number(route.params.channelId);
-		const result = await api.getChannels();
-		if (!result.ok || !result.data) return '';
-		const channel = (result.data as Array<Channel>).find((c) => c.id === channelId);
+		const channel = channels.value.find((c) => c.id === Number(route.params.channelId));
 		return channel?.slug ?? '';
 	}
 
@@ -102,6 +109,20 @@
 	</AppHeader>
 
 	<main class="flex min-h-screen flex-col items-center px-4 pb-28 pt-28">
+		<div class="mb-8 flex w-full max-w-3xl items-center gap-4">
+			<button
+				type="button"
+				aria-label="Back to channels"
+				class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-text-muted transition-colors hover:text-text"
+				@click="router.push({ name: 'channels' })"
+			>
+				<PhArrowLeft class="h-5 w-5" weight="regular" />
+			</button>
+			<h1 class="truncate font-display text-2xl font-semibold text-text">
+				{{ channelTitle }}
+			</h1>
+		</div>
+
 		<div class="mb-10 w-full max-w-3xl">
 			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
 		</div>
