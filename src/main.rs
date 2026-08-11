@@ -184,8 +184,7 @@ async fn main() -> Result<(), Error> {
             pool: pool.clone(),
         };
         let data = Data::new(appstate);
-        let path = "/app/html";
-        let static_files = String::from(path.strip_suffix('/').unwrap_or(path));
+        let static_files = config.html_path.trim_end_matches('/').to_string();
         App::new()
             .wrap(Logger::default())
             .wrap(
