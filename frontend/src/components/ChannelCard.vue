@@ -3,7 +3,8 @@
 		PhLinkSimple,
 		PhMicrophoneStage,
 		PhPencilSimple,
-		PhTrashSimple
+		PhTrashSimple,
+		PhYoutubeLogo
 	} from '@phosphor-icons/vue';
 	import { useRouter } from 'vue-router';
 	import { baseEndpoint } from '@/lib/api/client';
@@ -52,6 +53,16 @@
 			</div>
 		</div>
 		<div class="mt-auto flex justify-end gap-4 border-t border-outline pt-4">
+			<a
+				:href="channel.url"
+				target="_blank"
+				rel="noopener noreferrer"
+				aria-label="YouTube"
+				class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+				@click.stop
+			>
+				<PhYoutubeLogo class="h-5 w-5" weight="regular" />
+			</a>
 			<a
 				:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
 				target="_blank"
