@@ -9,7 +9,6 @@ import '@/app.css';
 
 const app = createApp(App);
 app.use(createPinia());
-app.use(router);
 
 const theme = useThemeStore();
 theme.init();
@@ -22,6 +21,7 @@ async function bootstrap() {
 			auth.setUser(result.user);
 		}
 	}
+	app.use(router);
 	app.mount('#app');
 }
 
