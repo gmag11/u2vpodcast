@@ -54,12 +54,19 @@
 		</template>
 	</AppHeader>
 
-	<main class="flex min-h-screen flex-col items-center px-4 pb-20 pt-10">
+	<main class="flex min-h-screen flex-col items-center px-4 pb-20 pt-28">
 		<div class="mb-10 w-full max-w-3xl">
 			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
 		</div>
 
 		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
+
+		<div v-else-if="filteredEpisodes.length === 0" class="mt-10 text-center">
+			<p class="font-display text-xl font-semibold text-text">No episodes yet</p>
+			<p class="mt-2 text-sm text-text-muted">
+				The channel is being processed and episodes will appear here as they are downloaded.
+			</p>
+		</div>
 
 		<div v-else class="flex w-full max-w-3xl flex-col gap-5">
 			<EpisodeCard v-for="episode in filteredEpisodes" :key="episode.id" :episode="episode" />
