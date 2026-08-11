@@ -1,6 +1,6 @@
 import type { Channel, ConfigResponse, Episode, LoginRequestBody, Response, User } from '@/types';
 
-export const baseEndpoint: string = import.meta.env.DEV ? 'http://localhost:6996' : '';
+export const baseEndpoint: string = '';
 
 const jsonHeaders = {
 	Accept: 'application/json',
@@ -57,6 +57,14 @@ export const api = {
 
 	async logout() {
 		return request<null>('/api/1.0/logout/', { method: 'GET' });
+	},
+
+	async getSession() {
+		const result = await request<User>('/api/1.0/session/');
+		if (result.ok && result.user == null && result.data != null) {
+			result.user = result.data as unknown as User;
+		}
+		return result;
 	},
 
 	async getChannels() {
