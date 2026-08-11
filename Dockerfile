@@ -27,10 +27,6 @@ RUN corepack enable
 COPY ./frontend/ /app
 WORKDIR /app
 
-FROM frontend_base AS frontend_deps
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --prod --frozen-lockfile
-
 FROM frontend_base AS frontend_builder
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install \
     --frozen-lockfile && \
@@ -56,8 +52,7 @@ RUN apk add --update --no-cache \
 
 # Copy from backend_builder
 COPY --from=backend_builder /app/u2vpodcast /app/
-COPY --from=frontend_deps /app/node_modules /app/html/node_modules
-COPY --from=frontend_builder /app/build /app/html
+COPY --from=frontend_builder /app/dist /app/html
 
 COPY migrations/ /app/migrations/
 

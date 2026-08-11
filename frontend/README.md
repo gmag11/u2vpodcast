@@ -1,38 +1,45 @@
-# create-svelte
+# u2vpodcast frontend
 
-Everything you need to build a Svelte project, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
+Vue 3 single-page application served as static files by the u2vpodcast backend at `/app`.
 
-## Creating a project
+## Stack
 
-If you're seeing this, you've probably already done this step. Congrats!
+- Vue 3 + TypeScript
+- Vite (build, base path `/app`)
+- Vue Router (SPA routing with auth guards)
+- Pinia (state: auth, theme, notifications, loading)
+- Tailwind CSS v4 (design tokens, light/dark themes)
+- Radix-Vue (headless primitives: dialog, switch)
+- Phosphor icons
+- Vitest (unit tests)
 
-```bash
-# create a new project in the current directory
-npm create svelte@latest
+## Design
 
-# create a new project in my-app
-npm create svelte@latest my-app
-```
+The UI follows the Stitch design reference (project "Modern Podcast Dashboard Redesign"),
+unified into a single design system: coral primary, sky accent, light/dark themes,
+Geist + Inter typography. See `openspec/changes/vue3-frontend-redesign/` for the full spec.
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+```bash
+pnpm install
+pnpm dev
+```
+
+Dev mode proxies API calls to `http://localhost:6996` (the Rust backend).
+
+## Checking
 
 ```bash
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+pnpm lint      # prettier + eslint
+pnpm check     # vue-tsc type check
+pnpm test      # vitest
 ```
 
 ## Building
 
-To create a production version of your app:
-
 ```bash
-npm run build
+pnpm run build
 ```
 
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
+Outputs to `dist/`, which the Dockerfile copies into `/app/html`.

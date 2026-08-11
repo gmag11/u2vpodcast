@@ -1,64 +1,30 @@
 import js from '@eslint/js';
-import tsParser from '@typescript-eslint/parser';
-import tsPlugin from '@typescript-eslint/eslint-plugin';
-import svelte from 'eslint-plugin-svelte';
-import prettier from 'eslint-config-prettier';
+import pluginVue from 'eslint-plugin-vue';
+import tseslint from 'typescript-eslint';
 import globals from 'globals';
+import eslintConfigPrettier from '@vue/eslint-config-prettier/skip-formatting';
 
-/** @type {import('eslint').Linter.Config[]} */
 export default [
 	{
-		ignores: [
-			'node_modules',
-			'build/',
-			'.svelte-kit/',
-			'package/',
-			'pnpm-lock.yaml',
-			'static/favicon/'
-		]
+		ignores: ['dist/', 'node_modules/', 'static/favicon/']
 	},
 	js.configs.recommended,
+	...tseslint.configs.recommended,
+	...pluginVue.configs['flat/recommended'],
 	{
-		files: ['**/*.{js,mjs,ts,svelte}'],
+		files: ['**/*.{ts,vue}'],
 		languageOptions: {
-			parser: tsParser,
-			parserOptions: {
-				extraFileExtensions: ['.svelte'],
-				sourceType: 'module'
-			},
 			globals: {
 				...globals.browser,
 				...globals.node
-			}
-		},
-		plugins: {
-			'@typescript-eslint': tsPlugin
-		},
-		rules: {
-			...tsPlugin.configs.recommended.rules
-		}
-	},
-	...svelte.configs['flat/recommended'],
-	{
-		files: ['**/*.svelte'],
-		languageOptions: {
+			},
 			parserOptions: {
-				parser: tsParser
+				parser: tseslint.parser
 			}
-		}
-	},
-	{
+		},
 		rules: {
-			'svelte/no-navigation-without-resolve': 'off',
-			'svelte/no-immutable-reactive-statements': 'off',
-			'svelte/no-reactive-reassign': 'off'
+			'vue/multi-word-component-names': 'off'
 		}
 	},
-	{
-		files: ['**/*.ts'],
-		rules: {
-			'no-undef': 'off'
-		}
-	},
-	prettier
+	eslintConfigPrettier
 ];

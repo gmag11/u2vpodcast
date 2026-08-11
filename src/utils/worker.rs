@@ -20,35 +20,40 @@ use super::super::models::{
     Episode,
     Ytdlp,
     YtVideo,
+    audios_dir,
+    ytdlp_path,
+    cookies_file,
 };
 
-static FOLDER: &str = "/app/audios";
-static YTDLP: &str = "/app/.local/bin/yt-dlp";
-
 pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
-    let ytdlp = Ytdlp::new(YTDLP, "cookies-cp.txt");
     let channels = Channel::read_all(pool).await?;
     for channel in channels.as_slice(){
         info!("Processing: {}", channel.url);
-        match process_channel(pool, channel, &ytdlp).await{
+        match update_channel(pool, channel.id).await{
             Ok(_) => {},
-            Err(e) => error!{"Cant process channel: {channel}. Error: {e}"},
-        }
-        match clean_channel(pool, channel).await{
-            Ok(()) => info!("Channel {} cleaned", &channel.id),
-            Err(e) => error!("Can't clean channel {}. {}", &channel.id, e),
+            Err(e) => error!("Cant process channel: {channel}. Error: {e}"),
         }
     }
     Ok(())
 }
 
-async fn clean_channel(pool: &SqlitePool, channel: &Channel) -> Result<(), Error>{
+pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+    let channel = Channel::read(pool, channel_id).await?;
+    let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
+    let folder = audios_dir();
+    process_channel(pool, &channel, &ytdlp, folder).await?;
+    clean_channel(pool, &channel, folder).await?;
+    info!("Channel {} updated", &channel.id);
+    Ok(())
+}
+
+async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error>{
     let max = usize::try_from(channel.max)
         .map_err(|e| Error::default(&e.to_string()))?;
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     for (index, episode) in episodes.iter().enumerate(){
         if index >= max { // remove
-            let filename = format!("{}/{}/{}.mp3", FOLDER, &channel.slug, episode.yt_id);
+            let filename = format!("{}/{}/{}.mp3", folder, &channel.slug, episode.yt_id);
             info!("Deleting file {filename}");
             let exists = tokio::fs::metadata(&filename)
                 .await
@@ -73,9 +78,10 @@ async fn process_channel(
     pool: &SqlitePool,
     channel: &Channel,
     ytdlp: &Ytdlp,
+    folder: &str,
 ) -> Result<(), Error>{
-    info!("Create directory {}/{}", FOLDER, &channel.slug);
-    let _ = create_dir_all(format!("{}/{}", FOLDER, &channel.slug))
+    info!("Create directory {}/{}", folder, &channel.slug);
+    let _ = create_dir_all(format!("{}/{}", folder, &channel.slug))
         .await;
     info!("Getting new videos for channel: {}", channel);
     let first = channel.first;
@@ -96,7 +102,7 @@ async fn process_channel(
     info!("Getting {} videos", ytvideos.len());
     for ytvideo in ytvideos{
         info!("Processing: {}", &ytvideo.title);
-        match process_episode(pool, channel, &ytvideo, ytdlp).await{
+        match process_episode(pool, channel, &ytvideo, ytdlp, folder).await{
             Ok(_) => {},
             Err(e) => error!("Cant process episode: {e}"),
         }
@@ -110,6 +116,7 @@ async fn process_episode(
     channel: &Channel,
     ytvideo: &YtVideo,
     ytdlp: &Ytdlp,
+    folder: &str,
 ) -> Result<(), Error>{
     info!("Start processing episode {}", ytvideo.title);
     if channel.episode_exists(pool, &ytvideo.id).await{
@@ -121,7 +128,7 @@ async fn process_episode(
     }
     info!("Downloading video: {:?}", ytvideo);
     let filename = format!("{}/{}/{}.mp3",
-        FOLDER,
+        folder,
         channel.slug,
         &ytvideo.id
     );

@@ -24,6 +24,8 @@ impl YTInfo{
     pub async fn new(url: &str) -> Result<Self, Error>{
 
         let html: String = ureq::get(url)
+            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .header("Accept-Language", "en-US,en;q=0.9")
             .call()
             .map_err(|e| Error::default(&e.to_string()))?
             .body_mut()

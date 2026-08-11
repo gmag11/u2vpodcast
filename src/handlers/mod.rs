@@ -16,6 +16,7 @@ use actix_files as af;
 use super::models::{
     Credentials,
     AppState,
+    audios_dir,
 };
 use super::utils::middleware::{
     RequireSession,
@@ -55,6 +56,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .service(channels::read_with_pagination)
                                     .service(episodes::read_with_pagination)
                                     .service(channels::create)
+                                    .service(channels::update_episodes)
                                     .service(channels::update)
                                     .service(channels::delete)
                                     .service(config::get_config)
@@ -64,7 +66,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("/media")
                     .wrap(SessionOrBasicAuth)
-                    .service(af::Files::new("", "./audios"))
+                    .service(af::Files::new("", audios_dir()))
             )
     );
 }
