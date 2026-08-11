@@ -35,11 +35,6 @@ export interface Episode {
 	updated_at: Date;
 }
 
-export interface CustomError {
-	error?: string;
-	id?: number;
-}
-
 export interface Response {
 	status: boolean;
 	status_code: number;
