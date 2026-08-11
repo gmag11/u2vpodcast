@@ -23,6 +23,15 @@
 	const max = ref(5);
 	const first = ref('');
 
+	function defaultFirst(): string {
+		const d = new Date();
+		d.setMonth(d.getMonth() - 1);
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	}
+
 	watch(
 		() => props.open,
 		(open) => {
@@ -34,7 +43,7 @@
 			max.value = props.channel?.max ?? 5;
 			first.value = props.channel?.first
 				? new Date(props.channel.first).toISOString().slice(0, 10)
-				: '';
+				: defaultFirst();
 		}
 	);
 
@@ -82,7 +91,12 @@
 
 			<div class="flex flex-col gap-1.5">
 				<label class="text-sm font-medium text-text" for="channel-url">Url</label>
-				<AppInput id="channel-url" v-model="url" type="url" placeholder="https://example.com/rss" />
+				<AppInput
+					id="channel-url"
+					v-model="url"
+					type="url"
+					placeholder="https://www.youtube.com/@channel"
+				/>
 			</div>
 
 			<div class="flex flex-col gap-1.5">
