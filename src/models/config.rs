@@ -32,6 +32,32 @@ fn default_html_path() -> String {
     }
 }
 
+pub fn audios_dir() -> &'static str {
+    if Path::new("/app/audios").is_dir() {
+        "/app/audios"
+    } else {
+        "audios"
+    }
+}
+
+pub fn ytdlp_path() -> &'static str {
+    if Path::new("/app/.local/bin/yt-dlp").exists() {
+        "/app/.local/bin/yt-dlp"
+    } else {
+        "yt-dlp"
+    }
+}
+
+pub fn cookies_file() -> &'static str {
+    if Path::new("/app/cookies-cp.txt").exists() {
+        "/app/cookies-cp.txt"
+    } else if Path::new("cookies-cp.txt").exists() {
+        "cookies-cp.txt"
+    } else {
+        ""
+    }
+}
+
 impl Config {
     pub async fn load() -> Self {
         info!("load");

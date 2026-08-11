@@ -20,14 +20,13 @@ use tracing::{
 use super::{
     AppState,
     super::models::{
+        audios_dir,
         CResponse,
         Channel,
         NewChannel,
         UpdateChannel,
     },
 };
-
-static FOLDER: &str = "/app/audios";
 
 
 #[get("/channels/")]
@@ -121,11 +120,12 @@ async fn delete(
     let key = path.into_inner();
     match Channel::read_by_id_or_slug(&data.pool, &key).await{
             Ok(channel) => {
-                info!("Remove directory {}/{}", FOLDER, &channel.slug);
-                match tokio::fs::remove_dir_all(format!("{}/{}", FOLDER, &channel.slug))
+                let folder = audios_dir();
+                info!("Remove directory {}/{}", folder, &channel.slug);
+                match tokio::fs::remove_dir_all(format!("{}/{}", folder, &channel.slug))
                     .await {
-                    Ok(_) => debug!("Removed directorio {}/{}", FOLDER, &channel.slug),
-                    Err(e) => error!("Can't remove directory {}/{}: {}", FOLDER, &channel.slug, e),
+                    Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
+                    Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
                 };
                 match Channel::delete(&data.pool, channel.id).await{
                     Ok(channel) => Ok(CResponse::ok(session, channel)),
