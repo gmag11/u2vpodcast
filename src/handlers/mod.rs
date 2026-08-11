@@ -52,6 +52,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                             .service(
                                 web::scope("")
                                     .wrap(RequireSession)
+                                    .configure(users::api_users)
+                                    .configure(options::api_options)
                                     .service(channels::read)
                                     .service(channels::read_with_pagination)
                                     .service(episodes::read_with_pagination)

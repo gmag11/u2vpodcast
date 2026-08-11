@@ -5,6 +5,7 @@ use actix_web::{
     web::{
         Data,
         Json,
+        self,
     },
     post,
     get,
@@ -32,7 +33,12 @@ struct KeyValue{
     value: String
 }
 
-#[get("update/")]
+pub fn api_options(cfg: &mut web::ServiceConfig){
+    cfg.service(update)
+        .service(post_options);
+}
+
+#[get("/options/update/")]
 async fn update(
     data: Data<AppState>,
     session: Session,
@@ -44,7 +50,7 @@ async fn update(
     }
 }
 
-#[post("/")]
+#[post("/options/")]
 async fn post_options(
     data: Data<AppState>,
     session: Session,
