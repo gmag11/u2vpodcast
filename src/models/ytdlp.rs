@@ -76,7 +76,7 @@ impl Ytdlp {
     pub async fn auto_update() -> Result<(), Error>{
         let python3 = "python3";
         let args = vec!["-m", "pip", "install", "--user", "--upgrade",
-            "--break-system-packages", "yt-dlp"];
+            "--break-system-packages", "yt-dlp[default]"];
         if StdCommand::new(python3)
             .args(&args)
             .spawn()

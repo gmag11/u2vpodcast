@@ -42,6 +42,7 @@ ENV USER=app
 ENV UID=10001
 
 RUN apk add --update --no-cache \
+            deno \
             ffmpeg~=8.1 \
             python3~=3.14 \
             py3-pip~=26.1 && \
@@ -73,7 +74,7 @@ RUN python3 -m pip install \
             --user \
             --upgrade \
             --break-system-packages \
-            yt-dlp
+            "yt-dlp[default]"
             #git+https://github.com/yt-dlp/yt-dlp.git@release
 
 CMD ["/app/u2vpodcast"]
