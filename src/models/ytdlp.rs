@@ -38,7 +38,8 @@ impl Ytdlp {
         info!("get_latest");
         let elapsed = format!("today-{}days", days);
         let args = vec!["--dateafter", &elapsed, "--dump-json",
-            "--break-on-reject", url];
+            "--break-on-reject", "--js-runtimes", "node",
+            "--js-runtimes", "deno", url];
         let stdout = Command::new(&self.path)
             .args(&args)
             .output()
@@ -58,8 +59,10 @@ impl Ytdlp {
 
     pub async fn download(&self, id: &str, output: &str) -> Result<std::process::ExitStatus, Error>{
         let url = format!("https://www.youtube.com/watch?v={}", id);
-        let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3", 
-            "-o", output];
+        let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3",
+            "-o", output, "--js-runtimes", "node",
+            "--js-runtimes", "deno", "--retries", "10",
+            "--retry-sleep", "5"];
         if !&self.cookies.is_empty(){
             args.push("--cookies");
             args.push(&self.cookies);
