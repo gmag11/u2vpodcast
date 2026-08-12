@@ -63,9 +63,13 @@ impl Ytdlp {
             "-o", output, "--js-runtimes", "node",
             "--js-runtimes", "deno", "--retries", "10",
             "--retry-sleep", "5"];
+        let tmp_cookies;
         if !&self.cookies.is_empty(){
-            args.push("--cookies");
-            args.push(&self.cookies);
+            tmp_cookies = format!("/tmp/u2vpodcast_cookies_{}.txt", id);
+            if std::fs::copy(&self.cookies, &tmp_cookies).is_ok(){
+                args.push("--cookies");
+                args.push(&tmp_cookies);
+            }
         }
         args.push(&url);
         Command::new(&self.path)
