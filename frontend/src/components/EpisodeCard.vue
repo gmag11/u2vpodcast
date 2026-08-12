@@ -115,8 +115,8 @@
 			</div>
 
 			<div class="flex shrink-0 items-center gap-2 text-sm text-text-muted">
-				<span>{{ isCurrent ? player.currentLabel : '0:00' }}</span>
-				<span v-if="isCurrent && player.durationLabel">/ {{ player.durationLabel }}</span>
+				<span v-if="isCurrent">{{ player.currentLabel }} / {{ player.durationLabel }}</span>
+				<span v-else>{{ props.episode.duration }}</span>
 			</div>
 		</div>
 
