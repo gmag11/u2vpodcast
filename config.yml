@@ -4,7 +4,11 @@ url: localhost
 port: 6996
 sleep_time: 1
 per_page: 3
-secret_key: "pxWGSDw8pie2TPZcqfFdpBgxwzp08fz4UTJ2q8pSfP80Df74PE8HcrjXV3hsOyZTgCpBvXtmn2O7qqtXigJM0Q=="
+secret_key: "change_me_to_a_strong_random_value"
+# If both admin_username and admin_password are present, the admin user is
+# recreated from these values on every startup. To instead use the admin
+# account already stored in the database, comment out both keys below; the
+# users table is then left untouched.
 admin_username: admin
 admin_password: nimda
 # When true, the RSS feed (/channels/{channel_id}/feed.xml) and the media files

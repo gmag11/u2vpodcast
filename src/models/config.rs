@@ -11,8 +11,8 @@ pub struct Config{
     pub sleep_time: u64,
     pub per_page: i64,
     pub secret_key: String,
-    pub admin_username: String,
-    pub admin_password: String,
+    pub admin_username: Option<String>,
+    pub admin_password: Option<String>,
     #[serde(default = "default_with_authentication")]
     pub with_authentication: bool,
     #[serde(default = "default_html_path")]
@@ -58,6 +58,20 @@ pub fn cookies_file() -> &'static str {
 }
 
 impl Config {
+    pub fn admin_credentials_present(&self) -> bool {
+        let username = self
+            .admin_username
+            .as_deref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let password = self
+            .admin_password
+            .as_deref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        username.is_some() && password.is_some()
+    }
+
     pub async fn load() -> Self {
         info!("load");
         let content = read_to_string("config.yml")

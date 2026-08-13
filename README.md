@@ -41,9 +41,11 @@ You need to modify `config.yml`. Change the params as you need, and add all the 
 | `sleep_time` | number | — | Hours between each background update cycle (checks for new videos and runs `yt-dlp`). |
 | `per_page` | integer | — | Number of items shown per page in the channel and episode listings. |
 | `secret_key` | string | — | Secret used to sign session cookies. Generate a strong random value and keep it secret. |
-| `admin_username` | string | — | Username of the admin user, recreated on every startup. |
-| `admin_password` | string | — | Password of the admin user. |
+| `admin_username` | string | — | Username of the admin user. Only used when both `admin_username` and `admin_password` are set: in that case the admin is recreated from these values on every startup. |
+| `admin_password` | string | — | Password of the admin user. Only used when both `admin_username` and `admin_password` are set. The database never stores it in plaintext, only its hash. |
 | `with_authentication` | boolean | `true` | When `true`, the RSS feed (`/channels/{channel_id}/feed.xml`) and the media files (`/media/**`) require HTTP Basic Auth using the admin credentials. When `false`, they are served without authentication. |
+
+If only one of `admin_username` and `admin_password` is set (or both are missing), both are **ignored**: the `users` table is left untouched on startup and the service authenticates against the admin account already stored in the database. To adopt this mode, log in once with the seeded credentials so the user row exists, then remove both keys from `config.yml` and restart.
 
 ### Usage
 

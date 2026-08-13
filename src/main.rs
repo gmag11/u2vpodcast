@@ -140,13 +140,23 @@ async fn main() -> Result<(), Error> {
     let url = config.url.clone();
     let port = config.port;
 
-    // Ensure the only user is the admin from the configuration on every startup.
-    User::delete_all(&pool)
-        .await
-        .expect("Cant delete existing users");
-    User::default(&pool, &config.admin_username, &config.admin_password)
-        .await
-        .expect("Cant create admin user");
+    // When both admin credentials are set in config.yml, reseed the only user
+    // from the configuration on every startup. When either is missing or empty,
+    // the config credentials are ignored and the existing users table is kept
+    // untouched, so authentication resolves against the stored database user.
+    if config.admin_credentials_present() {
+        let admin_username = config.admin_username.clone().unwrap_or_default();
+        let admin_password = config.admin_password.clone().unwrap_or_default();
+        User::delete_all(&pool)
+            .await
+            .expect("Cant delete existing users");
+        User::default(&pool, &admin_username, &admin_password)
+            .await
+            .expect("Cant create admin user");
+        info!("Admin reseeded from config.yml (seeded mode)");
+    } else {
+        info!("admin_username/admin_password not both set; ignoring config credentials and keeping existing users table");
+    }
 
     // Backfill slugs and rename audio directories before the worker starts.
     Channel::migrate_slugs(&pool, "/app/audios")
