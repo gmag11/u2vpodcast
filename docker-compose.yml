@@ -7,7 +7,7 @@ services:
     volumes:
       - audios:/app/audios
       - db:/app/db
-      - ./cookies.txt:/app/cookies.txt:ro
+      - ./cookies.txt:/app/cookies.txt
       - ./config.yml:/app/config.yml:ro
     ports:
       - 6996:6996

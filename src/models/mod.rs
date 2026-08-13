@@ -17,7 +17,12 @@ use chrono::{
 };
 
 pub use error::Error;
-pub use config::Config;
+pub use config::{
+    Config,
+    audios_dir,
+    ytdlp_path,
+    cookies_file,
+};
 pub use param::Param;
 pub use response::{
     CustomResponse,
@@ -39,6 +44,7 @@ pub use user::{
     User,
     NewUser,
     Credentials,
+    from_session,
 };
 
 pub fn default_datetime() -> DateTime<Utc> {

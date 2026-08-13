@@ -1,10 +1,8 @@
-use serde::Deserialize;
 use actix_web::{
     Responder,
     web::{
         Path,
         Data,
-        Query,
         Json,
     },
     get,
@@ -21,20 +19,17 @@ use tracing::{
 
 use super::{
     AppState,
-    super::models::{
-        CResponse,
-        Channel,
-        NewChannel,
-        UpdateChannel,
+    super::{
+        models::{
+            audios_dir,
+            CResponse,
+            Channel,
+            NewChannel,
+            UpdateChannel,
+        },
+        utils::worker::update_channel as refresh_channel,
     },
 };
-
-static FOLDER: &str = "/app/audios";
-
-#[derive(Deserialize)]
-struct Info{
-    channel_id: i64,
-}
 
 
 #[get("/channels/")]
@@ -61,7 +56,16 @@ async fn create(
 ) -> impl Responder {
     info!("create");
     match Channel::new(&data.pool, channel.into_inner()).await{
-            Ok(channel) => Ok(CResponse::ok(session, channel)),
+            Ok(channel) => {
+                let pool = data.pool.clone();
+                let id = channel.id;
+                actix_web::rt::spawn(async move{
+                    if let Err(e) = refresh_channel(&pool, id).await{
+                        error!("Cant refresh new channel {}: {}", id, e);
+                    }
+                });
+                Ok(CResponse::ok(session, channel))
+            },
             Err(mut e) => {
                 error!("Error: {e}");
                 e.set_session(session);
@@ -70,32 +74,101 @@ async fn create(
         }
 }
 
-#[put("/channels/")]
+#[post("/channels/{channel}/update/")]
+async fn update_episodes(
+    data: Data<AppState>,
+    session: Session,
+    path: Path<String>,
+) -> impl Responder {
+    info!("update_episodes");
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
+        Ok(channel) => {
+            let pool = data.pool.clone();
+            let id = channel.id;
+            actix_web::rt::spawn(async move{
+                if let Err(e) = refresh_channel(&pool, id).await{
+                    error!("Cant refresh channel {}: {}", id, e);
+                }
+            });
+            Ok(CResponse::ok(session, channel))
+        },
+        Err(mut e) => {
+            error!("Error: {e}");
+            e.set_session(session);
+            Err(e)
+        },
+    }
+}
+
+#[post("/channels/{channel}/image/")]
+async fn refresh_image(
+    data: Data<AppState>,
+    session: Session,
+    path: Path<String>,
+) -> impl Responder {
+    info!("refresh_image");
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
+        Ok(channel) => {
+            let url = channel.url.clone();
+            match Channel::update_image(&data.pool, channel.id, &url).await{
+                Ok(channel) => Ok(CResponse::ok(session, channel)),
+                Err(mut e) => {
+                    error!("Error: {e}");
+                    e.set_session(session);
+                    Err(e)
+                },
+            }
+        },
+        Err(mut e) => {
+            error!("Error: {e}");
+            e.set_session(session);
+            Err(e)
+        },
+    }
+}
+
+#[put("/channels/{channel}/")]
 async fn update(
     data: Data<AppState>,
     session: Session,
+    path: Path<String>,
     channel: Json<UpdateChannel>,
 ) -> impl Responder {
     info!("update");
-    match Channel::update(&data.pool, &channel.into_inner()).await{
-            Ok(channel) => Ok(CResponse::ok(session, channel)),
-            Err(mut e) => {
-                error!("Error: {e}");
-                e.set_session(session);
-                Err(e)
-            },
-        }
+    let key = path.into_inner();
+    let mut channel = channel.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
+        Ok(existing) => {
+            channel.id = existing.id;
+            match Channel::update(&data.pool, &channel).await{
+                Ok(channel) => Ok(CResponse::ok(session, channel)),
+                Err(mut e) => {
+                    error!("Error: {e}");
+                    e.set_session(session);
+                    Err(e)
+                },
+            }
+        },
+        Err(mut e) => {
+            error!("Error: {e}");
+            e.set_session(session);
+            Err(e)
+        },
+    }
 }
 
 
-#[get("/channels/{channel_id}/")]
+#[get("/channels/{channel}/")]
 async fn read(
     data: Data<AppState>,
     session: Session,
-    path: Path<Info>,
+    path: Path<String>,
 ) -> impl Responder{
     info!("read");
-    match Channel::read(&data.pool, path.channel_id).await{
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
             Ok(channel) => Ok(CResponse::ok(session, channel)),
             Err(mut e) => {
                 error!("Error: {e}");
@@ -104,22 +177,31 @@ async fn read(
             },
         }
 }
-#[delete("/channels/")]
+#[delete("/channels/{channel}/")]
 async fn delete(
     data: Data<AppState>,
     session: Session,
-    path: Query<Info>,
+    path: Path<String>,
 ) -> impl Responder{
     info!("delete");
-    match Channel::delete(&data.pool, path.channel_id).await{
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
             Ok(channel) => {
-                info!("Remove directory {}/{}", FOLDER, &channel.id);
-                match tokio::fs::remove_dir_all(format!("{}/{}", FOLDER, &channel.id))
+                let folder = audios_dir();
+                info!("Remove directory {}/{}", folder, &channel.slug);
+                match tokio::fs::remove_dir_all(format!("{}/{}", folder, &channel.slug))
                     .await {
-                    Ok(_) => debug!("Removed directorio {}/{}", FOLDER, &channel.id),
-                    Err(e) => error!("Can't remove directory {}/{}: {}", FOLDER, &channel.id, e),
+                    Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
+                    Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
                 };
-                Ok(CResponse::ok(session, channel))
+                match Channel::delete(&data.pool, channel.id).await{
+                    Ok(channel) => Ok(CResponse::ok(session, channel)),
+                    Err(mut e) => {
+                        error!("Error: {e}");
+                        e.set_session(session);
+                        Err(e)
+                    },
+                }
         },
         Err(mut e) => {
             error!("Error: {e}");

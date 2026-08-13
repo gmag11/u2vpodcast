@@ -21,6 +21,8 @@ pub struct YtVideo{
     pub original_url: String,
     pub webpage_url: String,
     pub upload_date: String,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
     pub duration_string: String,
 }
 
@@ -36,7 +38,8 @@ impl Ytdlp {
         info!("get_latest");
         let elapsed = format!("today-{}days", days);
         let args = vec!["--dateafter", &elapsed, "--dump-json",
-            "--break-on-reject", url];
+            "--break-on-reject", "--js-runtimes", "node",
+            "--js-runtimes", "deno", url];
         let stdout = Command::new(&self.path)
             .args(&args)
             .output()
@@ -56,11 +59,17 @@ impl Ytdlp {
 
     pub async fn download(&self, id: &str, output: &str) -> Result<std::process::ExitStatus, Error>{
         let url = format!("https://www.youtube.com/watch?v={}", id);
-        let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3", 
-            "-o", output];
+        let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3",
+            "-o", output, "--js-runtimes", "node",
+            "--js-runtimes", "deno", "--retries", "10",
+            "--retry-sleep", "5"];
+        let tmp_cookies;
         if !&self.cookies.is_empty(){
-            args.push("--cookies");
-            args.push(&self.cookies);
+            tmp_cookies = format!("/tmp/u2vpodcast_cookies_{}.txt", id);
+            if std::fs::copy(&self.cookies, &tmp_cookies).is_ok(){
+                args.push("--cookies");
+                args.push(&tmp_cookies);
+            }
         }
         args.push(&url);
         Command::new(&self.path)
@@ -74,7 +83,7 @@ impl Ytdlp {
     pub async fn auto_update() -> Result<(), Error>{
         let python3 = "python3";
         let args = vec!["-m", "pip", "install", "--user", "--upgrade",
-            "--break-system-packages", "yt-dlp"];
+            "--break-system-packages", "yt-dlp[default]"];
         if StdCommand::new(python3)
             .args(&args)
             .spawn()

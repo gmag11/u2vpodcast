@@ -6,7 +6,7 @@ services:
       - proxy
     labels:
       - caddy="${FQDN}"
-      - caddy.reverse_proxy="{{upstreams 8080}}"
+      - caddy.reverse_proxy="{{upstreams 6996}}"
 
 networks:
   proxy:

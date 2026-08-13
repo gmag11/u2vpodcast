@@ -13,8 +13,14 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 .env
+.opencode/
 cookies.txt
 media
 *.db*
 audios/
 u2vpodcast.db*
+
+.github/prompts/
+.github/skills/
+.vscode/
+opencode.json

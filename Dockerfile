@@ -1,11 +1,12 @@
 ###############################################################################
 ## Backend builder
 ###############################################################################
-FROM rust:alpine3.19 AS backend_builder
+FROM rust:alpine3.24 AS backend_builder
 
 LABEL maintainer="Lorenzo Carbonell <a.k.a. atareao> lorenzo.carbonell.cerezo@gmail.com"
 
 RUN apk add --update --no-cache \
+            gcc \
             musl-dev
 
 WORKDIR /app
@@ -19,43 +20,38 @@ RUN cargo build --release && \
 ###############################################################################
 ## Frontend builder
 ###############################################################################
-FROM node:20-alpine AS frontend_base
-ENV PNPM_HOME="/pnpm" \
-    PATH="$PNPM_HOME:$PATH"
+FROM node:24-alpine AS frontend_base
+ENV PNPM_HOME=/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
 RUN corepack enable
 COPY ./frontend/ /app
 WORKDIR /app
 
-FROM frontend_base AS frontend_deps
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --prod --frozen-lockfile
-
 FROM frontend_base AS frontend_builder
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install \
     --frozen-lockfile && \
+    pnpm test && \
     pnpm run build
 
 ###############################################################################
 ## Final image
 ###############################################################################
-FROM alpine:3.19
+FROM alpine:3.24
 
 ENV USER=app
 ENV UID=10001
 
 RUN apk add --update --no-cache \
-            ffmpeg~=6.1 \
-            git~=2.43 \
-            sqlite~=3.44 \
-            python3~=3.11 \
-            py3-pip~=23.3 && \
+            deno \
+            ffmpeg~=8.1 \
+            python3~=3.14 \
+            py3-pip~=26.1 && \
     rm -rf /var/cache/apk && \
     rm -rf /var/lib/app/lists*
 
 # Copy from backend_builder
 COPY --from=backend_builder /app/u2vpodcast /app/
-COPY --from=frontend_deps /app/node_modules /app/html/node_modules
-COPY --from=frontend_builder /app/build /app/html
+COPY --from=frontend_builder /app/dist /app/html
 
 COPY migrations/ /app/migrations/
 
@@ -78,7 +74,7 @@ RUN python3 -m pip install \
             --user \
             --upgrade \
             --break-system-packages \
-            yt-dlp
+            "yt-dlp[default]"
             #git+https://github.com/yt-dlp/yt-dlp.git@release
 
 CMD ["/app/u2vpodcast"]

@@ -88,29 +88,6 @@ pub struct Credentials{
     pub password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UserClaims {
-    pub id: i64,
-    pub role: Role,
-}
-
-
-#[derive(Debug, Deserialize)]
-pub struct UserSchema {
-    pub name: String,
-    pub password: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FilteredUser {
-    pub id: i64,
-    pub name: String,
-    pub role: String,
-    pub verified: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 impl User{
     fn from_row(row: SqliteRow) -> Self{
         info!("from_row");
@@ -210,6 +187,16 @@ impl User{
             .fetch_one(pool)
             .await
         .map_err(|e| e.into())
+    }
+
+    pub async fn delete_all(pool: &SqlitePool) -> Result<(), Error>{
+        info!("delete_all");
+        let sql = "DELETE FROM users";
+        query(sql)
+            .execute(pool)
+            .await
+            .map_err(|e| e.into())
+            .map(|_| ())
     }
 
     pub async fn update(pool: &SqlitePool, user: &Self) -> Result<Self, Error>{

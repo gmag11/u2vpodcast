@@ -7,7 +7,7 @@ use actix_web::{
         Data,
         Query,
         Json,
-        ServiceConfig, self,
+        ServiceConfig,
     },
     get,
     post,
@@ -28,15 +28,11 @@ use super::{
     },
 };
 
-#[allow(unused)]
 pub fn api_users(cfg: &mut ServiceConfig){
-    cfg.service(
-        web::scope("users/")
-            .service(create)
-            .service(delete)
-            .service(read)
-            .service(read_with_pagination)
-    );
+    cfg.service(create)
+        .service(delete)
+        .service(read)
+        .service(read_with_pagination);
 }
 
 #[derive(Deserialize)]
@@ -50,7 +46,7 @@ struct Info{
 }
 
 
-#[get("/")]
+#[get("/users/")]
 async fn read_with_pagination(
     data: Data<AppState>,
     page: Query<Page>,
@@ -67,7 +63,7 @@ async fn read_with_pagination(
     }
 }
 
-#[post("/")]
+#[post("/users/")]
 async fn create(
     data: Data<AppState>,
     session: Session,
@@ -83,7 +79,7 @@ async fn create(
     }
 }
 
-#[get("/{user_id}/")]
+#[get("/users/{user_id}/")]
 async fn read(
     data: Data<AppState>,
     session: Session,
@@ -99,7 +95,7 @@ async fn read(
     }
 }
 
-#[delete("/")]
+#[delete("/users/")]
 async fn delete(
     data: Data<AppState>,
     session: Session,

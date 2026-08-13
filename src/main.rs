@@ -39,12 +39,14 @@ use models::{
     AppState,
     User,
     Ytdlp,
+    Channel,
 };
 use utils::worker::do_the_work;
 use actix_files as af;
 use actix_session::{
     SessionMiddleware,
     storage::CookieSessionStore,
+    config::PersistentSession,
 };
 use actix_web::{
     http::header,
@@ -66,7 +68,7 @@ static MIGRATIONS_DIR: &str = "migrations";
 #[actix_web::main]
 async fn main() -> Result<(), Error> {
 
-    let format = time::format_description::parse(
+    let format = time::format_description::parse_borrowed::<2>(
         "[year]-[month padding:zero]-[day padding:zero]T[hour]:[minute]:[second]",
     ).expect("Can't parse timer");
     let offset_in_sec = chrono::Local::now()
@@ -138,11 +140,28 @@ async fn main() -> Result<(), Error> {
     let url = config.url.clone();
     let port = config.port;
 
-    if !db_exists {
-        User::default(&pool, &config.admin_username, &config.admin_password)
+    // When both admin credentials are set in config.yml, reseed the only user
+    // from the configuration on every startup. When either is missing or empty,
+    // the config credentials are ignored and the existing users table is kept
+    // untouched, so authentication resolves against the stored database user.
+    if config.admin_credentials_present() {
+        let admin_username = config.admin_username.clone().unwrap_or_default();
+        let admin_password = config.admin_password.clone().unwrap_or_default();
+        User::delete_all(&pool)
+            .await
+            .expect("Cant delete existing users");
+        User::default(&pool, &admin_username, &admin_password)
             .await
             .expect("Cant create admin user");
+        info!("Admin reseeded from config.yml (seeded mode)");
+    } else {
+        info!("admin_username/admin_password not both set; ignoring config credentials and keeping existing users table");
     }
+
+    // Backfill slugs and rename audio directories before the worker starts.
+    Channel::migrate_slugs(&pool, "/app/audios")
+        .await
+        .expect("Cant migrate slugs");
 
 
     let pool2 = pool.clone();
@@ -175,8 +194,7 @@ async fn main() -> Result<(), Error> {
             pool: pool.clone(),
         };
         let data = Data::new(appstate);
-        let path = "/app/html";
-        let static_files = String::from(path.strip_suffix('/').unwrap_or(path));
+        let static_files = config.html_path.trim_end_matches('/').to_string();
         App::new()
             .wrap(Logger::default())
             .wrap(
@@ -188,12 +206,22 @@ async fn main() -> Result<(), Error> {
                     .cookie_http_only(true)
                     .cookie_same_site(SameSite::None)
                     .cookie_secure(true)
+                    .session_lifecycle(
+                        PersistentSession::default()
+                            .session_ttl(time::Duration::days(7))
+                    )
                     .build()
                 }else{
-                    SessionMiddleware::new(
+                    SessionMiddleware::builder(
                         CookieSessionStore::default(),
                         Key::from(config.secret_key.as_bytes()).clone()
                     )
+                    .cookie_secure(false)
+                    .session_lifecycle(
+                        PersistentSession::default()
+                            .session_ttl(time::Duration::days(7))
+                    )
+                    .build()
                 }
             )
             .wrap(
@@ -221,7 +249,6 @@ async fn main() -> Result<(), Error> {
                 }
             )
             .app_data(Data::clone(&data))
-            .service(af::Files::new("/media", "./audios"))
             .service(af::Files::new("/app", static_files.clone())
                 .index_file("index.html")
                 .default_handler(
