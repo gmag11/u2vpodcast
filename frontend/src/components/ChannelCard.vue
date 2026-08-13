@@ -46,11 +46,11 @@
 					<PhMicrophoneStage class="h-10 w-10 text-text-muted" weight="regular" />
 				</div>
 			</div>
-			<div class="flex flex-col">
-				<h2 class="mb-2 line-clamp-2 font-display text-2xl font-semibold text-text">
+			<div class="flex min-w-0 flex-col">
+				<h2 class="mb-2 line-clamp-2 break-words font-display text-2xl font-semibold text-text">
 					{{ channel.title }}
 				</h2>
-				<p class="line-clamp-3 text-base leading-relaxed text-text-muted">
+				<p class="line-clamp-3 break-words text-base leading-relaxed text-text-muted">
 					{{ channel.description }}
 				</p>
 			</div>
