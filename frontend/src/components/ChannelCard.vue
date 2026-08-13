@@ -56,26 +56,40 @@
 			</div>
 		</div>
 		<div class="mt-auto flex justify-end gap-4 border-t border-outline pt-4">
-			<a
-				:href="channel.url"
-				target="_blank"
-				rel="noopener noreferrer"
-				aria-label="YouTube"
-				class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-				@click.stop
-			>
-				<PhYoutubeLogo class="h-5 w-5" weight="regular" />
-			</a>
-			<a
-				:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
-				target="_blank"
-				rel="noopener noreferrer"
-				aria-label="Link"
-				class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-				@click.stop
-			>
-				<PhLinkSimple class="h-5 w-5" weight="regular" />
-			</a>
+			<div class="group relative">
+				<a
+					:href="channel.url"
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label="YouTube"
+					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+					@click.stop
+				>
+					<PhYoutubeLogo class="h-5 w-5" weight="regular" />
+				</a>
+				<span
+					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Open on YouTube
+				</span>
+			</div>
+			<div class="group relative">
+				<a
+					:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label="Link"
+					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+					@click.stop
+				>
+					<PhLinkSimple class="h-5 w-5" weight="regular" />
+				</a>
+				<span
+					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Get RSS feed
+				</span>
+			</div>
 			<div class="group relative">
 				<button
 					type="button"
@@ -92,22 +106,36 @@
 					Reload cover
 				</span>
 			</div>
-			<button
-				type="button"
-				aria-label="Edit"
-				class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-				@click.stop="emit('update', channel)"
-			>
-				<PhPencilSimple class="h-5 w-5" weight="regular" />
-			</button>
-			<button
-				type="button"
-				aria-label="Delete"
-				class="cursor-pointer text-error transition-colors hover:opacity-80"
-				@click.stop="emit('delete', channel)"
-			>
-				<PhTrashSimple class="h-5 w-5" weight="regular" />
-			</button>
+			<div class="group relative">
+				<button
+					type="button"
+					aria-label="Edit"
+					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+					@click.stop="emit('update', channel)"
+				>
+					<PhPencilSimple class="h-5 w-5" weight="regular" />
+				</button>
+				<span
+					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Edit channel
+				</span>
+			</div>
+			<div class="group relative">
+				<button
+					type="button"
+					aria-label="Delete"
+					class="cursor-pointer text-error transition-colors hover:opacity-80"
+					@click.stop="emit('delete', channel)"
+				>
+					<PhTrashSimple class="h-5 w-5" weight="regular" />
+				</button>
+				<span
+					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Delete channel and audio files
+				</span>
+			</div>
 		</div>
 	</div>
 </template>
