@@ -101,6 +101,34 @@ async fn update_episodes(
     }
 }
 
+#[post("/channels/{channel}/image/")]
+async fn refresh_image(
+    data: Data<AppState>,
+    session: Session,
+    path: Path<String>,
+) -> impl Responder {
+    info!("refresh_image");
+    let key = path.into_inner();
+    match Channel::read_by_id_or_slug(&data.pool, &key).await{
+        Ok(channel) => {
+            let url = channel.url.clone();
+            match Channel::update_image(&data.pool, channel.id, &url).await{
+                Ok(channel) => Ok(CResponse::ok(session, channel)),
+                Err(mut e) => {
+                    error!("Error: {e}");
+                    e.set_session(session);
+                    Err(e)
+                },
+            }
+        },
+        Err(mut e) => {
+            error!("Error: {e}");
+            e.set_session(session);
+            Err(e)
+        },
+    }
+}
+
 #[put("/channels/{channel}/")]
 async fn update(
     data: Data<AppState>,

@@ -27,6 +27,7 @@
 	const showConfirmDialog = ref(false);
 	const editingChannel = ref<Channel | null>(null);
 	const pendingDelete = ref<Channel | null>(null);
+	const refreshingSlug = ref<string | null>(null);
 
 	const filteredChannels = computed(() =>
 		filterBySearchWords(channels.value, searchQuery.value, (c) =>
@@ -128,6 +129,19 @@
 		showConfirmDialog.value = false;
 	}
 
+	async function refreshChannelCover(channel: Channel) {
+		refreshingSlug.value = channel.slug;
+		const result = await api.refreshChannelImage(channel.slug);
+		refreshingSlug.value = null;
+		if (result.ok && result.data) {
+			const idx = channels.value.findIndex((c) => c.id === channel.id);
+			if (idx >= 0) channels.value[idx] = result.data;
+			notification.show('Cover image updated', 'success');
+		} else {
+			notification.show(result.message || 'Failed to refresh cover image', 'error');
+		}
+	}
+
 	function goToPage(page: number) {
 		if (page < 1 || page > maxPage.value) return;
 		router.push({ query: { ...route.query, page: String(page) } });
@@ -181,8 +195,10 @@
 				v-for="channel in paginatedChannels"
 				:key="channel.id"
 				:channel="channel"
+				:refreshing="refreshingSlug === channel.slug"
 				@update="openEditDialog"
 				@delete="openDeleteDialog"
+				@cover-refresh="refreshChannelCover"
 			/>
 		</div>
 

@@ -46,10 +46,15 @@ Adds a focused model method that re-fetches `YTInfo` for the channel URL and run
 
 The card tracks a `refreshing` boolean per card; the button disables and swaps to a spinner/disabled state while the request is in flight. Prevents double clicks on the same card.
 
+### 6. Distinguish cover refresh from episode refresh
+
+The cover button uses a distinct image/cover icon (`PhImage`) instead of the reload arrows used by the episode-refresh control in `EpisodesView.vue`, and shows a CSS-only tooltip ("Reload cover") on hover via a `group relative` wrapper. A custom Tailwind tooltip was chosen over the radix-vue `Tooltip` component (already a dependency but unused elsewhere in the SPA) to keep the change minimal and consistent with the existing hand-rolled styling.
+
 ## Risks / Trade-offs
 
 - [YouTube blocks the plain `ureq` fetch] → Mitigation: `YTInfo::new` already sends a browser-like User-Agent and Accept-Language; on failure the handler returns an error and the old image is preserved.
-- [Button hit area too close to Edit/Delete] → Mitigation: `@click.stop`, distinct icon (image/refresh), `aria-label`, disabled state while loading.
+- [Button hit area too close to Edit/Delete] → Mitigation: `@click.stop`, distinct image icon, `aria-label`, disabled state while loading.
+- [Tooltip hidden under card edge when card is near the top] → Mitigation: tooltip is positioned above the button (`bottom-full`), which sits in the card footer; overflow is not clipped by the card, so it remains visible.
 - [Slow network makes button feel unresponsive] → Mitigation: loading state shown immediately on click; existing notification store surfaces completion.
 - [No image re-fetch for empty covers] → Mitigation: deliberately out of scope; endpoint works for any channel, empty `image` just stays empty on failure.
 

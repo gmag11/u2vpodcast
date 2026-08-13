@@ -243,6 +243,21 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
+    pub async fn update_image(pool: &SqlitePool, id: i64, url: &str) -> Result<Self, Error>{
+        info!("update_image");
+        let ytinfo = YTInfo::new(url).await?;
+        let updated_at = Utc::now();
+        let sql = "UPDATE channels SET image = $1, updated_at = $2 WHERE id = $3 RETURNING *";
+        query(sql)
+            .bind(&ytinfo.image)
+            .bind(updated_at)
+            .bind(id)
+            .map(Self::from_row)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.into())
+    }
+
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
         info!("delete");
         let sql = "DELETE FROM channels WHERE id = $1 RETURNING *";

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 	import {
+		PhImage,
 		PhLinkSimple,
 		PhMicrophoneStage,
 		PhPencilSimple,
@@ -12,10 +13,12 @@
 
 	const props = defineProps<{
 		channel: Channel;
+		refreshing?: boolean;
 	}>();
 	const emit = defineEmits<{
 		(e: 'update', channel: Channel): void;
 		(e: 'delete', channel: Channel): void;
+		(e: 'cover-refresh', channel: Channel): void;
 	}>();
 	const router = useRouter();
 
@@ -73,6 +76,22 @@
 			>
 				<PhLinkSimple class="h-5 w-5" weight="regular" />
 			</a>
+			<div class="group relative">
+				<button
+					type="button"
+					aria-label="Refresh cover image"
+					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
+					:disabled="refreshing"
+					@click.stop="emit('cover-refresh', channel)"
+				>
+					<PhImage :class="refreshing ? 'h-5 w-5 animate-spin' : 'h-5 w-5'" weight="regular" />
+				</button>
+				<span
+					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Reload cover
+				</span>
+			</div>
 			<button
 				type="button"
 				aria-label="Edit"

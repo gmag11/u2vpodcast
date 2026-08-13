@@ -22,11 +22,15 @@ The system SHALL expose `POST /api/1.0/channels/{id-or-slug}/image/` that resolv
 
 ### Requirement: Channel card has a cover refresh button
 
-The channel card on the dashboard SHALL display a small button for re-reading the channel's cover image. Clicking it SHALL call `POST /api/1.0/channels/{slug}/image/` for the card's channel, show a loading state while the request is in flight (and prevent repeat clicks), update the card's image from the returned channel, and surface a success or error notification.
+The channel card on the dashboard SHALL display a small button for re-reading the channel's cover image. The button SHALL use a distinct image/cover icon (visually different from the episode-refresh control) and SHALL show a tooltip on hover explaining its purpose (e.g., "Reload cover"). Clicking it SHALL call `POST /api/1.0/channels/{slug}/image/` for the card's channel, show a loading state while the request is in flight (and prevent repeat clicks), update the card's image from the returned channel, and surface a success or error notification.
 
 #### Scenario: User refreshes a channel cover from the card
 - **WHEN** the user clicks the cover refresh button on a channel card
 - **THEN** the SPA calls the image endpoint, shows a loading state on that button while waiting, updates the card's cover with the returned `image`, and shows a success notification
+
+#### Scenario: Hovering the cover refresh button shows its purpose
+- **WHEN** the user hovers over the cover refresh button on a channel card
+- **THEN** a tooltip appears with text indicating the button reloads the cover image, distinguishing it from the episode refresh control
 
 #### Scenario: Cover refresh request fails
 - **WHEN** the image endpoint returns an error (e.g., channel not found or metadata fetch failure)
