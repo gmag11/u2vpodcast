@@ -14,6 +14,6 @@ target "latest" {
     platforms = ["linux/amd64"]
     tags = [
         "${REGISTRY_PREFIX}/${IMAGE_NAME}:latest",
-        "${REGISTRY_PREFIX}/${IMAGE_NAME}:v0.8.4"
+        "${REGISTRY_PREFIX}/${IMAGE_NAME}:v0.8.5"
     ]
 }
