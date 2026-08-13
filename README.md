@@ -30,6 +30,21 @@ For example,
 
 You need to modify `config.yml`. Change the params as you need, and add all the channels and YouTube list that you want
 
+#### `config.yml` options
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `production` | boolean | — | When `true`, runs in production mode: session cookies are marked secure (`SameSite=None`, `Secure`) and CORS is restricted to the configured `url`. In development (`false`), cookies and CORS are relaxed. |
+| `title` | string | — | Name of the service (informational). |
+| `url` | string | — | Public URL/host of the service. Used as allowed CORS origin in production and as base URL for the RSS feeds. |
+| `port` | integer | — | TCP port the HTTP server listens on. |
+| `sleep_time` | number | — | Hours between each background update cycle (checks for new videos and runs `yt-dlp`). |
+| `per_page` | integer | — | Number of items shown per page in the channel and episode listings. |
+| `secret_key` | string | — | Secret used to sign session cookies. Generate a strong random value and keep it secret. |
+| `admin_username` | string | — | Username of the admin user, recreated on every startup. |
+| `admin_password` | string | — | Password of the admin user. |
+| `with_authentication` | boolean | `true` | When `true`, the RSS feed (`/channels/{channel_id}/feed.xml`) and the media files (`/media/**`) require HTTP Basic Auth using the admin credentials. When `false`, they are served without authentication. |
+
 ### Usage
 
 ```
