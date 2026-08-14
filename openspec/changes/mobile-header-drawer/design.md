@@ -22,7 +22,7 @@
 
 ### Decision 1: Single responsive component, not a separate mobile header
 
-Keep all logic in `AppHeader.vue` and switch presentation with Tailwind `md:` breakpoints. The wordmark gets `hidden md:inline`; the inline nav gets `hidden md:flex`; the hamburger and mobile search toggle get `md:hidden`. A dedicated mobile header component would duplicate slots, auth/theme wiring, and logout handling.
+Keep all logic in `AppHeader.vue` and switch presentation with Tailwind breakpoints. The wordmark gets `hidden lg:inline` (hidden below `lg`, not `md`, so the header fits narrow desktop widths between 768px and 1024px where the full bar would otherwise overflow); the inline nav gets `hidden md:flex`; the hamburger and mobile search toggle get `md:hidden`. A dedicated mobile header component would duplicate slots, auth/theme wiring, and logout handling.
 
 **Why**: the slots (`#brand-icon`, `#search`, `#actions`) are already provided by the views; a second component would force every view to branch on breakpoint. Responsive classes keep one source of truth.
 
@@ -49,6 +49,18 @@ When `$slots.search` is present, AppHeader renders a magnifier toggle (`md:hidde
 Header keeps `z-50`; backdrop `z-[60]`; drawer `z-[70]`. Drawer and backdrop must sit above the persistent bottom player. Verify the player's z-index and bump if needed.
 
 **Why**: a fixed bottom player could otherwise intercept taps; explicit z-layering makes the drawer reliably on top.
+
+### Decision 6: Contain channel-card tooltip overflow
+
+The invisible hover tooltips in `ChannelCard` (`absolute whitespace-nowrap`, `opacity-0`) extend past the viewport on mobile and create a horizontal scrollbar. Add `overflow-x-clip` to the Channels page `<main>` so absolute tooltips are painted clipped at the container edge and cannot widen the scrollable area. `overflow-x: clip` (not `hidden`) avoids creating a scroll container and keeps the vertical axis intact.
+
+**Why**: the tooltips must stay `nowrap` to size correctly; clipping at the page container is the smallest change that removes the mobile horizontal scroll without altering the desktop hover behavior.
+
+### Decision 7: Header fits narrow desktop widths
+
+With every item visible (`md`+), the header's min-content width is ~945px, so between 768px and 945px the fixed header overflows its box and right-side items are clipped. The wordmark moves to `lg:inline`, search margins shrink to `mx-4` (back to `mx-8` at `lg`), and the right-group gap becomes `gap-4` until `lg`. Measured with headless Chrome, this reduces the header min-content so it fits from 768px up with no overflow.
+
+**Why**: 768px (tablet portrait / small laptop) is a real device width; hiding just the wordmark and tightening spacing keeps all functionality visible without pushing nav or session controls into the drawer at desktop sizes.
 
 ## Risks / Trade-offs
 

@@ -2,14 +2,14 @@
 
 ### Requirement: Mobile header shows the brand icon only
 
-On screens narrower than the `md` breakpoint, the header brand SHALL render only the brand icon; the "U2V Podcast" wordmark SHALL be hidden. On `md+` screens the full brand (icon + wordmark) SHALL render as today.
+On screens narrower than the `lg` breakpoint, the header brand SHALL render only the brand icon; the "U2V Podcast" wordmark SHALL be hidden. On `lg+` screens the full brand (icon + wordmark) SHALL render. The wordmark is hidden between `md` and `lg` as well so the header fits narrow desktop widths.
 
 #### Scenario: Mobile shows icon-only branding
 - **WHEN** an authenticated user views a header-rendering page on a mobile-width screen
 - **THEN** the header shows only the brand icon, with no wordmark text
 
 #### Scenario: Desktop keeps the full brand
-- **WHEN** an authenticated user views a header-rendering page on an `md+` screen
+- **WHEN** an authenticated user views a header-rendering page on an `lg+` screen
 - **THEN** the header shows the brand icon and the "U2V Podcast" wordmark
 
 ### Requirement: Mobile navigation moves into a side drawer
