@@ -52,7 +52,7 @@
 						<slot name="brand-icon" />
 					</span>
 					<span
-						class="hidden font-display text-2xl font-semibold tracking-tight text-text md:inline"
+						class="hidden font-display text-2xl font-semibold tracking-tight text-text lg:inline"
 					>
 						U2V<span class="text-primary-500">Podcast</span>
 					</span>
@@ -84,11 +84,11 @@
 				</div>
 			</div>
 
-			<div v-if="$slots.search" class="mx-8 hidden max-w-md flex-1 md:flex">
+			<div v-if="$slots.search" class="mx-4 hidden max-w-md flex-1 md:flex lg:mx-8">
 				<slot name="search" />
 			</div>
 
-			<div class="flex items-center gap-4 md:gap-6">
+			<div class="flex items-center gap-4 lg:gap-6">
 				<slot name="actions" />
 				<button
 					v-if="$slots.search"
