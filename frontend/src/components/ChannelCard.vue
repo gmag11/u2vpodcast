@@ -8,7 +8,9 @@
 		PhYoutubeLogo
 	} from '@phosphor-icons/vue';
 	import { useRouter } from 'vue-router';
+	import { computed } from 'vue';
 	import { baseEndpoint } from '@/lib/api/client';
+	import { lastEpisodeAge } from '@/lib/utils/channel.age';
 	import type { Channel } from '@/types';
 
 	const props = defineProps<{
@@ -25,13 +27,22 @@
 	function openEpisodes() {
 		router.push({ name: 'episodes', params: { channelId: String(props.channel.id) } });
 	}
+
+	const ageLabel = computed(() => lastEpisodeAge(props.channel.last_date));
 </script>
 
 <template>
 	<div
-		class="glass-card flex h-full min-h-[300px] cursor-pointer flex-col rounded-3xl p-8"
+		class="glass-card relative flex h-full min-h-[300px] cursor-pointer flex-col rounded-3xl p-8"
 		@click="openEpisodes"
 	>
+		<span
+			v-if="ageLabel"
+			class="absolute right-4 top-4 z-10 rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
+		>
+			{{ ageLabel }}
+		</span>
+
 		<div class="mb-6 flex gap-6">
 			<div
 				class="h-[140px] w-[140px] shrink-0 overflow-hidden rounded-2xl border border-outline bg-surface-input shadow-lg"
