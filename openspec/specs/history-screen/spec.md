@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Vue SPA screen showing every episode from every channel in chronological order (newest first), so users can find and replay episodes without remembering which channel they belong to. Reuses the existing episode card and player in a compact, full-width single-column layout, identifies the owning channel on each card, and supports live word-based search filtering.
+
+## Requirements
 
 ### Requirement: History screen lists all episodes newest first
 
@@ -24,9 +28,13 @@ Every episode card on the history screen SHALL display the name of the channel t
 - **WHEN** the history screen renders an episode belonging to channel `Linux y Tapas`
 - **THEN** the card shows `Linux y Tapas` as the channel name alongside the episode's own title
 
-### Requirement: History cards use a compact, wider layout
+### Requirement: History cards use a compact, wide single-column layout
 
-Episode cards on the history screen SHALL use a compact layout that reduces vertical height while making use of the wider available horizontal space, while SHALL retaining the same playback controls (play/pause, seek, stop, speed, volume) as the channel episodes list.
+Episode cards on the history screen SHALL be arranged in a single column that spans the full available width, with each card in a compact layout that reduces vertical height while making use of the wider available horizontal space. The cards SHALL NOT be placed in a horizontal grid of multiple columns. The cards SHALL retain the same playback controls (play/pause, seek, stop, speed, volume) as the channel episodes list.
+
+#### Scenario: Cards are laid out in a single column
+- **WHEN** the history screen renders more than one episode
+- **THEN** all cards stack vertically in a single full-width column with no horizontal grid
 
 #### Scenario: Card is compact vertically
 - **WHEN** the history screen renders an episode card

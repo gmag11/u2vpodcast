@@ -44,9 +44,9 @@ Extend `EpisodeCard.vue` with an optional `compact?: boolean` prop rather than c
 
 ### Decision 3: `history` route and `HistoryView.vue`
 
-Add route `{ path: '/history', name: 'history', component: HistoryView }` to `router/index.ts`; it is protected automatically because it has no `public` meta. `HistoryView.vue` fetches `api.getAllEpisodes()` on mount, applies the auth-session guard pattern used by `EpisodesView.vue`, and renders cards inside a wider container using a responsive two-column grid on large screens (single column on small) so the list uses width instead of height.
+Add route `{ path: '/history', name: 'history', component: HistoryView }` to `router/index.ts`; it is protected automatically because it has no `public` meta. `HistoryView.vue` fetches `api.getAllEpisodes()` on mount, applies the auth-session guard pattern used by `EpisodesView.vue`, and renders cards inside a wider container in a single full-width column, so each entry uses the available width while staying compact vertically.
 
-**Why**: matches the "more compact vertically, wider" requirement; a two-column grid shortens the scroll while each card remains compact.
+**Why**: matches the "more compact vertically, wider" requirement; a single wide column keeps entries legible at any screen size and avoids the cramped half-width cards a two-column grid would produce. The compact card shrinks vertical height while the wider container and full-width rows make each entry easy to scan.
 
 ### Decision 4: Channel name sourced from `channel_title` on the episode
 

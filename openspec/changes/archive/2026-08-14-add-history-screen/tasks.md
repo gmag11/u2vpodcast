@@ -20,7 +20,7 @@
 
 - [x] 4.1 Create `frontend/src/views/HistoryView.vue` that loads `api.getAllEpisodes()` on mount, applies the same session-guard pattern as `EpisodesView.vue`, and shows an empty-state message when there are no episodes.
 - [x] 4.2 In `HistoryView.vue`, add `SearchInput` bound to `searchQuery` and derive `filteredEpisodes` with `filterBySearchWords(episodes, searchQuery, (e) => [e.title, e.description, e.yt_id].join(' '))`, plus a "no results" message matching `EpisodesView.vue`.
-- [x] 4.3 Render the episodes in a wider container with a responsive grid (single column on small screens, two columns on large) using `EpisodeCard` with `:compact="true"`.
+- [x] 4.3 Render the episodes in a wider container as a single column of wide entries using `EpisodeCard` with `:compact="true"`.
 - [x] 4.4 Add the `{ path: '/history', name: 'history', component: () => import('@/views/HistoryView.vue') }` route to `frontend/src/router/index.ts`.
 - [x] 4.5 Add a "History" navigation link to `frontend/src/components/AppHeader.vue` pointing at the `history` route.
 
@@ -29,5 +29,5 @@
 - [x] 5.1 Run the frontend typecheck/build (e.g. `pnpm run build` in `frontend/`) and confirm no type or compilation errors.
 - [x] 5.2 Log in and open the history screen: confirm episodes from all channels appear newest first, each card shows its channel name, and compact cards play audio with seek/stop/speed/volume working.
 - [x] 5.3 Confirm the history search filters live per keystroke (case-insensitive, multi-word AND, `yt_id` match), clearing restores the full list, and a no-match query shows the no-results message.
-- [ ] 5.4 Confirm the history route redirects to `/login` when unauthenticated and is reachable via the header link when authenticated.
-- [ ] 5.5 Confirm the existing channel episodes page still renders and plays correctly after the `Episode`/`EpisodeCard` changes.
+- [x] 5.4 Confirm the history route redirects to `/login` when unauthenticated and is reachable via the header link when authenticated.
+- [x] 5.5 Confirm the existing channel episodes page still renders and plays correctly after the `Episode`/`EpisodeCard` changes.
