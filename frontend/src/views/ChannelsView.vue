@@ -176,7 +176,7 @@
 		</template>
 		<template #actions>
 			<AppButton type="button" @click="openNewDialog">
-				Create New
+				<span class="hidden sm:inline">Create New</span>
 				<PhPlus class="h-4 w-4" weight="regular" />
 			</AppButton>
 		</template>
