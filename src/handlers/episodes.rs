@@ -50,3 +50,18 @@ async fn read_with_pagination(
         }
     }
 }
+
+#[get("/episodes/")]
+async fn read_all(
+    data: Data<AppState>,
+    session: Session,
+) -> impl Responder{
+    info!("read_all");
+    match Episode::read_all_with_channels(&data.pool).await{
+        Ok(episodes) => Ok(CResponse::ok(session, episodes)),
+        Err(e) => {
+            error!("{e}");
+            Err(e)
+        }
+    }
+}

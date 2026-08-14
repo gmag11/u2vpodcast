@@ -57,6 +57,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .service(channels::read)
                                     .service(channels::read_with_pagination)
                                     .service(episodes::read_with_pagination)
+                                    .service(episodes::read_all)
                                     .service(channels::create)
                                     .service(channels::update_episodes)
                                     .service(channels::refresh_image)
