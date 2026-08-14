@@ -35,8 +35,8 @@
 		<div class="flex flex-col gap-5 sm:flex-row sm:items-start">
 			<div class="flex items-start gap-3 sm:flex-col sm:gap-3">
 				<div
-					class="shrink-0 overflow-hidden rounded-lg bg-surface-input"
-					:class="compact ? 'h-20 w-28' : 'h-20 w-28 sm:h-28 sm:w-48'"
+					class="min-w-0 flex-1 overflow-hidden rounded-lg bg-surface-input sm:shrink-0 sm:flex-none"
+					:class="compact ? 'h-20 sm:w-28' : 'h-20 sm:h-28 sm:w-48'"
 				>
 					<img
 						v-if="props.episode.image"
@@ -46,7 +46,7 @@
 					/>
 				</div>
 
-				<div class="flex flex-col items-center gap-1.5 sm:hidden">
+				<div class="flex shrink-0 items-center gap-1.5 sm:hidden">
 					<button
 						type="button"
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
