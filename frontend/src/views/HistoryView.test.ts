@@ -10,7 +10,8 @@ const router = createRouter({
 	history: createMemoryHistory(),
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
-		{ path: '/history', name: 'history', component: HistoryView }
+		{ path: '/history', name: 'history', component: HistoryView },
+		{ path: '/:channelId(\\d+)', name: 'episodes', component: { template: '<div />' } }
 	]
 });
 
@@ -69,6 +70,7 @@ describe('HistoryView', () => {
 		expect(wrapper.text()).toContain('Linux y Tapas');
 		expect(wrapper.text()).toContain('Description');
 		expect(wrapper.find('a[href="/history"]').exists()).toBe(true);
+		expect(wrapper.find('a[href="/1"]').text()).toContain('Linux y Tapas');
 	});
 
 	it('shows an empty state when there are no episodes', async () => {
