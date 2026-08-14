@@ -1,9 +1,10 @@
 <script setup lang="ts">
 	import { PhMoon, PhSignOut, PhSun, PhUserCircle } from '@phosphor-icons/vue';
-	import { useRouter } from 'vue-router';
+	import { useRoute, useRouter } from 'vue-router';
 	import { useAuthStore } from '@/stores/auth';
 	import { useThemeStore } from '@/stores/theme';
 
+	const route = useRoute();
 	const router = useRouter();
 	const auth = useAuthStore();
 	const theme = useThemeStore();
@@ -19,15 +20,42 @@
 		class="fixed top-0 z-50 w-full border-b border-outline bg-surface/70 shadow-[0_4px_20px_var(--glow)] backdrop-blur-xl"
 	>
 		<div class="mx-auto flex h-20 max-w-[1440px] items-center justify-between px-5 md:px-16">
-			<div class="flex items-center gap-3">
-				<span
-					class="flex h-9 w-9 items-center justify-center rounded-full bg-primary-500/10 text-xl text-primary-500"
-				>
-					<slot name="brand-icon" />
-				</span>
-				<span class="font-display text-2xl font-semibold tracking-tight text-text">
-					U2V<span class="text-primary-500">Podcast</span>
-				</span>
+			<div class="flex items-center gap-6">
+				<div class="flex items-center gap-3">
+					<span
+						class="flex h-9 w-9 items-center justify-center rounded-full bg-primary-500/10 text-xl text-primary-500"
+					>
+						<slot name="brand-icon" />
+					</span>
+					<span class="font-display text-2xl font-semibold tracking-tight text-text">
+						U2V<span class="text-primary-500">Podcast</span>
+					</span>
+				</div>
+
+				<div class="flex items-center gap-1">
+					<RouterLink
+						to="/"
+						class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+						:class="
+							route.name === 'channels'
+								? 'bg-accent-600 text-white'
+								: 'text-text-muted hover:text-text'
+						"
+					>
+						Channels
+					</RouterLink>
+					<RouterLink
+						to="/history"
+						class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+						:class="
+							route.name === 'history'
+								? 'bg-accent-600 text-white'
+								: 'text-text-muted hover:text-text'
+						"
+					>
+						History
+					</RouterLink>
+				</div>
 			</div>
 
 			<div v-if="$slots.search" class="mx-8 hidden max-w-md flex-1 md:flex">

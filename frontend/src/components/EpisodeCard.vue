@@ -12,9 +12,15 @@
 	import { usePlayerStore } from '@/stores/player';
 	import type { Episode } from '@/types';
 
-	const props = defineProps<{
-		episode: Episode;
-	}>();
+	const props = withDefaults(
+		defineProps<{
+			episode: Episode;
+			compact?: boolean;
+		}>(),
+		{
+			compact: false
+		}
+	);
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
@@ -41,11 +47,14 @@
 
 <template>
 	<article
-		class="flex flex-col gap-4 rounded-xl border border-outline bg-surface-card p-5 shadow-card"
-		:class="isCurrent ? 'border-accent-500/60' : ''"
+		class="flex flex-col rounded-xl border border-outline bg-surface-card shadow-card"
+		:class="[isCurrent ? 'border-accent-500/60' : '', compact ? 'gap-3 p-4' : 'gap-4 p-5']"
 	>
 		<div class="flex flex-col gap-5 sm:flex-row sm:items-start">
-			<div class="h-28 w-full shrink-0 overflow-hidden rounded-lg bg-surface-input sm:w-48">
+			<div
+				class="w-full shrink-0 overflow-hidden rounded-lg bg-surface-input"
+				:class="compact ? 'h-20 sm:w-28' : 'h-28 sm:w-48'"
+			>
 				<img
 					v-if="props.episode.image"
 					:src="props.episode.image"
@@ -54,6 +63,12 @@
 				/>
 			</div>
 			<div class="flex flex-col gap-1.5">
+				<p
+					v-if="compact && props.episode.channel_title"
+					class="text-xs font-medium uppercase tracking-wide text-accent-500"
+				>
+					{{ props.episode.channel_title }}
+				</p>
 				<h2
 					class="text-base font-bold uppercase leading-tight tracking-wide text-text line-clamp-2"
 				>
@@ -62,7 +77,9 @@
 				<time class="text-sm text-text-muted">
 					{{ formatDate(props.episode.published_at) }}
 				</time>
-				<p class="mt-1 line-clamp-2 text-sm text-text-muted">{{ props.episode.description }}</p>
+				<p v-if="!compact" class="mt-1 line-clamp-2 text-sm text-text-muted">
+					{{ props.episode.description }}
+				</p>
 				<a
 					class="mt-1 inline-flex w-max items-center gap-1.5 text-sm text-accent-500 hover:underline"
 					:href="props.episode.webpage_url"
