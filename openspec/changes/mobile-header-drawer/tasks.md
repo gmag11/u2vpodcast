@@ -26,7 +26,7 @@
 
 - [x] 5.1 Add component tests (e.g. `frontend/src/components/AppHeader.test.ts`) covering: drawer opens and closes, selecting a nav link closes the drawer, mobile-only elements are present/absent by breakpoint class, and the search toggle expands the mobile search row.
 - [x] 5.2 Run `pnpm build`, `pnpm test`, and `pnpm lint`; confirm no type, test, or style errors.
-- [x] 5.3 Manually verify mobile (<`md`): icon-only brand and actions, no inline nav, hamburger opens the drawer with user/nav/Logout, backdrop and Escape close it, theme toggle works, search toggle expands/collapses the Channels search.
+- [x] 5.3 Manually verify mobile (<`md`): icon-only brand and actions, no inline nav, hamburger opens the drawer with user/nav/Logout, backdrop and Escape close it, theme toggle works, search input renders above the channel cards and filters live.
 - [x] 5.4 Manually verify desktop (`md+`): header identical to before, inline nav, inline search, text+icon actions, theme and logout unchanged.
 
 ## 6. Overflow fixes found during mobile QA
@@ -34,3 +34,9 @@
 - [x] 6.1 Add `overflow-x-clip` to the Channels page `<main>` so the invisible `ChannelCard` tooltips (absolute, `nowrap`) no longer widen the scrollable area and no longer cause a horizontal scrollbar on mobile (verified with headless Chrome: overflow 0 at 320-700px).
 - [x] 6.2 Make the header fit narrow desktop widths: wordmark `hidden lg:inline`, search margins `mx-4 lg:mx-8`, right-group gap `gap-4 lg:gap-6` (verified with headless Chrome: no overflow and no header clipping from 768px up).
 - [x] 6.3 Run `pnpm build`, `pnpm test`, and `pnpm lint` after the overflow fixes; all pass.
+
+## 7. Search moved into page content
+
+- [x] 7.1 In `ChannelsView.vue`, remove the `#search` slot from `AppHeader` and render `SearchInput` above the channel cards in a `max-w-3xl` container (matching the episodes list pattern), on mobile and desktop.
+- [x] 7.2 In `AppHeader.vue`, remove the header search slot, the mobile search toggle, the expandable search row, and the `searchOpen` state (no view provides the `#search` slot anymore).
+- [x] 7.3 Update `AppHeader.test.ts` to drop the search-toggle test; run `pnpm build`, `pnpm test`, and `pnpm lint`; all pass.

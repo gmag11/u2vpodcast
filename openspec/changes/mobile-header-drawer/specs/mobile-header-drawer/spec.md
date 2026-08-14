@@ -60,18 +60,10 @@ The theme toggle SHALL remain visible in the header bar on mobile-width screens,
 - **WHEN** a user on a mobile-width screen views a header-rendering page
 - **THEN** the theme toggle is visible in the header bar and toggles light/dark as on desktop
 
-### Requirement: Mobile search expands from a toggle
+### Requirement: Search lives in page content, not the header
 
-On views that provide a header search slot (the Channels page), the header SHALL render a search toggle on screens narrower than `md`. Tapping it SHALL expand a full-width search input row directly below the header bar; tapping it again (or closing the row) SHALL collapse it. On `md+` screens the search input SHALL render inline in the header bar as today.
+The header SHALL NOT render a search input or search toggle. Search inputs SHALL be placed in the page content above the list they filter, matching the episodes list pattern. On the Channels page, a search input SHALL render above the channel cards at all widths (mobile and desktop), and typing in it SHALL filter the channel list live.
 
-#### Scenario: Mobile search expands below the header
-- **WHEN** a user on a mobile-width screen taps the search toggle on the Channels page
-- **THEN** a full-width search input appears below the header and filters the channel list as the user types
-
-#### Scenario: Mobile search collapses again
-- **WHEN** a user taps the search toggle while the mobile search row is expanded
-- **THEN** the search row collapses
-
-#### Scenario: Desktop search stays inline
-- **WHEN** a user views the Channels page on an `md+` screen
-- **THEN** the search input renders inline in the header bar, as today
+#### Scenario: Channels search sits above the cards
+- **WHEN** an authenticated user opens the Channels page on mobile or desktop
+- **THEN** a search input renders above the channel cards and filters the list as the user types

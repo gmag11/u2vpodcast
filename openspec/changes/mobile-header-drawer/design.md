@@ -22,7 +22,7 @@
 
 ### Decision 1: Single responsive component, not a separate mobile header
 
-Keep all logic in `AppHeader.vue` and switch presentation with Tailwind breakpoints. The wordmark gets `hidden lg:inline` (hidden below `lg`, not `md`, so the header fits narrow desktop widths between 768px and 1024px where the full bar would otherwise overflow); the inline nav gets `hidden md:flex`; the hamburger and mobile search toggle get `md:hidden`. A dedicated mobile header component would duplicate slots, auth/theme wiring, and logout handling.
+Keep all logic in `AppHeader.vue` and switch presentation with Tailwind breakpoints. The wordmark gets `hidden lg:inline` (hidden below `lg`, not `md`, so the header fits narrow desktop widths between 768px and 1024px where the full bar would otherwise overflow); the inline nav gets `hidden md:flex`; the hamburger gets `md:hidden`. A dedicated mobile header component would duplicate slots, auth/theme wiring, and logout handling.
 
 **Why**: the slots (`#brand-icon`, `#search`, `#actions`) are already provided by the views; a second component would force every view to branch on breakpoint. Responsive classes keep one source of truth.
 
@@ -38,11 +38,11 @@ Add `drawerOpen` ref. The drawer is a fixed panel (`right-0 top-0 h-full w-72`) 
 
 **Why**: the `#actions` slot content is owned by the views; the header cannot restyle slot content. A label wrapper is the smallest change and keeps `AppButton` generic.
 
-### Decision 4: Mobile search via a toggle + expandable row in AppHeader
+### Decision 4: Search lives in page content
 
-When `$slots.search` is present, AppHeader renders a magnifier toggle (`md:hidden`) and a mobile search row below the header (absolute, full width, `md:hidden`) shown when `searchOpen`. The same `<slot name="search" />` is also rendered inline for `md+` as today. Both instances bind to the same view state via the existing `v-model` contract.
+The header does not render any search. `ChannelsView` moves its search input out of the header slot and into the page content above the channel cards, mirroring the episodes list pattern (`SearchInput` in a `max-w-3xl` container above the list). This removes the header `#search` slot entirely from `AppHeader`, along with the mobile search toggle and expandable row they drove.
 
-**Why**: the slot content is a single `SearchInput` bound to the view's `searchQuery`; rendering it in two places is safe because typing in one emits `update:modelValue` to the shared ref and the other reflects the same value. This fixes the current gap where mobile Channels has no search.
+**Why**: a search field belongs next to the list it filters; placing it in content makes it reachable on mobile and desktop with no toggle, and the header slot/toggle became redundant once Channels stopped using it. This also resolves the earlier gap where mobile had no channel search.
 
 ### Decision 5: Layering
 
@@ -58,23 +58,21 @@ The invisible hover tooltips in `ChannelCard` (`absolute whitespace-nowrap`, `op
 
 ### Decision 7: Header fits narrow desktop widths
 
-With every item visible (`md`+), the header's min-content width is ~945px, so between 768px and 945px the fixed header overflows its box and right-side items are clipped. The wordmark moves to `lg:inline`, search margins shrink to `mx-4` (back to `mx-8` at `lg`), and the right-group gap becomes `gap-4` until `lg`. Measured with headless Chrome, this reduces the header min-content so it fits from 768px up with no overflow.
+With every item visible (`md`+), the header's min-content width is ~945px, so between 768px and 945px the fixed header overflows its box and right-side items are clipped. The wordmark moves to `lg:inline`, and the right-group gap becomes `gap-4` until `lg`. Measured with headless Chrome, this reduces the header min-content so it fits from 768px up with no overflow.
 
 **Why**: 768px (tablet portrait / small laptop) is a real device width; hiding just the wordmark and tightening spacing keeps all functionality visible without pushing nav or session controls into the drawer at desktop sizes.
 
 ## Risks / Trade-offs
 
-- **[Risk] Two `#search` instances mounted** (inline desktop + mobile row). → Mitigation: they share one reactive `searchQuery`; behavior is identical client-side filtering. Verify visually that the mobile row is hidden on `md+` and the inline one hidden below `md`, so only one is visible at a time.
-- **[Risk] Escape listener leaks**. → Mitigation: add `keydown` listener on mount and remove on unmount; also reset `drawerOpen`/`searchOpen` on route change.
+- **[Risk] Escape listener leaks**. → Mitigation: add `keydown` listener on mount and remove on unmount; also reset `drawerOpen` on route change.
 - **[Risk] z-index collisions with the persistent player or dialogs**. → Mitigation: explicit `z-[70]`/`z-[60]`; verify against `PersistentPlayer` and `AppDialog`.
 - **[Risk] Icon-only actions lose their text label on mobile**. → Mitigation: the icons (`＋`, `⟳`) are recognizable, and tooltips/aria-labels are kept for accessibility.
-- **[Trade-off] Mobile search is a toggle, not always-visible.** → Matches the "expand on demand" pattern; the bar stays minimal.
 
 ## Migration Plan
 
-1. `AppHeader.vue`: responsive brand/nav, hamburger + drawer + backdrop, mobile search toggle + row, Escape/route-close handling.
-2. `ChannelsView.vue` / `EpisodesView.vue`: wrap action labels in `hidden sm:inline`.
-3. Component tests: drawer opens/closes, nav link closes drawer, mobile-only elements hidden on `md`, search toggle expands.
+1. `AppHeader.vue`: responsive brand/nav, hamburger + drawer + backdrop, Escape/route-close handling; no search slot.
+2. `ChannelsView.vue` / `EpisodesView.vue`: wrap action labels in `hidden sm:inline`; move the Channels search input into page content above the cards.
+3. Component tests: drawer opens/closes, nav link closes drawer, mobile-only elements hidden on `md`.
 4. `pnpm build`, `pnpm test`, `pnpm lint`; manually verify mobile + desktop layouts.
 
 **Rollback**: revert the frontend changes; no DB/API/config changes.
