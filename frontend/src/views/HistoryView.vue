@@ -89,7 +89,7 @@
 			</p>
 		</div>
 
-		<div v-else class="grid w-full max-w-6xl grid-cols-1 gap-5 lg:grid-cols-2">
+		<div v-else class="flex w-full max-w-6xl flex-col gap-5">
 			<EpisodeCard
 				v-for="episode in filteredEpisodes"
 				:key="episode.id"

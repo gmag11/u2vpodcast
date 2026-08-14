@@ -76,6 +76,17 @@ describe('HistoryView', () => {
 		expect(wrapper.text()).toContain('No episodes yet');
 	});
 
+	it('lays out cards in a single wide column, not a grid', async () => {
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(
+			okResult([episode(1, 'Episodio 10'), episode(2, 'Episodio 42')]) as never
+		);
+		const wrapper = await mountView();
+		const mainHtml = wrapper.find('main').html();
+		expect(mainHtml).toContain('flex-col');
+		expect(mainHtml).not.toContain('grid-cols');
+		expect(mainHtml).not.toContain('lg:grid');
+	});
+
 	it('filters cards live as the user types', async () => {
 		vi.mocked(api.getAllEpisodes).mockResolvedValue(
 			okResult([episode(2, 'Episodio 42'), episode(1, 'Episodio 10')]) as never
