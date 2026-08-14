@@ -185,7 +185,7 @@
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
 		</div>
 
-		<div class="mb-10 w-full max-w-3xl">
+		<div class="mx-auto mb-10 w-full max-w-3xl">
 			<SearchInput v-model="searchQuery" placeholder="Search channels…" />
 		</div>
 
