@@ -16,16 +16,14 @@ const router = createRouter({
 
 const user: User = { id: 1, name: 'admin', role: 'Admin', active: true };
 
-async function mountHeader(options: { search?: boolean } = {}) {
+async function mountHeader() {
 	const pinia = createPinia();
 	useAuthStore(pinia).setUser(user);
 	await router.push('/');
 	await router.isReady();
 	return mount(AppHeader, {
 		global: { plugins: [router, pinia] },
-		slots: options.search
-			? { 'brand-icon': '<span class="brand-icon" />', search: '<input placeholder="Search" />' }
-			: { 'brand-icon': '<span class="brand-icon" />' }
+		slots: { 'brand-icon': '<span class="brand-icon" />' }
 	});
 }
 
@@ -78,15 +76,5 @@ describe('AppHeader', () => {
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 		await flushPromises();
 		expect(wrapper.find('aside[aria-label="Navigation"]').exists()).toBe(false);
-	});
-
-	it('expands a mobile search row from the search toggle', async () => {
-		const wrapper = await mountHeader({ search: true });
-		expect(wrapper.findAll('input[placeholder="Search"]')).toHaveLength(1);
-		await wrapper.find('button[aria-label="Toggle search"]').trigger('click');
-		expect(wrapper.findAll('input[placeholder="Search"]')).toHaveLength(2);
-		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-		await flushPromises();
-		expect(wrapper.findAll('input[placeholder="Search"]')).toHaveLength(1);
 	});
 });

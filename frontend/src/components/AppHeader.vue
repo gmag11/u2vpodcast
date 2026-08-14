@@ -1,13 +1,6 @@
 <script setup lang="ts">
 	import { onMounted, onUnmounted, ref, watch } from 'vue';
-	import {
-		PhList,
-		PhMagnifyingGlass,
-		PhMoon,
-		PhSignOut,
-		PhSun,
-		PhUserCircle
-	} from '@phosphor-icons/vue';
+	import { PhList, PhMoon, PhSignOut, PhSun, PhUserCircle } from '@phosphor-icons/vue';
 	import { useRoute, useRouter } from 'vue-router';
 	import { useAuthStore } from '@/stores/auth';
 	import { useThemeStore } from '@/stores/theme';
@@ -18,11 +11,9 @@
 	const theme = useThemeStore();
 
 	const drawerOpen = ref(false);
-	const searchOpen = ref(false);
 
 	function closeOverlays() {
 		drawerOpen.value = false;
-		searchOpen.value = false;
 	}
 
 	function onKeydown(event: KeyboardEvent) {
@@ -84,22 +75,8 @@
 				</div>
 			</div>
 
-			<div v-if="$slots.search" class="mx-4 hidden max-w-md flex-1 md:flex lg:mx-8">
-				<slot name="search" />
-			</div>
-
 			<div class="flex items-center gap-4 lg:gap-6">
 				<slot name="actions" />
-				<button
-					v-if="$slots.search"
-					type="button"
-					class="rounded-lg p-2 text-text-muted transition-colors hover:text-text md:hidden"
-					aria-label="Toggle search"
-					:aria-expanded="searchOpen"
-					@click="searchOpen = !searchOpen"
-				>
-					<PhMagnifyingGlass class="h-5 w-5" weight="regular" />
-				</button>
 				<button
 					type="button"
 					aria-label="Toggle theme"
@@ -130,13 +107,6 @@
 					</button>
 				</div>
 			</div>
-		</div>
-
-		<div
-			v-if="$slots.search && searchOpen"
-			class="border-t border-outline bg-surface/70 px-5 py-3 backdrop-blur-xl md:hidden"
-		>
-			<slot name="search" />
 		</div>
 	</nav>
 
