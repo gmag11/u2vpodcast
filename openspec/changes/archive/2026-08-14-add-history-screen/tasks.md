@@ -14,7 +14,7 @@
 ## 3. Frontend: compact episode card
 
 - [x] 3.1 Add an optional `compact?: boolean` prop to `frontend/src/components/EpisodeCard.vue` (default `false`).
-- [x] 3.2 In compact mode, reduce vertical padding, shrink the thumbnail, drop the description line, and render `episode.channel_title` as a small channel label above the title; keep all player controls unchanged. Verify the non-compact card (channel episodes page) renders identically to before.
+- [x] 3.2 In compact mode, reduce vertical padding, shrink the thumbnail, keep the description line (clamped to two lines), and render `episode.channel_title` as a small channel label above the title; keep all player controls unchanged. Verify the non-compact card (channel episodes page) renders identically to before.
 
 ## 4. Frontend: history view and route
 

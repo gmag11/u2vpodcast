@@ -36,9 +36,9 @@ ORDER BY e.published_at DESC;
 
 ### Decision 2: Reuse `EpisodeCard.vue` with a `compact` prop
 
-Extend `EpisodeCard.vue` with an optional `compact?: boolean` prop rather than creating a separate card component. When `compact` is true: reduce vertical padding, shrink the thumbnail, drop the description line, and render the channel name (from `episode.channel_title`) as a small label above the title. The player control wiring (play/pause/seek/stop/speed/volume) is unchanged.
+Extend `EpisodeCard.vue` with an optional `compact?: boolean` prop rather than creating a separate card component. When `compact` is true: reduce vertical padding, shrink the thumbnail, keep the description line (clamped to two lines, same as the non-compact card), and render the channel name (from `episode.channel_title`) as a small label above the title. The player control wiring (play/pause/seek/stop/speed/volume) is unchanged.
 
-**Why**: the card already owns all player logic via the `player` store; a new component would duplicate that wiring. A prop keeps one source of truth and lets the history list diverge only in presentation.
+**Why**: the card already owns all player logic via the `player` store; a new component would duplicate that wiring. A prop keeps one source of truth and lets the history list diverge only in presentation. The description (episode summary) is kept in compact mode per user feedback after archive.
 
 **Alternative considered**: separate `HistoryEpisodeCard.vue`. Rejected: duplicates player interaction logic and risks the two cards drifting.
 
