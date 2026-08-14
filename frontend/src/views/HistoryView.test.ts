@@ -67,6 +67,7 @@ describe('HistoryView', () => {
 		expect(wrapper.text()).toContain('Episodio 42');
 		expect(wrapper.text()).toContain('Episodio 10');
 		expect(wrapper.text()).toContain('Linux y Tapas');
+		expect(wrapper.text()).toContain('Description');
 		expect(wrapper.find('a[href="/history"]').exists()).toBe(true);
 	});
 

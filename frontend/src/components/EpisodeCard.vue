@@ -77,7 +77,7 @@
 				<time class="text-sm text-text-muted">
 					{{ formatDate(props.episode.published_at) }}
 				</time>
-				<p v-if="!compact" class="mt-1 line-clamp-2 text-sm text-text-muted">
+				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>
 				<a
