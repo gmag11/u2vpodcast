@@ -94,12 +94,13 @@
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<p
+				<RouterLink
 					v-if="compact && props.episode.channel_title"
-					class="text-xs font-medium uppercase tracking-wide text-accent-500"
+					:to="{ name: 'episodes', params: { channelId: String(props.episode.channel_id) } }"
+					class="w-max text-xs font-medium uppercase tracking-wide text-accent-500 hover:underline"
 				>
 					{{ props.episode.channel_title }}
-				</p>
+				</RouterLink>
 				<h2
 					class="text-base font-bold uppercase leading-tight tracking-wide text-text line-clamp-2"
 				>
