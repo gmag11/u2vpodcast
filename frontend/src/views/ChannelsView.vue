@@ -29,8 +29,17 @@
 	const pendingDelete = ref<Channel | null>(null);
 	const refreshingSlug = ref<string | null>(null);
 
+	const sortedChannels = computed(() =>
+		[...channels.value].sort((a, b) => {
+			if (!a.last_date && !b.last_date) return 0;
+			if (!a.last_date) return 1;
+			if (!b.last_date) return -1;
+			return new Date(b.last_date).getTime() - new Date(a.last_date).getTime();
+		})
+	);
+
 	const filteredChannels = computed(() =>
-		filterBySearchWords(channels.value, searchQuery.value, (c) =>
+		filterBySearchWords(sortedChannels.value, searchQuery.value, (c) =>
 			[c.title, c.description, c.url, c.slug].join(' ')
 		)
 	);

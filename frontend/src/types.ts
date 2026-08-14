@@ -17,6 +17,7 @@ export interface Channel {
 	max: number;
 	created_at: Date;
 	updated_at: Date;
+	last_date: string | null;
 }
 
 export interface Episode {

@@ -61,7 +61,8 @@
 			first: first.value ? new Date(first.value) : new Date(),
 			max: Number(max.value) || 5,
 			created_at: props.channel?.created_at ?? new Date(),
-			updated_at: new Date()
+			updated_at: new Date(),
+			last_date: props.channel?.last_date ?? null
 		};
 		emit('save', channel);
 	}
