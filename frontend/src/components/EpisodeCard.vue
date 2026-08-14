@@ -35,8 +35,8 @@
 		<div class="flex flex-col gap-5 sm:flex-row sm:items-start">
 			<div class="flex items-start gap-3 sm:flex-col sm:gap-3">
 				<div
-					class="aspect-video min-w-0 flex-1 overflow-hidden rounded-lg bg-surface-input sm:aspect-auto sm:shrink-0 sm:flex-none"
-					:class="compact ? 'sm:h-20 sm:w-28' : 'sm:h-28 sm:w-48'"
+					class="shrink-0 overflow-hidden rounded-lg bg-surface-input"
+					:class="compact ? 'h-20 w-28' : 'h-28 w-48'"
 				>
 					<img
 						v-if="props.episode.image"
