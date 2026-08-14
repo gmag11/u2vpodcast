@@ -23,6 +23,7 @@ export interface Episode {
 	id: number;
 	channel_id: number;
 	channel_slug: string;
+	channel_title: string;
 	title: string;
 	description: string;
 	yt_id: string;

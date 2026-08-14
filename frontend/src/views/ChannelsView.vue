@@ -171,21 +171,22 @@
 				></path>
 			</svg>
 		</template>
-		<template #search>
-			<SearchInput v-model="searchQuery" placeholder="Search" />
-		</template>
 		<template #actions>
 			<AppButton type="button" @click="openNewDialog">
-				Create New
+				<span class="hidden sm:inline">Create New</span>
 				<PhPlus class="h-4 w-4" weight="regular" />
 			</AppButton>
 		</template>
 	</AppHeader>
 
-	<main class="mx-auto max-w-[1440px] px-5 pb-28 pt-20 md:px-16">
+	<main class="mx-auto max-w-[1440px] overflow-x-clip px-5 pb-28 pt-20 md:px-16">
 		<div class="mb-12 pt-8">
 			<h1 class="mb-2 font-display text-4xl font-semibold text-text">Dashboard</h1>
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
+		</div>
+
+		<div class="mx-auto mb-10 w-full max-w-3xl">
+			<SearchInput v-model="searchQuery" placeholder="Search channels…" />
 		</div>
 
 		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>

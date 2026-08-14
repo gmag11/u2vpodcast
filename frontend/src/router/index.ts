@@ -16,6 +16,11 @@ const router = createRouter({
 			component: () => import('@/views/ChannelsView.vue')
 		},
 		{
+			path: '/history',
+			name: 'history',
+			component: () => import('@/views/HistoryView.vue')
+		},
+		{
 			path: '/:channelId(\\d+)',
 			name: 'episodes',
 			component: () => import('@/views/EpisodesView.vue')

@@ -116,7 +116,7 @@
 					weight="regular"
 					:class="refreshing ? 'animate-spin' : ''"
 				/>
-				Refresh
+				<span class="hidden sm:inline">Refresh</span>
 			</AppButton>
 		</template>
 	</AppHeader>
