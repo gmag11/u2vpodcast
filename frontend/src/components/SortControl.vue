@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { PhArrowDown, PhArrowUp } from '@phosphor-icons/vue';
+	import { PhArrowDown, PhArrowUp, PhCalendarBlank } from '@phosphor-icons/vue';
 	import type { ChannelSortKey, SortDirection } from '@/lib/utils/channel.sort';
 
 	defineProps<{
@@ -12,9 +12,9 @@
 		(e: 'update:direction', value: SortDirection): void;
 	}>();
 
-	const keys: Array<{ value: ChannelSortKey; label: string }> = [
-		{ value: 'last_date', label: 'Last episode' },
-		{ value: 'title', label: 'Title' },
+	const keys: Array<{ value: ChannelSortKey; label: string; icon?: boolean }> = [
+		{ value: 'last_date', label: 'Last episode', icon: true },
+		{ value: 'title', label: 'A-Z' },
 		{ value: 'id', label: 'Id' }
 	];
 </script>
@@ -29,13 +29,15 @@
 				:key="key.value"
 				type="button"
 				:aria-pressed="modelValue === key.value"
+				:aria-label="key.label"
 				class="rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500"
 				:class="
 					modelValue === key.value ? 'bg-accent-500 text-white' : 'text-text-muted hover:text-text'
 				"
 				@click="emit('update:modelValue', key.value)"
 			>
-				{{ key.label }}
+				<PhCalendarBlank v-if="key.icon" class="h-4 w-4" weight="regular" />
+				<span v-else>{{ key.label }}</span>
 			</button>
 		</div>
 
