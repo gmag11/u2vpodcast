@@ -90,10 +90,10 @@
 				</div>
 
 				<div class="hidden min-w-0 flex-col sm:flex">
-					<p class="truncate text-sm font-semibold text-text">
+					<p class="max-w-60 truncate text-sm font-semibold text-text">
 						{{ player.currentEpisode.title }}
 					</p>
-					<p class="truncate text-xs text-text-muted">
+					<p class="max-w-60 truncate text-xs text-text-muted">
 						{{ player.currentLabel }} / {{ player.durationLabel }}
 					</p>
 				</div>
