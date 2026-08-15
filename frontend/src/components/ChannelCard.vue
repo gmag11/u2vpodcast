@@ -1,9 +1,9 @@
 <script setup lang="ts">
 	import {
 		PhImage,
-		PhLinkSimple,
 		PhMicrophoneStage,
 		PhPencilSimple,
+		PhRss,
 		PhTrashSimple,
 		PhYoutubeLogo
 	} from '@phosphor-icons/vue';
@@ -89,11 +89,11 @@
 					:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
 					target="_blank"
 					rel="noopener noreferrer"
-					aria-label="Link"
+					aria-label="RSS feed"
 					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
 					@click.stop
 				>
-					<PhLinkSimple class="h-5 w-5" weight="regular" />
+					<PhRss class="h-5 w-5" weight="regular" />
 				</a>
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
