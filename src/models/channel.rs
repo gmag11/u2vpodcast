@@ -266,13 +266,19 @@ impl Channel{
 
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
         info!("delete");
+        let mut tx = pool.begin().await?;
+        query("DELETE FROM episodes WHERE channel_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         let sql = "DELETE FROM channels WHERE id = $1 RETURNING *";
-        query(sql)
+        let channel = query(sql)
             .bind(id)
             .map(Self::from_row)
-            .fetch_one(pool)
-            .await
-        .map_err(|e| e.into())
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(channel)
     }
 
     pub async fn migrate_slugs(pool: &SqlitePool, audio_folder: &str) -> Result<(), Error>{
