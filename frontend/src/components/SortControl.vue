@@ -20,7 +20,7 @@
 </script>
 
 <template>
-	<div role="group" aria-label="Sort channels" class="flex flex-wrap items-center gap-2">
+	<div role="group" aria-label="Sort channels" class="flex flex-nowrap items-center gap-2">
 		<div
 			class="inline-flex items-center rounded-full border border-outline bg-surface-input p-1 shadow-inner"
 		>
