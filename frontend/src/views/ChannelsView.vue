@@ -236,7 +236,7 @@
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
 		</div>
 
-		<div class="relative mb-10 flex w-full flex-col gap-3 md:block">
+		<div class="relative mb-10 flex w-full flex-col gap-3 lg:block">
 			<SearchInput
 				v-model="searchQuery"
 				placeholder="Search channels…"
@@ -245,7 +245,7 @@
 			<SortControl
 				:model-value="sortKey"
 				:direction="sortDirection"
-				class="self-end md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
+				class="self-end lg:absolute lg:right-0 lg:top-1/2 lg:-translate-y-1/2"
 				@update:model-value="setSortKey"
 				@update:direction="setSortDirection"
 			/>
