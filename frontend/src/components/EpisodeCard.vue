@@ -32,7 +32,7 @@
 		class="flex flex-col gap-4 rounded-xl border border-outline bg-surface-card shadow-card"
 		:class="[isCurrent ? 'border-accent-500/60' : '', compact ? 'p-4' : 'p-5']"
 	>
-		<div class="flex flex-col gap-5 sm:flex-row sm:items-start">
+		<div class="flex flex-1 flex-col gap-5 sm:flex-row sm:items-start">
 			<div class="flex items-start gap-3 sm:flex-col sm:gap-3">
 				<div
 					class="shrink-0 overflow-hidden rounded-lg bg-surface-input"
@@ -111,9 +111,6 @@
 				>
 					{{ props.episode.title }}
 				</h2>
-				<time class="text-sm text-text-muted">
-					{{ formatDate(props.episode.published_at) }}
-				</time>
 				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>
@@ -128,5 +125,9 @@
 				</a>
 			</div>
 		</div>
+
+		<time class="mt-auto self-end text-sm text-text-muted">
+			{{ formatDate(props.episode.published_at) }}
+		</time>
 	</article>
 </template>
