@@ -236,16 +236,16 @@
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
 		</div>
 
-		<div class="relative mb-10 flex w-full flex-col gap-3 lg:block">
+		<div class="mb-10 flex w-full flex-col gap-3 md:flex-row md:items-center md:justify-between">
 			<SearchInput
 				v-model="searchQuery"
 				placeholder="Search channels…"
-				class="mx-auto w-full max-w-3xl"
+				class="min-w-0 flex-1 md:max-w-3xl"
 			/>
 			<SortControl
 				:model-value="sortKey"
 				:direction="sortDirection"
-				class="self-end lg:absolute lg:right-0 lg:top-1/2 lg:-translate-y-1/2"
+				class="shrink-0 self-end"
 				@update:model-value="setSortKey"
 				@update:direction="setSortDirection"
 			/>
