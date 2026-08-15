@@ -6,6 +6,8 @@
 	import { useAuthStore } from '@/stores/auth';
 	import { useNotificationStore } from '@/stores/notification';
 	import { filterBySearchWords } from '@/lib/utils/list.filter';
+	import { DEFAULT_SORT_DIRECTION, DEFAULT_SORT_KEY, sortChannels } from '@/lib/utils/channel.sort';
+	import type { ChannelSortKey, SortDirection } from '@/lib/utils/channel.sort';
 	import type { Channel } from '@/types';
 	import AppButton from '@/components/AppButton.vue';
 	import AppHeader from '@/components/AppHeader.vue';
@@ -14,6 +16,7 @@
 	import ConfirmDialog from '@/components/ConfirmDialog.vue';
 	import Pagination from '@/components/Pagination.vue';
 	import SearchInput from '@/components/SearchInput.vue';
+	import SortControl from '@/components/SortControl.vue';
 
 	const route = useRoute();
 	const router = useRouter();
@@ -29,13 +32,49 @@
 	const pendingDelete = ref<Channel | null>(null);
 	const refreshingSlug = ref<string | null>(null);
 
+	const SORT_KEY = 'channel-sort';
+
+	const sortKey = ref<ChannelSortKey>(DEFAULT_SORT_KEY);
+	const sortDirection = ref<SortDirection>(DEFAULT_SORT_DIRECTION);
+
+	function resolveInitialSort(): { key: ChannelSortKey; direction: SortDirection } {
+		const saved = localStorage.getItem(SORT_KEY);
+		if (!saved) return { key: DEFAULT_SORT_KEY, direction: DEFAULT_SORT_DIRECTION };
+		try {
+			const parsed = JSON.parse(saved) as { key?: unknown; direction?: unknown };
+			const key =
+				parsed.key === 'title' || parsed.key === 'id' || parsed.key === 'last_date'
+					? parsed.key
+					: DEFAULT_SORT_KEY;
+			const direction =
+				parsed.direction === 'asc' || parsed.direction === 'desc'
+					? parsed.direction
+					: DEFAULT_SORT_DIRECTION;
+			return { key, direction };
+		} catch {
+			return { key: DEFAULT_SORT_KEY, direction: DEFAULT_SORT_DIRECTION };
+		}
+	}
+
+	function persistSort() {
+		localStorage.setItem(
+			SORT_KEY,
+			JSON.stringify({ key: sortKey.value, direction: sortDirection.value })
+		);
+	}
+
+	function setSortKey(key: ChannelSortKey) {
+		sortKey.value = key;
+		persistSort();
+	}
+
+	function setSortDirection(direction: SortDirection) {
+		sortDirection.value = direction;
+		persistSort();
+	}
+
 	const sortedChannels = computed(() =>
-		[...channels.value].sort((a, b) => {
-			if (!a.last_date && !b.last_date) return 0;
-			if (!a.last_date) return 1;
-			if (!b.last_date) return -1;
-			return new Date(b.last_date).getTime() - new Date(a.last_date).getTime();
-		})
+		sortChannels(channels.value, sortKey.value, sortDirection.value)
 	);
 
 	const filteredChannels = computed(() =>
@@ -157,6 +196,9 @@
 	}
 
 	onMounted(async () => {
+		const initial = resolveInitialSort();
+		sortKey.value = initial.key;
+		sortDirection.value = initial.direction;
 		await loadConfig();
 		await load();
 	});
@@ -194,8 +236,14 @@
 			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
 		</div>
 
-		<div class="mx-auto mb-10 w-full max-w-3xl">
+		<div class="mx-auto mb-10 flex w-full max-w-3xl flex-col gap-3">
 			<SearchInput v-model="searchQuery" placeholder="Search channels…" />
+			<SortControl
+				:model-value="sortKey"
+				:direction="sortDirection"
+				@update:model-value="setSortKey"
+				@update:direction="setSortDirection"
+			/>
 		</div>
 
 		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
