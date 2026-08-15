@@ -114,20 +114,21 @@
 				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>
-				<a
-					class="mt-1 inline-flex w-max items-center gap-1.5 text-sm text-accent-500 hover:underline"
-					:href="props.episode.webpage_url"
-					target="_blank"
-					rel="noopener noreferrer"
-				>
-					<PhLinkSimple class="h-4 w-4" weight="regular" />
-					YouTube
-				</a>
+				<div class="mt-1 flex w-full items-center justify-between gap-2">
+					<a
+						class="inline-flex w-max items-center gap-1.5 text-sm text-accent-500 hover:underline"
+						:href="props.episode.webpage_url"
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						<PhLinkSimple class="h-4 w-4" weight="regular" />
+						YouTube
+					</a>
+					<time class="shrink-0 text-sm text-text-muted">
+						{{ formatDate(props.episode.published_at) }}
+					</time>
+				</div>
 			</div>
 		</div>
-
-		<time class="mt-auto self-end text-sm text-text-muted">
-			{{ formatDate(props.episode.published_at) }}
-		</time>
 	</article>
 </template>
