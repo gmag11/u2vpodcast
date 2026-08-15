@@ -46,30 +46,33 @@
 					/>
 				</div>
 
-				<div class="flex shrink-0 items-center gap-1.5 sm:hidden">
-					<button
-						type="button"
-						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
-						:aria-label="isPlaying ? 'Pause' : 'Play'"
-						:disabled="isCurrent && player.loading"
-						@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
-					>
-						<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
-						<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
-					</button>
+				<div class="flex shrink-0 flex-col items-start gap-1.5 sm:hidden">
+					<div class="flex items-center gap-1.5">
+						<button
+							type="button"
+							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
+							:aria-label="isPlaying ? 'Pause' : 'Play'"
+							:disabled="isCurrent && player.loading"
+							@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
+						>
+							<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
+							<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
+						</button>
 
-					<button
-						type="button"
-						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-						aria-label="Stop"
-						:disabled="!isCurrent"
-						@click="player.stop()"
-					>
-						<PhStop class="h-4 w-4" weight="fill" />
-					</button>
+						<button
+							type="button"
+							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
+							aria-label="Stop"
+							:disabled="!isCurrent"
+							@click="player.stop()"
+						>
+							<PhStop class="h-4 w-4" weight="fill" />
+						</button>
+					</div>
+					<span class="text-sm text-text-muted">{{ durationLabel }}</span>
 				</div>
 
-				<div class="hidden gap-2 sm:flex">
+				<div class="hidden w-full items-center justify-between gap-2 sm:flex">
 					<button
 						type="button"
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
@@ -90,6 +93,8 @@
 					>
 						<PhStop class="h-4 w-4" weight="fill" />
 					</button>
+
+					<span class="ml-auto text-sm text-text-muted">{{ durationLabel }}</span>
 				</div>
 			</div>
 
@@ -109,7 +114,6 @@
 				<time class="text-sm text-text-muted">
 					{{ formatDate(props.episode.published_at) }}
 				</time>
-				<span class="text-sm text-text-muted">{{ durationLabel }}</span>
 				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>

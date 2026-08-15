@@ -20,6 +20,7 @@
 	const episodes = ref<Episode[]>([]);
 	const channels = ref<Channel[]>([]);
 	const channelTitle = ref('');
+	const channelDescription = ref('');
 	const searchQuery = ref('');
 	const refreshing = ref(false);
 
@@ -58,6 +59,7 @@
 		}
 		const channel = channels.value.find((c) => c.id === channelId);
 		channelTitle.value = channel?.title ?? 'Episodes';
+		channelDescription.value = channel?.description ?? '';
 	}
 
 	async function resolveSlugFallback(): Promise<string> {
@@ -135,7 +137,11 @@
 				{{ channelTitle }}
 			</h1>
 		</div>
+p v-if="channelDescription" class="mb-10 w-full max-w-3xl text-sm leading-relaxed text-text-muted">
+			{{ channelDescription }}
+		</p>
 
+		<
 		<div class="mb-10 w-full max-w-3xl">
 			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
 		</div>
