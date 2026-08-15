@@ -1,8 +1,8 @@
 <script setup lang="ts">
 	import { computed, onMounted, ref } from 'vue';
 	import { useRoute, useRouter } from 'vue-router';
-	import { PhArrowLeft } from '@phosphor-icons/vue';
-	import { api } from '@/lib/api/client';
+	import { PhArrowLeft, PhRss } from '@phosphor-icons/vue';
+	import { api, baseEndpoint } from '@/lib/api/client';
 	import { useAuthStore } from '@/stores/auth';
 	import { filterBySearchWords } from '@/lib/utils/list.filter';
 	import type { Episode } from '@/types';
@@ -74,6 +74,20 @@
 				<PhArrowLeft class="h-5 w-5" weight="regular" />
 			</button>
 			<h1 class="truncate font-display text-2xl font-semibold text-text">History</h1>
+			<a
+				:href="`${baseEndpoint}/feed.xml`"
+				target="_blank"
+				rel="noopener noreferrer"
+				aria-label="Get global RSS feed"
+				class="group relative ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-accent-500 transition-colors hover:text-accent-400"
+			>
+				<PhRss class="h-5 w-5" weight="regular" />
+				<span
+					class="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					Get global RSS feed
+				</span>
+			</a>
 		</div>
 
 		<div class="mb-10 w-full max-w-6xl">
