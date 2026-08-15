@@ -137,7 +137,10 @@
 				{{ channelTitle }}
 			</h1>
 		</div>
-		<p v-if="channelDescription" class="mb-10 w-full max-w-3xl text-sm leading-relaxed text-text-muted">
+		<p
+			v-if="channelDescription"
+			class="mb-10 w-full max-w-3xl text-sm leading-relaxed text-text-muted"
+		>
 			{{ channelDescription }}
 		</p>
 
