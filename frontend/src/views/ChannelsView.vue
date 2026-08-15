@@ -245,7 +245,7 @@
 			<SortControl
 				:model-value="sortKey"
 				:direction="sortDirection"
-				class="md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
+				class="self-end md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
 				@update:model-value="setSortKey"
 				@update:direction="setSortDirection"
 			/>
