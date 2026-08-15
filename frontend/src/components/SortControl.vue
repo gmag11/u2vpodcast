@@ -12,10 +12,14 @@
 		(e: 'update:direction', value: SortDirection): void;
 	}>();
 
-	const keys: Array<{ value: ChannelSortKey; label: string; icon?: boolean }> = [
-		{ value: 'last_date', label: 'Last episode', icon: true },
-		{ value: 'title', label: 'A-Z' },
-		{ value: 'id', label: 'Id' }
+	const keys: Array<{ value: ChannelSortKey; label: string; tooltip: string; icon?: boolean }> = [
+		{
+			value: 'last_date',
+			label: 'Last episode',
+			tooltip: 'Sort by last episode date'
+		},
+		{ value: 'title', label: 'A-Z', tooltip: 'Sort alphabetically by title' },
+		{ value: 'id', label: 'Id', tooltip: 'Sort by channel id' }
 	];
 </script>
 
@@ -30,6 +34,7 @@
 				type="button"
 				:aria-pressed="modelValue === key.value"
 				:aria-label="key.label"
+				:title="key.tooltip"
 				class="rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500"
 				:class="
 					modelValue === key.value ? 'bg-accent-500 text-white' : 'text-text-muted hover:text-text'
@@ -45,6 +50,7 @@
 			type="button"
 			:aria-pressed="direction === 'asc'"
 			:aria-label="direction === 'asc' ? 'Sort ascending' : 'Sort descending'"
+			:title="direction === 'asc' ? 'Sort ascending' : 'Sort descending'"
 			class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-input text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
 			@click="emit('update:direction', direction === 'asc' ? 'desc' : 'asc')"
 		>
