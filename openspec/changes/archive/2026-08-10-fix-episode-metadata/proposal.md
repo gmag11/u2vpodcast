@@ -8,7 +8,7 @@ Episode metadata and feed URLs have four issues that degrade the podcast experie
 
 3. **No YouTube link in episode descriptions.** The RSS `<description>` and `<itunes:summary>` contain the raw YouTube video description, but there is no link back to the original video on YouTube. Listeners who want to jump from the podcast to watch the video must manually search for it.
 
-4. **Legacy feed URLs stop working.** Older versions of the application served each channel's feed at `/{slug}/feed.xml`, while the current version serves it at `/channels/{slug}/feed.xml`. Podcast clients subscribed to the old URL (e.g., `https://u2vpod.gmprojects.pro/<slug>/feed.xml`) no longer receive updates after the URL scheme changed. The feed must remain reachable at both URLs for backwards compatibility; the frontend keeps linking the canonical `/channels/{slug}/feed.xml`.
+4. **Legacy feed URLs stop working.** Older versions of the application served each channel's feed at `/{slug}/feed.xml`, while the current version serves it at `/channels/{slug}/feed.xml`. Podcast clients subscribed to the old URL (e.g., `https://<host>/<slug>/feed.xml`) no longer receive updates after the URL scheme changed. The feed must remain reachable at both URLs for backwards compatibility; the frontend keeps linking the canonical `/channels/{slug}/feed.xml`.
 
 ## What Changes
 
