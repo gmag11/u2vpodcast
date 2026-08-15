@@ -33,8 +33,8 @@ export function sortChannels<T extends SortableChannel>(
 			return (a.id - b.id) * multiplier;
 		}
 		if (!a.last_date && !b.last_date) return 0;
-		if (!a.last_date) return 1;
-		if (!b.last_date) return -1;
+		if (!a.last_date) return -1 * multiplier;
+		if (!b.last_date) return 1 * multiplier;
 		return (new Date(a.last_date).getTime() - new Date(b.last_date).getTime()) * multiplier;
 	});
 }

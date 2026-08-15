@@ -40,8 +40,9 @@ export function sortChannels<T extends { last_date: string | null; title: string
 ```
 
 Semantics per key (direction flips the primary comparator):
-- `last_date`: channels with a `null` `last_date` always sort last, regardless of
-  direction. `desc` (default) → newest first; `asc` → oldest first.
+- `last_date`: channels with a `null` `last_date` are treated as the oldest, so
+  they sort first when ascending and last when descending. `desc` (default) →
+  newest first; `asc` → oldest first.
 - `title`: case-insensitive comparison (lowercased `localeCompare`).
 - `id`: numeric comparison.
 

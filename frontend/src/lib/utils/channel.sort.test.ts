@@ -21,16 +21,16 @@ describe('sortChannels', () => {
 		expect(result.map((i) => i.id)).toEqual([2, 3, 1, 4]);
 	});
 
-	it('sorts by last_date ascending, nulls last', () => {
+	it('sorts by last_date ascending, nulls treated as oldest (first)', () => {
 		const result = sortChannels(items, 'last_date', 'asc');
-		expect(result.map((i) => i.id)).toEqual([1, 3, 2, 4]);
+		expect(result.map((i) => i.id)).toEqual([4, 1, 3, 2]);
 	});
 
-	it('keeps channels without last_date last in both directions', () => {
+	it('treats channels without last_date as oldest in both directions', () => {
 		const desc = sortChannels(items, 'last_date', 'desc');
 		const asc = sortChannels(items, 'last_date', 'asc');
 		expect(desc[desc.length - 1].id).toBe(4);
-		expect(asc[asc.length - 1].id).toBe(4);
+		expect(asc[0].id).toBe(4);
 	});
 
 	it('sorts by title case-insensitively', () => {

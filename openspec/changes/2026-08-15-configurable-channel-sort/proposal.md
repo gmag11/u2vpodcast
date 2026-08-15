@@ -13,7 +13,7 @@ changes; this change delivers those keys and the controls to configure them.
   episode date — the default —, title, or id) and a direction toggle
   (ascending/descending).
 - The frontend ordering logic in `ChannelsView` SHALL become configurable:
-  `last_date` keeps the "channels without episodes sort last" rule, `title`
+  `last_date` treats channels without episodes as the oldest, `title`
   sorts case-insensitively, and `id` sorts numerically.
 - The selected sort key and direction SHALL persist across reloads.
 - No API or backend change: `GET /api/1.0/channels/` already carries `last_date`,
