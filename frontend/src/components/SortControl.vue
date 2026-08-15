@@ -43,12 +43,11 @@
 			type="button"
 			:aria-pressed="direction === 'asc'"
 			:aria-label="direction === 'asc' ? 'Sort ascending' : 'Sort descending'"
-			class="inline-flex items-center gap-1.5 rounded-full border border-outline bg-surface-input px-3 py-1.5 text-sm font-medium text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
+			class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-input text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
 			@click="emit('update:direction', direction === 'asc' ? 'desc' : 'asc')"
 		>
 			<PhArrowUp v-if="direction === 'asc'" class="h-4 w-4" weight="bold" />
 			<PhArrowDown v-else class="h-4 w-4" weight="bold" />
-			{{ direction === 'asc' ? 'Ascending' : 'Descending' }}
 		</button>
 	</div>
 </template>
