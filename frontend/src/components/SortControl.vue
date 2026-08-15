@@ -16,7 +16,8 @@
 		{
 			value: 'last_date',
 			label: 'Last episode',
-			tooltip: 'Sort by last episode date'
+			tooltip: 'Sort by last episode date',
+			icon: true
 		},
 		{ value: 'title', label: 'A-Z', tooltip: 'Sort alphabetically by title' },
 		{ value: 'id', label: 'Id', tooltip: 'Sort by channel id' }
