@@ -14,7 +14,7 @@
 ## 3. Verification
 
 - [x] 3.1 Confirm `cargo build` and `pnpm build` pass with the new handler and link.
-- [ ] 3.2 Request `/feed.xml` with valid credentials: every channel's episodes appear newest first, each `<enclosure>` resolves to `{url}/media/{slug}/{yt_id}.mp3`, and titles carry the channel prefix.
-- [ ] 3.3 Confirm `/feed.xml` is rejected without credentials (same protection as per-channel feeds).
-- [ ] 3.4 Open the history screen and confirm the RSS link is visible, points at the global feed, and opens it.
-- [ ] 3.5 Confirm per-channel feeds at `/channels/{slug}/feed.xml` are unchanged.
+- [x] 3.2 Request `/feed.xml` with valid credentials: every channel's episodes appear newest first, each `<enclosure>` resolves to `{url}/media/{slug}/{yt_id}.mp3`, and titles carry the channel prefix.
+- [x] 3.3 Confirm `/feed.xml` is rejected without credentials (same protection as per-channel feeds).
+- [x] 3.4 Open the history screen and confirm the RSS link is visible, points at the global feed, and opens it.
+- [x] 3.5 Confirm per-channel feeds at `/channels/{slug}/feed.xml` are unchanged.
