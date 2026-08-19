@@ -78,7 +78,7 @@ async fn main() -> Result<(), Error> {
 
     let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, format);
     let log_level = var("RUST_LOG")
-        .unwrap_or("DEBUG".to_string());
+        .unwrap_or(config.log_level.clone());
     let log_layer = tracing_subscriber::fmt::layer()
         .compact()
         .with_timer(timer)

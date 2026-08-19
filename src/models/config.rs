@@ -17,10 +17,16 @@ pub struct Config{
     pub with_authentication: bool,
     #[serde(default = "default_html_path")]
     pub html_path: String,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
 
 fn default_with_authentication() -> bool {
     true
+}
+
+fn default_log_level() -> String {
+    "INFO".to_string()
 }
 
 fn default_html_path() -> String {

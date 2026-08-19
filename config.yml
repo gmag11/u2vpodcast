@@ -19,3 +19,7 @@ admin_password: nimda
 # (/media/**) require HTTP Basic Auth using the admin credentials above.
 # When false, they are served without authentication. Defaults to true if omitted.
 with_authentication: true
+# Log level for the application. One of: TRACE, DEBUG, INFO, WARN, ERROR.
+# Defaults to INFO if omitted. The RUST_LOG environment variable, when set,
+# takes precedence over this value.
+log_level: INFO
