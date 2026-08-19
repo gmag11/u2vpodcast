@@ -77,6 +77,7 @@ async fn main() -> Result<(), Error> {
     let time_offset = time::UtcOffset::from_whole_seconds(offset_in_sec).unwrap();
 
     let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, format);
+    let config = Config::load().await;
     let log_level = var("RUST_LOG")
         .unwrap_or(config.log_level.clone());
     let log_layer = tracing_subscriber::fmt::layer()
@@ -90,8 +91,6 @@ async fn main() -> Result<(), Error> {
         .init();
 
     info!("Log level: {log_level}");
-
-    let config = Config::load().await;
 
     let db_url = if var("RUST_ENV") == Ok("production".to_string()){
         std::env::current_exe()?
