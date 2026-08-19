@@ -17,12 +17,14 @@ export interface Channel {
 	max: number;
 	created_at: Date;
 	updated_at: Date;
+	last_date: string | null;
 }
 
 export interface Episode {
 	id: number;
 	channel_id: number;
 	channel_slug: string;
+	channel_title: string;
 	title: string;
 	description: string;
 	yt_id: string;

@@ -15,6 +15,8 @@ pub struct Episode {
     pub channel_id: i64,
     #[serde(default)]
     pub channel_slug: String,
+    #[serde(default = "get_default_empty")]
+    pub channel_title: String,
     pub title: String,
     #[serde(default = "get_default_empty")]
     pub description: String,
@@ -40,6 +42,27 @@ impl Episode {
             id: row.get("id"),
             channel_id: row.get("channel_id"),
             channel_slug: String::new(),
+            channel_title: String::new(),
+            title: row.get("title"),
+            description: row.get("description"),
+            yt_id: row.get("yt_id"),
+            webpage_url: row.get("webpage_url"),
+            published_at: row.get("published_at"),
+            duration: row.get("duration"),
+            image: row.get("image"),
+            listen: row.get("listen"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
+    fn from_row_with_channel(row: SqliteRow) -> Self {
+        info!("from_row_with_channel");
+        Self {
+            id: row.get("id"),
+            channel_id: row.get("channel_id"),
+            channel_slug: row.get("channel_slug"),
+            channel_title: row.get("channel_title"),
             title: row.get("title"),
             description: row.get("description"),
             yt_id: row.get("yt_id"),
@@ -64,6 +87,7 @@ impl Episode {
             id: -1,
             channel_id,
             channel_slug: String::new(),
+            channel_title: String::new(),
             title: title.to_string(),
             description: description.to_string(),
             yt_id: yt_id.to_string(),
@@ -119,6 +143,18 @@ impl Episode {
         let sql = "SELECT * FROM episodes ORDER BY published_at DESC";
         query(sql)
             .map(Self::from_row)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    pub async fn read_all_with_channels(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+        info!("read_all_with_channels");
+        let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, COALESCE(c.title, '') AS channel_title \
+                   FROM episodes e LEFT JOIN channels c ON c.id = e.channel_id \
+                   ORDER BY e.published_at DESC";
+        query(sql)
+            .map(Self::from_row_with_channel)
             .fetch_all(pool)
             .await
             .map_err(|e| e.into())

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-14
+goal: "Reorganize the header for mobile: brand as icon only, nav links + session
+  in a side drawer, per-view actions as icons, and a mobile search toggle."

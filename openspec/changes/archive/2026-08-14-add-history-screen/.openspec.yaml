@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-08-14
+goal: Add a history screen listing all episodes across all channels, newest
+  first, with channel name shown per card, a more compact vertical layout, and
+  word-based search filtering.

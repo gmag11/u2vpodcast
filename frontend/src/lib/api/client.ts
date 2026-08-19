@@ -101,6 +101,10 @@ export const api = {
 		return request<Array<Episode>>(`/api/1.0/channels/${channelId}/episodes/`);
 	},
 
+	async getAllEpisodes() {
+		return request<Array<Episode>>('/api/1.0/episodes/');
+	},
+
 	async getConfig() {
 		return request<ConfigResponse>('/api/1.0/config/');
 	}

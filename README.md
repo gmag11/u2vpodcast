@@ -26,6 +26,25 @@ For example,
 * Chrome => https://chrome.google.com/webstore/detail/get-cookiestxt/bgaddhkoddajcdgocldbbfleckgcbcid/
 * Firefox => https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/
 
+#### Correct file ownership
+
+The container runs as the `app` user (UID `10001`). `yt-dlp` reads the cookies from `cookies.txt` and also writes back to it on every download, so the file must be writable by the container user or downloads fail with a `PermissionError`.
+
+Since `cookies.txt` is bind-mounted from the host (`./cookies.txt:/app/cookies.txt`), make it writable on the host:
+
+```bash
+chmod 666 cookies.txt
+```
+
+Alternatively, make the container user the owner:
+
+```bash
+sudo chown 10001:10001 cookies.txt   # Docker (rootful Podman)
+sudo chown <your-subuid>:<your-subuid> cookies.txt  # rootless Podman
+```
+
+When running rootless Podman, the container UID is mapped to a subordinate UID of your user (check `/etc/subuid`). After a rootless container changes the ownership of `cookies.txt`, edit it from the host with `podman unshare chown <your-uid>:<your-gid> cookies.txt`.
+
 ### Configuration
 
 You need to modify `config.yml`. Change the params as you need, and add all the channels and YouTube list that you want

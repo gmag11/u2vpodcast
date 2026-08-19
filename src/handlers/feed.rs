@@ -29,7 +29,73 @@ pub fn web_feed(cfg: &mut ServiceConfig) {
         web::resource("/{key}/feed.xml")
             .route(web::get().to(get_legacy_feed))
             .wrap(SessionOrBasicAuth),
+    )
+    .service(
+        web::resource("/feed.xml")
+            .route(web::get().to(get_global_feed))
+            .wrap(SessionOrBasicAuth),
     );
+}
+
+async fn get_global_feed(data: Data<AppState>) -> impl Responder {
+    info!("get_global_feed");
+    let url = &data.config.url;
+    match Episode::read_all_with_channels(&data.pool).await {
+        Ok(episodes) => {
+            let mut items = Vec::new();
+            for episode in episodes {
+                if episode.channel_slug.is_empty() {
+                    continue;
+                }
+                let enclosure = format!("{url}/media/{}/{}.mp3", episode.channel_slug, episode.yt_id);
+                let description = format!("{}\n\n{}", episode.webpage_url, episode.description);
+                let itunes = ITunesItemExtensionBuilder::default()
+                    .image(Some(episode.image))
+                    .summary(Some(description.clone()))
+                    .explicit(Some("No".to_string()))
+                    .episode_type(Some("Full".to_string()))
+                    .duration(Some(episode.duration))
+                    .build();
+                let enclosure = EnclosureBuilder::default()
+                    .url(&enclosure)
+                    .mime_type("audio/mpeg".to_string())
+                    .build();
+                let guid = GuidBuilder::default().value(episode.yt_id).build();
+                let title = if episode.channel_title.is_empty() {
+                    episode.title.clone()
+                } else {
+                    format!("{}: {}", episode.channel_title, episode.title)
+                };
+                let item = ItemBuilder::default()
+                    .title(Some(title))
+                    .description(Some(description))
+                    .enclosure(Some(enclosure))
+                    .guid(Some(guid))
+                    .pub_date(Some(episode.published_at.to_rfc2822()))
+                    .itunes_ext(Some(itunes))
+                    .build();
+                items.push(item);
+            }
+            let link = format!("{url}/rss");
+            let itunes = ITunesChannelExtensionBuilder::default()
+                .summary(Some("All episodes from all channels, newest first".to_string()))
+                .build();
+            let channel_builder = ChannelBuilder::default()
+                .title("All Episodes")
+                .description("All episodes from all channels, newest first")
+                .link(&link)
+                .itunes_ext(Some(itunes))
+                .items(items)
+                .build();
+            HttpResponse::Ok()
+                .append_header(("Content-type", "application/rss+xml; charset=utf-8"))
+                .body(channel_builder.to_string())
+        }
+        Err(e) => {
+            error!("Error: {e}");
+            HttpResponse::InternalServerError().body("Internal server error")
+        }
+    }
 }
 
 async fn get_feed(data: Data<AppState>, path: Path<Info>) -> impl Responder {

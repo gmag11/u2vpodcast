@@ -45,6 +45,7 @@ pub struct Channel {
     pub max: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_date: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -92,6 +93,7 @@ impl Channel{
             max: row.get("max"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
+            last_date: row.try_get("last_date").unwrap_or(None),
         }
     }
 
@@ -199,7 +201,11 @@ impl Channel{
 
     pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
         info!("read_all");
-        let sql = "SELECT * FROM channels";
+        let sql = "SELECT c.*, e.last_date FROM channels c \
+                   LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
+                              FROM episodes GROUP BY channel_id) e \
+                   ON e.channel_id = c.id \
+                   ORDER BY e.last_date IS NULL, e.last_date DESC";
         query(sql)
             .map(Self::from_row)
             .fetch_all(pool)
@@ -260,13 +266,19 @@ impl Channel{
 
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
         info!("delete");
+        let mut tx = pool.begin().await?;
+        query("DELETE FROM episodes WHERE channel_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         let sql = "DELETE FROM channels WHERE id = $1 RETURNING *";
-        query(sql)
+        let channel = query(sql)
             .bind(id)
             .map(Self::from_row)
-            .fetch_one(pool)
-            .await
-        .map_err(|e| e.into())
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(channel)
     }
 
     pub async fn migrate_slugs(pool: &SqlitePool, audio_folder: &str) -> Result<(), Error>{

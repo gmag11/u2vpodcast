@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-15
+goal: Add a global RSS feed download link on the history screen containing every
+  episode from every channel in publication order.
