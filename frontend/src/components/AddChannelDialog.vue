@@ -62,7 +62,10 @@
 			max: Number(max.value) || 5,
 			created_at: props.channel?.created_at ?? new Date(),
 			updated_at: new Date(),
-			last_date: props.channel?.last_date ?? null
+			last_date: props.channel?.last_date ?? null,
+			last_sync_at: props.channel?.last_sync_at ?? null,
+			last_sync_ok: props.channel?.last_sync_ok ?? null,
+			last_sync_error: props.channel?.last_sync_error ?? null
 		};
 		emit('save', channel);
 	}

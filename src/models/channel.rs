@@ -46,6 +46,9 @@ pub struct Channel {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_date: Option<DateTime<Utc>>,
+    pub last_sync_at: Option<DateTime<Utc>>,
+    pub last_sync_ok: Option<bool>,
+    pub last_sync_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -94,6 +97,9 @@ impl Channel{
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             last_date: row.try_get("last_date").unwrap_or(None),
+            last_sync_at: row.try_get("last_sync_at").unwrap_or(None),
+            last_sync_ok: row.try_get("last_sync_ok").unwrap_or(None),
+            last_sync_error: row.try_get("last_sync_error").unwrap_or(None),
         }
     }
 
@@ -370,6 +376,25 @@ impl Channel{
                 Utc::now()
             }
         }
+    }
+
+    pub async fn set_sync_status(
+        pool: &SqlitePool,
+        id: i64,
+        ok: bool,
+        error: Option<String>,
+    ) -> Result<(), Error>{
+        let sql = "UPDATE channels SET last_sync_at = $1, last_sync_ok = $2, \
+                   last_sync_error = $3 WHERE id = $4";
+        query(sql)
+            .bind(Utc::now())
+            .bind(ok)
+            .bind(error)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| Error::default(&e.to_string()))?;
+        Ok(())
     }
 }
 

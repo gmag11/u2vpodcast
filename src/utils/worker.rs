@@ -41,6 +41,23 @@ pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
 }
 
 pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+    let (ok, message) = match update_channel_inner(pool, channel_id).await {
+        Ok(()) => (true, None),
+        Err(e) => (false, Some(error_message(e))),
+    };
+    let _ = Channel::set_sync_status(pool, channel_id, ok, message.clone()).await;
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::default(&message.unwrap_or_default()))
+    }
+}
+
+fn error_message(e: Error) -> String {
+    e.to_string()
+}
+
+async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
     let channel = Channel::read(pool, channel_id).await?;
     let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
     let folder = audios_dir();

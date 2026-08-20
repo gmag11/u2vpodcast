@@ -43,6 +43,13 @@
 			{{ ageLabel }}
 		</span>
 
+		<span
+			v-if="channel.last_sync_ok === true || channel.last_sync_ok === false"
+			class="absolute left-4 top-4 z-10 h-2.5 w-2.5 rounded-full shadow"
+			:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
+			:title="channel.last_sync_ok ? 'Last sync succeeded' : 'Last sync failed'"
+		></span>
+
 		<div class="mb-6 flex gap-6">
 			<div
 				class="h-[140px] w-[140px] shrink-0 overflow-hidden rounded-2xl border border-outline bg-surface-input shadow-lg"

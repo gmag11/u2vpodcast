@@ -18,6 +18,9 @@ export interface Channel {
 	created_at: Date;
 	updated_at: Date;
 	last_date: string | null;
+	last_sync_at: string | null;
+	last_sync_ok: boolean | null;
+	last_sync_error: string | null;
 }
 
 export interface Episode {
