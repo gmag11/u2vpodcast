@@ -13,7 +13,10 @@ use chrono::{
     },
 };
 use std::convert::TryFrom;
+use rand::Rng;
 use tokio::fs::create_dir_all;
+use tokio::time::sleep;
+use std::time::Duration;
 use super::super::models::{
     Error,
     Channel,
@@ -136,6 +139,9 @@ async fn process_episode(
     if !ytdlp.download(&ytvideo.id, &filename).await?.success(){
         Err(Error::default(&format!("Cant download {filename}")))?
     }
+    let delay = rand::thread_rng().gen_range(20..=40);
+    info!("Pausing {delay} seconds before next download");
+    sleep(Duration::from_secs(delay)).await;
     let title = &ytvideo.title;
     let description = &ytvideo.description;
     let yt_id = &ytvideo.id;

@@ -2542,6 +2542,7 @@ dependencies = [
  "chrono",
  "deunicode",
  "filetime",
+ "rand 0.8.7",
  "regex",
  "rss",
  "serde",
