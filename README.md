@@ -82,6 +82,10 @@ After that, go to `https://u2vpodcast.tuservidor.com` and you can find a list of
 1. The channel: https://u2vpodcast.tuservidor.com/linux_y_tapas?page=1
 2. The feed: https://u2vpodcast.tuservidor.com/linux_y_tapas/feed.xml
 
+### SQLite & backups
+
+The database runs in WAL journal mode. Backing up the database therefore also requires the companion files `u2vpodcast.db-wal` and `u2vpodcast.db-shm` (or run an explicit SQLite checkpoint/`sqlite3 u2vpodcast.db ".backup backup.db"` before copying only the `.db` file). The pool size is configurable via `db_pool_max_connections` (default 5).
+
 ### Contributing
 
 ### License
