@@ -7,4 +7,4 @@
 ## 2. Verification
 
 - [x] 2.1 Run frontend lint/type-check (`cd frontend && npm run build` or equivalent) and existing tests
-- [ ] 2.2 Manually verify in browser: green card shows dot left of badge with "Status: Ok" tooltip; failed-sync card shows red dot with "Status: Error"; never-synced channel shows neither; top-left corner is clean
+- [x] 2.2 Manually verify in browser: green card shows dot left of badge with "Status: Ok" tooltip; failed-sync card shows red dot with "Status: Error"; never-synced channel shows neither; top-left corner is clean
