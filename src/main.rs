@@ -3,11 +3,14 @@ mod utils;
 mod handlers;
 
 use sqlx::{
-    sqlite::SqlitePoolOptions,
+    sqlite::{
+        SqlitePoolOptions,
+        SqliteConnectOptions,
+        SqliteJournalMode,
+    },
     migrate::{
         Migrator,
-        MigrateDatabase
-    }
+    },
 };
 
 use tokio::{
@@ -20,7 +23,7 @@ use tokio::{
 use std::{
     str::FromStr,
     env::var,
-    path::Path,
+    path::PathBuf,
 };
 use tracing_subscriber::{
     Layer,
@@ -40,6 +43,7 @@ use models::{
     User,
     Ytdlp,
     Channel,
+    audios_dir,
 };
 use utils::worker::do_the_work;
 use actix_files as af;
@@ -76,6 +80,54 @@ fn validate_origin(origin: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Session keys must be at least 64 bytes: actix-session's `Key::from` panics
+// otherwise. Validate at startup (both modes use the key) so a short
+// `config.yml` key fails with a clear message instead of a panic (crash-safety).
+fn validate_secret_key(key: &str) -> Result<(), String> {
+    let trimmed = key.trim();
+    if trimmed.len() < 64 {
+        return Err(format!(
+            "invalid `secret_key`: must be at least 64 bytes (got {}). \
+             Generate one with e.g. `openssl rand -base64 48`",
+            trimmed.len()
+        ));
+    }
+    Ok(())
+}
+
+// Shared CORS builder: an explicit origin allowlist plus credential support in
+// every mode. A wildcard origin combined with credentials would let any site
+// read the API using the user's session cookie, so no mode may use
+// `allow_any_origin()` (fix-dev-cors-with-credentials / api-cors-policy).
+fn build_cors(origins: &[String]) -> Cors {
+    let mut cors = Cors::default();
+    for origin in origins {
+        cors = cors.allowed_origin(origin);
+    }
+    cors.allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+        .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+        .allowed_header(header::CONTENT_TYPE)
+        .expose_headers(&[header::CONTENT_DISPOSITION])
+        .supports_credentials()
+        .max_age(3600)
+}
+
+// The CORS allowlist for the current mode. Development restricts credentialed
+// cross-origin requests to the configured URL plus the local SPA dev origins,
+// mirroring the production posture instead of reflecting any origin.
+fn cors_origins_for(config: &Config) -> Vec<String> {
+    if config.production {
+        vec![config.url.clone(), YT_IMAGE_ORIGIN.to_string()]
+    } else {
+        vec![
+            config.url.clone(),
+            format!("http://localhost:{}", config.port),
+            format!("http://127.0.0.1:{}", config.port),
+            YT_IMAGE_ORIGIN.to_string(),
+        ]
+    }
+}
+
 use actix_session::{
     SessionMiddleware,
     storage::CookieSessionStore,
@@ -94,6 +146,27 @@ use actix_web::{
 };
 use actix_cors::Cors;
 
+
+// Development-mode root directory. `CARGO_MANIFEST_DIR` only exists when the
+// process was started through Cargo; fall back to the current working
+// directory so a directly executed binary resolves a sensible local path
+// instead of panicking (runtime-path-resolution).
+fn dev_root() -> PathBuf {
+    match var("CARGO_MANIFEST_DIR") {
+        Ok(dir) => {
+            info!("Using CARGO_MANIFEST_DIR `{dir}` as development root");
+            PathBuf::from(dir)
+        }
+        Err(_) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            info!(
+                "CARGO_MANIFEST_DIR is unset; using current directory `{}` as development root",
+                cwd.display()
+            );
+            cwd
+        }
+    }
+}
 
 static DDBB: &str = "u2vpodcast.db";
 static MIGRATIONS_DIR: &str = "migrations";
@@ -135,33 +208,34 @@ async fn main() -> Result<(), Error> {
             .unwrap()
             .to_string()
     }else{
-        let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        Path::new(&crate_dir)
+        dev_root()
             .join(DDBB)
-            .to_str()
-            .unwrap()
-            .to_string()
+            .to_string_lossy()
+            .into_owned()
     };
     info!("DB url: {db_url}");
-    let db_exists = sqlx::Sqlite::database_exists(&db_url).await.unwrap();
-    info!("DB exists: {db_exists}");
-    if !db_exists{
-        sqlx::Sqlite::create_database(&db_url).await.unwrap();
-    }
+    // WAL + busy timeout: concurrent readers are not blocked by the single
+    // writer and transient write contention waits instead of failing with
+    // SQLITE_BUSY (db-pool-sizing). `create_if_missing` handles the DB file
+    // creation that the removed `database_exists`/`create_database` block did.
+    let db_options = SqliteConnectOptions::from_str(&db_url)
+        .expect("valid sqlite URL derived from config")
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_secs(5));
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(config.db_pool_max_connections.max(1))
+        .connect_with(db_options)
+        .await
+        .expect("Pool failed");
 
     let migrations = if var("RUST_ENV") == Ok("production".to_string()){
         std::env::current_exe().unwrap().parent().unwrap().join(MIGRATIONS_DIR)
     }else{
-        let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        Path::new(&crate_dir).join(MIGRATIONS_DIR)
+        dev_root().join(MIGRATIONS_DIR)
     };
     info!("{}", &migrations.display());
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(2)
-        .connect(&db_url)
-        .await
-        .expect("Pool failed");
 
     Migrator::new(migrations)
         .await?
@@ -176,6 +250,19 @@ async fn main() -> Result<(), Error> {
     // deployed is worse than a loud refusal at startup.
     if config.production {
         validate_origin(&url)
+            .map_err(|e| Error::default(&e))?;
+    }
+
+    // The session key is used in every mode; actix-session panics on keys
+    // shorter than 64 bytes, so validate up front (crash-safety).
+    validate_secret_key(&config.secret_key)
+        .map_err(|e| Error::default(&e))?;
+
+    // Validate the whole CORS allowlist up front in every mode: a dev origin
+    // with a typo must not silently deploy a broader or broken policy.
+    let cors_origins = cors_origins_for(&config);
+    for origin in &cors_origins {
+        validate_origin(origin)
             .map_err(|e| Error::default(&e))?;
     }
 
@@ -198,7 +285,9 @@ async fn main() -> Result<(), Error> {
     }
 
     // Backfill slugs and rename audio directories before the worker starts.
-    Channel::migrate_slugs(&pool, "/app/audios")
+    // Use the shared audio path so the rename works outside Docker too
+    // (runtime-path-resolution).
+    Channel::migrate_slugs(&pool, audios_dir())
         .await
         .expect("Cant migrate slugs");
 
@@ -263,29 +352,7 @@ async fn main() -> Result<(), Error> {
                     .build()
                 }
             )
-            .wrap(
-                if config.production{
-                    Cors::default() // explicit allowlist only; no wildcard may be configured for credentialed requests
-                        .allowed_origin(&url)
-                        .allowed_origin(YT_IMAGE_ORIGIN)
-                        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
-                        .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
-                        .allowed_header(header::CONTENT_TYPE)
-                        .expose_headers(&[header::CONTENT_DISPOSITION])
-                        .supports_credentials()
-                        .max_age(3600)
-                }else{
-                    Cors::default() // allowed_origin return access-control-allow-origin: * by default
-                        .allow_any_origin()
-                        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
-                        .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
-                        .allowed_header(header::CONTENT_TYPE)
-                        .expose_headers(&[header::CONTENT_DISPOSITION])
-                        .supports_credentials()
-                        .max_age(3600)
-
-                }
-            )
+            .wrap(build_cors(&cors_origins))
             .app_data(Data::clone(&data))
             .service(af::Files::new("/app", static_files.clone())
                 .index_file("index.html")
@@ -308,7 +375,7 @@ async fn main() -> Result<(), Error> {
 
 #[cfg(test)]
 mod cors_tests {
-    use super::validate_origin;
+    use super::{validate_origin, validate_secret_key};
 
     #[test]
     fn valid_origins_are_accepted() {
@@ -325,5 +392,49 @@ mod cors_tests {
         assert!(validate_origin("https://podcasts.example.com/").is_err());
         assert!(validate_origin("https://podcasts.example.com/path").is_err());
         assert!(validate_origin("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn dev_local_origins_are_accepted() {
+        assert!(validate_origin("http://localhost:5173").is_ok());
+        assert!(validate_origin("http://localhost:6996").is_ok());
+        assert!(validate_origin("http://127.0.0.1:6996").is_ok());
+        assert!(validate_origin("http://[::1]:6996").is_ok());
+    }
+
+    #[test]
+    fn short_secret_key_is_rejected() {
+        assert!(validate_secret_key("").is_err());
+        assert!(validate_secret_key("short").is_err());
+        assert!(validate_secret_key(&"x".repeat(63)).is_err());
+    }
+
+    #[test]
+    fn valid_secret_key_is_accepted() {
+        let key = "x".repeat(64);
+        assert!(validate_secret_key(&key).is_ok());
+        assert!(validate_secret_key(&format!("  {}  ", key)).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod error_serialization_tests {
+    use crate::models::Error;
+    use actix_web::http::StatusCode;
+    use serde_json;
+
+    #[test]
+    fn error_without_status_serializes_as_500() {
+        let error = Error::default("boom");
+        let value = serde_json::to_value(&error).expect("serializing Error must not panic");
+        assert_eq!(value["status_code"], 500);
+        assert_eq!(value["details"], "boom");
+    }
+
+    #[test]
+    fn error_with_status_serializes_it() {
+        let error = Error::new_with_status_code("nope", StatusCode::BAD_REQUEST);
+        let value = serde_json::to_value(&error).expect("serializing Error must not panic");
+        assert_eq!(value["status_code"], 400);
     }
 }

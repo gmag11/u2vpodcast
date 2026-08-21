@@ -41,7 +41,7 @@ impl Serialize for Error {
             S: serde::Serializer {
         let mut state = serializer.serialize_struct("Error", 2)?;
         state.serialize_field("details", &self.details)?;
-        state.serialize_field("status_code", &self.status_code.unwrap().as_u16())?;
+        state.serialize_field("status_code", &self.status_code().as_u16())?;
         state.end()
     }
 

@@ -4,6 +4,7 @@ use actix_web::{
         Path,
         Data,
         Json,
+        Query,
     },
     get,
     put,
@@ -11,6 +12,7 @@ use actix_web::{
     delete,
 };
 use actix_session::Session;
+use serde::Deserialize;
 use tracing::{
     info,
     debug,
@@ -31,14 +33,22 @@ use super::{
     },
 };
 
+#[derive(Deserialize)]
+struct Page{
+    page: Option<i64>,
+}
+
 
 #[get("/channels/")]
 async fn read_with_pagination(
     data: Data<AppState>,
     session: Session,
+    page: Query<Page>,
 ) -> impl Responder{
     info!("read_all");
-    match Channel::read_all(&data.pool).await{
+    let page = page.page.unwrap_or(1);
+    let per_page = data.config.per_page;
+    match Channel::read_with_pagination(&data.pool, page, per_page).await{
         Ok(channels) => Ok(CResponse::ok(session, channels)),
         Err(mut e) => {
             error!("Error: {e}");

@@ -50,7 +50,9 @@ impl CResponse {
             user,
             data: None::<Value>,
         };
-        HttpResponse::build(StatusCode::OK)
+        // Report the failing status in the HTTP status line too, so clients do
+        // not need to parse the body to detect errors (api-response-contract).
+        HttpResponse::build(status_code)
             .json(response)
     }
 }
@@ -70,6 +72,27 @@ impl<T> CustomResponse<T> {
     }
 }
 
+#[cfg(test)]
+mod response_envelope_tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn ko_envelope_marks_failure() {
+        let resp = CustomResponse::<Value>::new(StatusCode::UNAUTHORIZED, "Unauthorized", None, None);
+        assert!(!resp.status);
+        assert_eq!(resp.status_code, 401);
+        assert_eq!(resp.message, "Unauthorized");
+    }
+
+    #[test]
+    fn ok_envelope_marks_success() {
+        let resp = CustomResponse::<Value>::new(StatusCode::OK, "Ok", None, None);
+        assert!(resp.status);
+        assert_eq!(resp.status_code, 200);
+    }
+}
+
 //impl<T> Into<HttpResponse> for CustomResponse<T>
 //where T: DeserializeOwned + Serialize{
 //    fn into(self) -> HttpResponse {
@@ -79,8 +102,4 @@ impl<T> CustomResponse<T> {
 //}
 
 
-impl<T> From<CustomResponse<T>> for HttpResponse {
-    fn from(custom_response: CustomResponse<T>) -> HttpResponse{
-        custom_response.into()
-    }
-}
+

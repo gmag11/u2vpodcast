@@ -19,6 +19,12 @@ pub struct Config{
     pub html_path: String,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default = "default_db_pool_max_connections")]
+    pub db_pool_max_connections: u32,
+}
+
+fn default_db_pool_max_connections() -> u32 {
+    5
 }
 
 fn default_with_authentication() -> bool {

@@ -44,15 +44,18 @@ pub async fn post_login(
             if user.active && user.check_password(&credentials.password).await {
                 info!("Ok");
                 session.renew();
-                session.insert(USER_ID_KEY, user.id)
-                    .expect("`user_id` cannot be inserted into session");
-                session.insert(USER_NAME_KEY, &user.name)
-                    .expect("`user_name` cannot be inserted into session");
-                session.insert(USER_ROLE_KEY, &user.role)
-                    .expect("`user_role` cannot be inserted into session");
-                session.insert(USER_ACTIVE_KEY, user.active)
-                    .expect("`user_active` cannot be inserted into session");
-                CResponse::ok(session, "")
+                let insert_err = session
+                    .insert(USER_ID_KEY, user.id)
+                    .err()
+                    .or_else(|| session.insert(USER_NAME_KEY, &user.name).err())
+                    .or_else(|| session.insert(USER_ROLE_KEY, &user.role).err())
+                    .or_else(|| session.insert(USER_ACTIVE_KEY, user.active).err());
+                if let Some(e) = insert_err {
+                    error!("Cannot populate session: {e}");
+                    CResponse::ko(StatusCode::INTERNAL_SERVER_ERROR, session)
+                } else {
+                    CResponse::ok(session, "")
+                }
             }else{
                 error!("Unauthorized");
                 CResponse::ko(StatusCode::UNAUTHORIZED, session)

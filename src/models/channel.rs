@@ -1,5 +1,4 @@
 use actix_web::http::StatusCode;
-use serde_json::Value;
 use serde::{
     Serialize,
     Deserialize
@@ -291,7 +290,6 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
-    #[allow(unused)]
     pub async fn read_with_pagination(
         pool: &SqlitePool,
         page: i64,
@@ -301,7 +299,15 @@ impl Channel{
         // A malformed page (<= 0) must never yield a negative SQL OFFSET.
         let page = page.max(1);
         let offset = (page - 1) * per_page;
-        let sql = "SELECT * FROM channels ORDER BY created_at ASC LIMIT $1 OFFSET $2";
+        // Paginate with the same ordering as `read_all` (most recent activity
+        // first) so paginating the list does not silently reorder the UI
+        // (fix-api-contract-mismatches / channels-list-ordering).
+        let sql = "SELECT c.*, e.last_date FROM channels c \
+                   LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
+                              FROM episodes GROUP BY channel_id) e \
+                   ON e.channel_id = c.id \
+                   ORDER BY e.last_date IS NULL, e.last_date DESC \
+                   LIMIT $1 OFFSET $2";
         query(sql)
             .bind(per_page)
             .bind(offset)
@@ -488,8 +494,86 @@ impl Channel{
     }
 }
 
-impl From<Channel> for Value {
-    fn from(channel: Channel) -> Value {
-        channel.into()
+#[cfg(test)]
+mod channel_pagination_tests {
+    use super::*;
+    use sqlx::{
+        migrate::Migrator,
+        sqlite::SqlitePoolOptions,
+    };
+    use std::path::Path;
+
+    async fn memory_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        Migrator::new(migrations)
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_channel(pool: &SqlitePool, url: &str, title: &str) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind(url)
+        .bind(title)
+        .bind(slugify(title))
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(now)
+        .bind(5i64)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert channel")
+    }
+
+    #[tokio::test]
+    async fn pagination_pages_are_disjoint_and_bounded() {
+        let pool = memory_pool().await;
+        let mut ids = Vec::new();
+        for i in 1..=3 {
+            ids.push(insert_channel(&pool, &format!("https://example.com/c{i}"), &format!("Channel {i}")).await);
+        }
+
+        let page1 = Channel::read_with_pagination(&pool, 1, 2).await.expect("page 1");
+        let page2 = Channel::read_with_pagination(&pool, 2, 2).await.expect("page 2");
+
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page2.len(), 1);
+
+        let ids1: std::collections::HashSet<i64> = page1.iter().map(|c| c.id).collect();
+        let ids2: std::collections::HashSet<i64> = page2.iter().map(|c| c.id).collect();
+        assert!(ids1.is_disjoint(&ids2), "pages must not overlap");
+        assert_eq!(ids1.union(&ids2).cloned().collect::<std::collections::HashSet<_>>().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn zero_or_negative_page_is_clamped() {
+        let pool = memory_pool().await;
+        insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
+        insert_channel(&pool, "https://example.com/c2", "Channel 2").await;
+
+        // page 0 and page -3 must behave as page 1, never a negative OFFSET.
+        let p0 = Channel::read_with_pagination(&pool, 0, 2).await.expect("page 0");
+        let pneg = Channel::read_with_pagination(&pool, -3, 2).await.expect("negative page");
+        assert_eq!(p0.len(), 2);
+        assert_eq!(pneg.len(), 2);
     }
 }
+
+

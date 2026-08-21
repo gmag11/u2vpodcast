@@ -1,4 +1,3 @@
-use serde_json::Value;
 use super::Error;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,7 +8,7 @@ use sqlx::{
 };
 use tracing::info;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
     pub id: i64,
     pub channel_id: i64,
@@ -228,8 +227,8 @@ impl Episode {
         info!("update");
         let sql = "UPDATE episodes SET channel_id = $2, title = $3,
                    description = $4, yt_id = $5, published_at = $6,
-                   duration =$7, image = $8, listen = $9, updated_at = $10
-                   FROM episodes WHERE id = $1 RETURNING * ;";
+                   duration = $7, image = $8, listen = $9, updated_at = $10
+                   WHERE id = $1 RETURNING * ;";
         let updated_at = Utc::now();
         query(sql)
             .bind(episode.id)
@@ -274,8 +273,124 @@ impl Episode {
     }
 }
 
-impl From<Episode> for Value {
-    fn from(episode: Episode) -> Value{
-        episode.into()
+#[cfg(test)]
+mod episode_update_tests {
+    use super::*;
+    use sqlx::{
+        sqlite::SqlitePoolOptions,
+        migrate::Migrator,
+    };
+    use std::path::Path;
+
+    async fn memory_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        Migrator::new(migrations)
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_channel(pool: &SqlitePool) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind("https://example.com/ep-test")
+        .bind("Episode Test Channel")
+        .bind("ep_test_channel")
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(now)
+        .bind(5i64)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert channel")
+    }
+
+    fn episode_struct(channel_id: i64, yt_id: &str) -> Episode {
+        Episode {
+            id: -1,
+            channel_id,
+            channel_slug: String::new(),
+            channel_title: String::new(),
+            title: format!("episode {yt_id}"),
+            description: String::new(),
+            yt_id: yt_id.to_string(),
+            webpage_url: format!("https://youtu.be/{yt_id}"),
+            published_at: Utc::now(),
+            duration: "00:10:00".to_string(),
+            image: String::new(),
+            listen: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn updating_an_existing_episode_affects_exactly_one_row() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+
+        let first = episode_struct(channel_id, "aaa111");
+        let saved_1 = Episode::create(&pool, &first).await.expect("create ep 1");
+        let second = episode_struct(channel_id, "bbb222");
+        let _saved_2 = Episode::create(&pool, &second).await.expect("create ep 2");
+
+        let mut update = saved_1.clone();
+        update.title = "episode aaa111 (updated)".to_string();
+        let saved = update.save(&pool).await.expect("save must succeed");
+
+        assert_eq!(saved.id, saved_1.id, "the returned row must be the updated episode");
+        assert_eq!(saved.title, "episode aaa111 (updated)");
+
+        let count: i64 = query("SELECT count(*) FROM episodes WHERE title = $1")
+            .bind("episode aaa111 (updated)")
+            .map(|row: SqliteRow| row.get::<i64, _>(0))
+            .fetch_one(&pool)
+            .await
+            .expect("count updated rows");
+        assert_eq!(count, 1, "exactly one row must hold the new value");
+
+        let untouched: i64 = query("SELECT count(*) FROM episodes WHERE yt_id = $1 AND title = $2")
+            .bind("bbb222")
+            .bind("episode bbb222")
+            .map(|row: SqliteRow| row.get::<i64, _>(0))
+            .fetch_one(&pool)
+            .await
+            .expect("count untouched rows");
+        assert_eq!(untouched, 1, "the other episode must be untouched");
+    }
+
+    #[tokio::test]
+    async fn update_returns_progressed_updated_at() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "ccc333");
+        let saved = Episode::create(&pool, &created).await.expect("create");
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let mut update = saved.clone();
+        update.title = "changed".to_string();
+        let saved = update.save(&pool).await.expect("save");
+        assert!(
+            saved.updated_at >= saved.created_at,
+            "updated_at must be refreshed on update"
+        );
     }
 }
+
+

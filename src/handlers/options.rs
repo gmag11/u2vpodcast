@@ -2,6 +2,7 @@ use actix_session::Session;
 use serde::{Serialize, Deserialize};
 use actix_web::{
     Responder,
+    http::StatusCode,
     web::{
         Data,
         Json,
@@ -22,6 +23,7 @@ use super::{
         utils::worker::do_the_work,
         models::{
             CResponse,
+            Error,
             Param,
         },
     },
@@ -32,6 +34,11 @@ struct KeyValue{
     key: String,
     value: String
 }
+
+// Guards against stacking manual full syncs (non-blocking-update-paths): the
+// scheduled worker loop is exempt and manages its own cadence.
+static SYNC_IN_PROGRESS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 pub fn api_options(cfg: &mut web::ServiceConfig){
     cfg.service(update)
@@ -44,10 +51,25 @@ async fn update(
     session: Session,
 ) -> impl Responder {
     info!("update");
-    match do_the_work(&data.pool).await{
-        Ok(()) => Ok(CResponse::ok(session, "")),
-        Err(e) => Err(e),
+    // Non-blocking: run the full refresh in the background and return
+    // immediately. Completion is observable through per-channel sync status
+    // (last_sync_at/last_sync_ok/last_sync_error).
+    if SYNC_IN_PROGRESS.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err(Error::new_with_status_code(
+            "A full sync is already running",
+            StatusCode::CONFLICT,
+        ));
     }
+    let pool = data.pool.clone();
+    actix_web::rt::spawn(async move {
+        let result = do_the_work(&pool).await;
+        SYNC_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
+        match result {
+            Ok(()) => info!("Manual full sync finished"),
+            Err(e) => error!("Manual full sync failed: {e}"),
+        }
+    });
+    Ok(CResponse::ok(session, ""))
 }
 
 #[post("/options/")]
