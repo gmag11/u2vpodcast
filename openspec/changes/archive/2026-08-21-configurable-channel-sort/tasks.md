@@ -14,4 +14,4 @@
 ## 3. Verify
 
 - [x] 3.1 Run `pnpm test`, `pnpm run lint`, and `pnpm run build` in `frontend/`
-- [ ] 3.2 Manually confirm the three keys and both directions re-order the list and persist across reload
+- [x] 3.2 Manually confirm the three keys and both directions re-order the list and persist across reload
