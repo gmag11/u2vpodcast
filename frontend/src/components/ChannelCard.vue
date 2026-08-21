@@ -11,6 +11,7 @@
 	import { computed } from 'vue';
 	import { baseEndpoint } from '@/lib/api/client';
 	import { lastEpisodeAge } from '@/lib/utils/channel.age';
+	import { lastSyncAge } from '@/lib/utils/channel.sync.age';
 	import type { Channel } from '@/types';
 
 	const props = defineProps<{
@@ -29,6 +30,7 @@
 	}
 
 	const ageLabel = computed(() => lastEpisodeAge(props.channel.last_date));
+	const syncAgeLabel = computed(() => lastSyncAge(props.channel.last_sync_at));
 </script>
 
 <template>
@@ -49,6 +51,14 @@
 			:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
 			:title="channel.last_sync_ok ? 'Last sync succeeded' : 'Last sync failed'"
 		></span>
+
+		<span
+			v-if="syncAgeLabel"
+			class="absolute bottom-4 left-4 z-10 rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
+			:title="channel.last_sync_at ? 'Last sync: ' + channel.last_sync_at : 'Never synced'"
+		>
+			{{ syncAgeLabel }}
+		</span>
 
 		<div class="mb-6 flex gap-6">
 			<div
