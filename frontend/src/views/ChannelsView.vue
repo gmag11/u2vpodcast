@@ -147,7 +147,9 @@
 			const result = await api.updateChannel(channel.slug, channel);
 			if (result.ok) {
 				const idx = channels.value.findIndex((c) => c.id === channel.id);
-				if (idx >= 0) channels.value[idx] = channel;
+				// Apply the server response so fields the backend rejected or
+				// normalized (e.g. empty title -> 400) are never flashed as saved.
+				if (idx >= 0 && result.data) channels.value[idx] = result.data;
 				notification.show('Channel updated', 'success');
 			} else {
 				notification.show(result.message || 'Failed to update channel', 'error');
