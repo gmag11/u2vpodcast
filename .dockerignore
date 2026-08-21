@@ -49,6 +49,7 @@ LICENSE
 .justfile
 sample.http
 sample.hurl
+openspec/
 
 # OS
 .DS_Store
