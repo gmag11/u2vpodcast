@@ -14,7 +14,7 @@
 
 ## Decisions
 
-- **Filter in `Channel::read_all` (add `WHERE active = 1`).** Single source of truth for "channels the scheduler should process", and avoids touching the worker loop. The API read path and other callers of `read_all` must be checked: if any non-worker consumer needs inactive channels, use a separate query instead. Current consumers: worker only, so the filter is safe.
+- **Add a dedicated `Channel::read_active` query used only by the worker, leaving `read_all` unfiltered.** The initial design assumed the worker was `read_all`'s only consumer, but auditing found two more: the SPA channel list endpoint (`GET /channels/`) must still show inactive channels so operators can re-enable them, and `migrate_slugs` must process every channel for backfill/rename. Filtering `read_all` would have hidden deactivated channels from the UI and skipped their slug migration — so the filter lives in a separate query used solely by `do_the_work`.
 - **Do not daemonize anyway:** if a fully disabled-but-kept channel should stop being listenable too, that is out of scope; the toggle concerns syncing.
 
 ## Risks / Trade-offs

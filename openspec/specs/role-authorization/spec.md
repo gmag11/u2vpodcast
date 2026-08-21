@@ -1,16 +1,22 @@
-## ADDED Requirements
+# role-authorization
+
+## Purpose
+
+Documents the authorization model for the current single-admin deployment and the contract for the future role-management stage. Today the system operates with exactly one administrator account, so every authenticated session has full powers; role-based enforcement is intentionally deferred until user/role management exists.
+
+## Requirements
 
 ### Requirement: Current deployment is single-user, all-admin
 
-The system SHALL operate with a single user account that acts as administrator. There SHALL be no endpoint to create additional users, delete users, or change roles in the current iteration. Every successful authenticated session SHALL have full application powers (channel management, options, user endpoints) because every existing account is already an administrator.
+The system SHALL operate with a single user account that acts as administrator. User-management API endpoints (`/api/1.0/users/**`) exist, but the deployment holds exactly one account and there is no role-management flow, so every successful authenticated session SHALL have full application powers (channel management, options, and the user endpoints themselves) because every existing account is already an administrator. Role-based authorization is intentionally not enforced in this iteration.
 
 #### Scenario: Only one account exists and it can do everything
 - **WHEN** the app runs with the seeded admin account and the operator logs in
 - **THEN** the session is authorized for every route including user-management endpoints, and no other account exists
 
-#### Scenario: No user-management surface exists in this iteration
-- **WHEN** a client inspects the public API surface
-- **THEN** no endpoint allows creating users, deleting users, or changing user roles
+#### Scenario: User-management endpoints serve only the single existing account
+- **WHEN** a client calls the user-management endpoints while the deployment holds a single admin account
+- **THEN** they address or return that single account; there is no multi-account role flow to guard yet
 
 ### Requirement: Role enforcement is deferred to the role-management stage
 
