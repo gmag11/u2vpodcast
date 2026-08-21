@@ -9,7 +9,6 @@ use chrono::{
     TimeZone,
     naive::{
         NaiveDate,
-        NaiveDateTime
     },
 };
 use std::convert::TryFrom;
@@ -32,9 +31,19 @@ pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
     let channels = Channel::read_all(pool).await?;
     for channel in channels.as_slice(){
         info!("Processing: {}", channel.url);
-        match update_channel(pool, channel.id).await{
-            Ok(_) => {},
-            Err(e) => error!("Cant process channel: {channel}. Error: {e}"),
+        // Run each channel in its own isolated task so that a panic while
+        // processing one channel (e.g. yt-dlp output, filesystem) can never
+        // unwind through here and kill the scheduled worker loop.
+        let pool = pool.clone();
+        let url_for_task = channel.url.clone();
+        let channel_id = channel.id;
+        match tokio::spawn(async move {
+            if let Err(e) = update_channel(&pool, channel_id).await {
+                error!("Cant process channel: {url_for_task}. Error: {e}");
+            }
+        }).await {
+            Ok(()) => {},
+            Err(e) => error!("Task panicked while processing channel: {}. Error: {e}", channel.url),
         }
     }
     Ok(())
@@ -116,9 +125,7 @@ async fn process_channel(
         first
     };
     info!("Last video: {}", &last);
-    let days = (Utc::now().timestamp() - last.timestamp())/86400;
-    info!("Number of days: {}", days);
-    let ytvideos = ytdlp.get_latest(&channel.url, days).await?;
+    let ytvideos = ytdlp.get_latest(&channel.url, last).await?;
     info!("Getting {} videos", ytvideos.len());
     for ytvideo in ytvideos{
         info!("Processing: {}", &ytvideo.title);
@@ -189,15 +196,22 @@ async fn process_episode(
 }
 
 fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
+    // Prefer the precise publish timestamp when available.
     if let Some(timestamp) = ytvideo.timestamp {
-        TimeZone::timestamp_opt(&Utc, timestamp, 0).unwrap()
-    } else {
-        let format = "%Y%m%d";
-        let naive_date = NaiveDate::parse_from_str(&ytvideo.upload_date, format).unwrap();
-        // Add some default time to convert it into a NaiveDateTime
-        let naive_datetime: NaiveDateTime = naive_date.and_hms_opt(0,0,0).unwrap();
-        // Add a timezone to the object to convert it into a DateTime<UTC>
-        TimeZone::from_utc_datetime(&Utc, &naive_datetime)
+        if let Some(dt) = TimeZone::timestamp_opt(&Utc, timestamp, 0).single() {
+            return dt;
+        }
     }
+    let format = "%Y%m%d";
+    if let Ok(naive_date) = NaiveDate::parse_from_str(&ytvideo.upload_date, format) {
+        // Add some default time to convert it into a NaiveDateTime
+        if let Some(naive_datetime) = naive_date.and_hms_opt(0, 0, 0) {
+            // Add a timezone to the object to convert it into a DateTime<UTC>
+            return TimeZone::from_utc_datetime(&Utc, &naive_datetime);
+        }
+    }
+    // Fallback so a malformed/youtube edge-case date never panics the worker.
+    error!("Cant parse publish date from {:?}, using now()", &ytvideo.upload_date);
+    Utc::now()
 }
 

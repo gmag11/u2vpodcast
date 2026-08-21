@@ -5,6 +5,11 @@ use tracing::{
     info,
     debug,
 };
+use chrono::{
+    DateTime,
+    TimeZone,
+    Utc,
+};
 use super::Error;
 
 pub struct Ytdlp{
@@ -34,9 +39,12 @@ impl Ytdlp {
             cookies: cookies.to_string(),
         }
     }
-    pub async fn get_latest(&self, url: &str, days: i64) -> Result<Vec<YtVideo>, Error>{
+    pub async fn get_latest(&self, url: &str, last: DateTime<Utc>) -> Result<Vec<YtVideo>, Error>{
         info!("get_latest");
-        let elapsed = format!("today-{}days", days);
+        // Fetch every video published on or after the date of the last stored
+        // episode. Using the absolute date (not "today-Ndays") avoids missing
+        // videos published earlier the same day the scheduler/worker runs.
+        let elapsed = last.format("%Y%m%d").to_string();
         let args = vec!["--dateafter", &elapsed, "--dump-json",
             "--break-on-reject", "--js-runtimes", "node",
             "--js-runtimes", "deno", url];
@@ -45,14 +53,15 @@ impl Ytdlp {
             .output()
             .await?
             .stdout;
-        let mut result = std::str::from_utf8(&stdout)?
+        let lines = std::str::from_utf8(&stdout)?
             .split('\n')
+            .filter(|line| !line.trim().is_empty())
             .collect::<Vec<&str>>()
             .join(",");
-        result.pop();
-        debug!("{}", &result);
-        let content = format!("[{}]", result);
-        let ytvideos: Vec<YtVideo> = serde_json::from_str(&content).unwrap();
+        debug!("{}", &lines);
+        let content = format!("[{}]", lines);
+        let ytvideos: Vec<YtVideo> = serde_json::from_str(&content)
+            .map_err(|e| Error::default(&format!("Cant parse yt-dlp output: {e}")))?;
         info!("{:?}", &ytvideos);
         Ok(ytvideos)
     }
@@ -97,7 +106,9 @@ impl Ytdlp {
 #[tokio::test]
 async fn test_e(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
-    let salida = ytdlp.get_latest("error", 0).await;
+    // Old date: the "error" channel yields no parseable videos.
+    let old = Utc.timestamp_opt(0, 0).unwrap();
+    let salida = ytdlp.get_latest("error", old).await;
     match salida{
         Ok(videos) => {
             assert!(videos.is_empty());
@@ -110,7 +121,9 @@ async fn test_e(){
 #[tokio::test]
 async fn test_0(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
-    let salida = ytdlp.get_latest("atareao", 0).await;
+    // Recent date: expect no/very few videos on this channel.
+    let today = Utc::now();
+    let salida = ytdlp.get_latest("atareao", today).await;
     match salida{
         Ok(videos) => {
             assert!(videos.is_empty());
@@ -123,7 +136,9 @@ async fn test_0(){
 #[tokio::test]
 async fn test_info(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
-    let salida = ytdlp.get_latest("atareao", 5).await;
+    // Look back 5 days so the channel has published something.
+    let last = Utc::now() - chrono::Duration::days(5);
+    let salida = ytdlp.get_latest("atareao", last).await;
     match salida{
         Ok(videos) => {
             println!("{:?}", videos.first().unwrap());
