@@ -1,6 +1,11 @@
 production: true
 title: u2vpodcast
-url: localhost
+# Public origin of this deployment, used for the production CORS allowlist.
+# Must be a full origin without trailing slash or path, e.g. https://podcasts.example.com
+# (the origin shown in the browser's address bar). If this app is served behind
+# a reverse proxy on the same host as the SPA, requests are same-origin and CORS
+# does not affect them either way.
+url: http://localhost:6996
 port: 6996
 sleep_time: 1
 per_page: 3

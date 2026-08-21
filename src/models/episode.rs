@@ -208,6 +208,8 @@ impl Episode {
             page,
             per_page
         );
+        // A malformed page (<= 0) must never yield a negative SQL OFFSET.
+        let page = page.max(1);
         let offset = (page - 1) * per_page;
         let sql = "SELECT * FROM episodes
                    WHERE channel_id = $1 ORDER BY published_at DESC

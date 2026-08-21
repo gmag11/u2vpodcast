@@ -43,6 +43,39 @@ use models::{
 };
 use utils::worker::do_the_work;
 use actix_files as af;
+
+// Explicit origin allowlist for the production CORS policy. The configured
+// `config.url` is validated at startup and appended by the CORS builder;
+// this host is allowed so the SPA can fetch cover images. No trailing slash:
+// origins are scheme://host[:port] only.
+const YT_IMAGE_ORIGIN: &str = "https://yt3.googleusercontent.com";
+
+// Validates that a CORS origin is a full `scheme://host[:port]` value with no
+// path and no trailing slash, so the allowlist can never silently match
+// everything or misparse.
+fn validate_origin(origin: &str) -> Result<(), String> {
+    let trimmed = origin.trim();
+    let (scheme, rest) = trimmed.split_once("://").ok_or_else(|| {
+        format!(
+            "invalid CORS origin `{origin}`: missing `scheme://` (use e.g. https://podcasts.example.com)"
+        )
+    })?;
+    if !matches!(scheme, "http" | "https") {
+        return Err(format!(
+            "invalid CORS origin `{origin}`: scheme must be `http` or `https`"
+        ));
+    }
+    if rest.is_empty() || rest.contains('/') {
+        return Err(format!(
+            "invalid CORS origin `{origin}`: must not contain a path or trailing slash"
+        ));
+    }
+    if rest.split(':').next().unwrap_or("").is_empty() {
+        return Err(format!("invalid CORS origin `{origin}`: missing host"));
+    }
+    Ok(())
+}
+
 use actix_session::{
     SessionMiddleware,
     storage::CookieSessionStore,
@@ -139,6 +172,13 @@ async fn main() -> Result<(), Error> {
     let url = config.url.clone();
     let port = config.port;
 
+    // Fail fast on a misconfigured CORS origin: a bad allowlist silently
+    // deployed is worse than a loud refusal at startup.
+    if config.production {
+        validate_origin(&url)
+            .map_err(|e| Error::default(&e))?;
+    }
+
     // When both admin credentials are set in config.yml, reseed the only user
     // from the configuration on every startup. When either is missing or empty,
     // the config credentials are ignored and the existing users table is kept
@@ -225,10 +265,9 @@ async fn main() -> Result<(), Error> {
             )
             .wrap(
                 if config.production{
-                    Cors::default() // allowed_origin return access-control-allow-origin: * by default
+                    Cors::default() // explicit allowlist only; no wildcard may be configured for credentialed requests
                         .allowed_origin(&url)
-                        .allowed_origin("https://yt3.googleusercontent.com/")
-                        .allow_any_origin()
+                        .allowed_origin(YT_IMAGE_ORIGIN)
                         .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
                         .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
                         .allowed_header(header::CONTENT_TYPE)
@@ -265,4 +304,26 @@ async fn main() -> Result<(), Error> {
     .await
     .map_err(|e| e.into())
 
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::validate_origin;
+
+    #[test]
+    fn valid_origins_are_accepted() {
+        assert!(validate_origin("https://podcasts.example.com").is_ok());
+        assert!(validate_origin("https://podcasts.example.com:8443").is_ok());
+        assert!(validate_origin("http://localhost:6996").is_ok());
+        assert!(validate_origin("https://yt3.googleusercontent.com").is_ok());
+    }
+
+    #[test]
+    fn invalid_origins_are_rejected() {
+        assert!(validate_origin("localhost").is_err());
+        assert!(validate_origin("http://").is_err());
+        assert!(validate_origin("https://podcasts.example.com/").is_err());
+        assert!(validate_origin("https://podcasts.example.com/path").is_err());
+        assert!(validate_origin("ftp://example.com").is_err());
+    }
 }

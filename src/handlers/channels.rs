@@ -188,12 +188,27 @@ async fn delete(
     match Channel::read_by_id_or_slug(&data.pool, &key).await{
             Ok(channel) => {
                 let folder = audios_dir();
-                info!("Remove directory {}/{}", folder, &channel.slug);
-                match tokio::fs::remove_dir_all(format!("{}/{}", folder, &channel.slug))
-                    .await {
-                    Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
-                    Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
-                };
+                // Ownership guard: only remove the audio directory when no other
+                // channel row references the same slug path. Post-migration the
+                // slug is unique, but the guard covers stale/edge states so a
+                // shared directory can never be wiped while another channel's
+                // rows survive.
+                match Channel::count_by_slug(&data.pool, &channel.slug).await {
+                    Ok(count) if count > 1 => {
+                        error!(
+                            "Channel slug `{}` still referenced by {} channels; skipping directory removal to avoid wiping another channel's audio",
+                            &channel.slug, count
+                        );
+                    }
+                    _ => {
+                        info!("Remove directory {}/{}", folder, &channel.slug);
+                        match tokio::fs::remove_dir_all(format!("{}/{}", folder, &channel.slug))
+                            .await {
+                            Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
+                            Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
+                        };
+                    }
+                }
                 match Channel::delete(&data.pool, channel.id).await{
                     Ok(channel) => Ok(CResponse::ok(session, channel)),
                     Err(mut e) => {

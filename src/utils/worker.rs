@@ -28,7 +28,7 @@ use super::super::models::{
 };
 
 pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
-    let channels = Channel::read_all(pool).await?;
+    let channels = Channel::read_active(pool).await?;
     for channel in channels.as_slice(){
         info!("Processing: {}", channel.url);
         // Run each channel in its own isolated task so that a panic while
@@ -77,8 +77,19 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
 }
 
 async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error>{
-    let max = usize::try_from(channel.max)
-        .map_err(|e| Error::default(&e.to_string()))?;
+    // Defense in depth: a stored `max` below 1 (e.g. the historical -1 default)
+    // must never trigger mass deletion and must not fail the sync. We keep all
+    // episodes unchanged until the operator sets a valid retention limit.
+    let max = match usize::try_from(channel.max) {
+        Ok(m) if m >= 1 => m,
+        _ => {
+            info!(
+                "Skipping prune for channel {}: max={} is invalid; keeping all episodes",
+                channel.id, channel.max
+            );
+            return Ok(());
+        }
+    };
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     for (index, episode) in episodes.iter().enumerate(){
         if index >= max { // remove

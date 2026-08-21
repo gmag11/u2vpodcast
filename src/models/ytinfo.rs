@@ -1,7 +1,12 @@
 use regex::Regex;
-use ureq;
+use ureq::Agent;
+use std::time::Duration;
 
 use super::Error;
+
+// Upper bound for the metadata fetch so a hung upstream cannot stall blocking
+// threads (or the async workers waiting on them) indefinitely.
+const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 
 
 
@@ -23,14 +28,28 @@ impl YTInfo{
 
     pub async fn new(url: &str) -> Result<Self, Error>{
 
-        let html: String = ureq::get(url)
-            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .call()
-            .map_err(|e| Error::default(&e.to_string()))?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| Error::default(&e.to_string()))?;
+        // The upstream HTTP fetch is fully synchronous; run it on the blocking
+        // thread pool so two slow/hung fetches can never stall the few tokio
+        // worker threads that serve the whole API. The closure returns a plain
+        // String error because this crate's `Error` wraps a non-Send `Session`.
+        let url = url.to_string();
+        let html = actix_web::rt::task::spawn_blocking(move || -> Result<String, String> {
+            let agent: Agent = ureq::Agent::config_builder()
+                .timeout_global(Some(METADATA_TIMEOUT))
+                .build()
+                .into();
+            agent.get(&url)
+                .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .call()
+                .map_err(|e| e.to_string())?
+                .body_mut()
+                .read_to_string()
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| Error::default(&e.to_string()))?
+        .map_err(|e| Error::default(&e))?;
 
         let title = get_metadata(&html, "og:title");
         let description = get_metadata(&html, "og:description");

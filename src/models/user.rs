@@ -38,6 +38,11 @@ pub struct SessionUser{
 }
 
 
+// Single-admin invariant (see `Role` doc comment): every existing account is an
+// administrator, so no per-route role check exists by design. When the future
+// role-management stage lands, `from_session` claims (role/active) are already
+// refreshed per request from the DB (see `validate_session` middleware), so the
+// guards can simply read `claims.role`/`claims.active`.
 pub fn from_session(session: Session) -> Result<SessionUser, Error> {
     info!("from_session");
     let id = session.get(USER_ID_KEY)
@@ -65,6 +70,7 @@ pub fn from_session(session: Session) -> Result<SessionUser, Error> {
 pub struct User{
     pub id: i64,
     pub name: String,
+    #[serde(skip_serializing)]
     pub hashed_password: String,
     pub role: Role,
     pub active: bool,
@@ -232,6 +238,8 @@ impl User{
         per_page: i64,
     ) -> Result<Vec<User>, Error> {
         tracing::debug!("Página: {page}. Páginas: {per_page}");
+        // A malformed page (<= 0) must never yield a negative SQL OFFSET.
+        let page = page.max(1);
         let offset = (page - 1) * per_page;
         let sql = "SELECT * FROM users ORDER BY created_at ASC LIMIT $1 OFFSET $2";
         query(sql)

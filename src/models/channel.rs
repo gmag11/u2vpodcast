@@ -23,7 +23,7 @@ use sqlx::{
         SqliteRow
     },
     query,
-    Row
+    Row,
 };
 
 use super::{
@@ -63,6 +63,7 @@ pub struct NewChannel {
 pub struct UpdateChannel {
     pub id: i64,
     pub url: String,
+    pub title: String,
     pub active: bool,
     pub first: DateTime<Utc>,
     pub max: i64,
@@ -72,6 +73,16 @@ impl Display for Channel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({} - {})", self.id, self.url)
     }
+}
+
+// True when the sqlx error is a SQLite unique-constraint violation specifically
+// on the `channels.slug` column. We must NOT treat violations of other unique
+// constraints (e.g. `channels.url` when creating the same channel twice) as a
+// slug race, or the retry loop would spin unboundedly.
+fn is_slug_unique_violation(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .map(|dbe| dbe.is_unique_violation() && dbe.message().contains("channels.slug"))
+        .unwrap_or(false)
 }
 
 fn slugify(title: &str) -> String {
@@ -105,6 +116,12 @@ impl Channel{
 
     pub async fn new(pool: &SqlitePool, channel: NewChannel) -> Result<Self, Error>{
         info!("new");
+        if channel.max < 1 {
+            return Err(Error::new_with_status_code(
+                "max must be >= 1",
+                StatusCode::BAD_REQUEST,
+            ));
+        }
         let created_at = Utc::now();
         let updated_at = created_at;
         let ytinfo = match YTInfo::new(&channel.url).await{
@@ -112,25 +129,50 @@ impl Channel{
             Err(_) => YTInfo::default(),
         };
         let base_slug = slugify(&ytinfo.title);
-        let slug = Self::unique_slug(pool, &base_slug).await;
         let sql = "INSERT INTO channels (url, title, slug, active, description,
                    image, first, max, created_at, updated_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *;";
-        let mut channel_row = query(sql)
-            .bind(&channel.url)
-            .bind(&ytinfo.title)
-            .bind(&slug)
-            .bind(channel.active)
-            .bind(&ytinfo.description)
-            .bind(&ytinfo.image)
-            .bind(channel.first)
-            .bind(channel.max)
-            .bind(created_at)
-            .bind(updated_at)
-            .map(Self::from_row)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| Error::default(&e.to_string()))?;
+        // Check-then-insert can lose a race: a second concurrent creation may
+        // take the same slug between our uniqueness check and the INSERT. The
+        // DB-level UNIQUE index turns that race into a unique-violation error,
+        // and we retry with the next -N suffix instead of failing.
+        let mut attempt = 0u32;
+        let mut channel_row;
+        loop {
+            let slug = if attempt == 0 {
+                Self::unique_slug(pool, &base_slug).await
+            } else if base_slug.is_empty() {
+                format!("channel-{}", attempt + 1)
+            } else {
+                format!("{}-{}", base_slug, attempt + 1)
+            };
+            match query(sql)
+                .bind(&channel.url)
+                .bind(&ytinfo.title)
+                .bind(&slug)
+                .bind(channel.active)
+                .bind(&ytinfo.description)
+                .bind(&ytinfo.image)
+                .bind(channel.first)
+                .bind(channel.max)
+                .bind(created_at)
+                .bind(updated_at)
+                .map(Self::from_row)
+                .fetch_one(pool)
+                .await
+            {
+                Ok(row) => {
+                    channel_row = row;
+                    break;
+                }
+                Err(e) if is_slug_unique_violation(&e) => {
+                    debug!("Slug `{slug}` raced; retrying with suffix {}", attempt + 1);
+                    attempt += 1;
+                    continue;
+                }
+                Err(e) => return Err(Error::default(&e.to_string())),
+            }
+        }
         if channel_row.slug.is_empty() {
             let fallback = format!("channel-{}", channel_row.id);
             let sql = "UPDATE channels SET slug = $1 WHERE id = $2 RETURNING *";
@@ -194,6 +236,16 @@ impl Channel{
         }
     }
 
+    pub async fn count_by_slug(pool: &SqlitePool, slug: &str) -> Result<i64, Error>{
+        let sql = "SELECT count(*) FROM channels WHERE slug = $1";
+        query(sql)
+            .bind(slug)
+            .map(|row: SqliteRow| -> i64 { row.get(0) })
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.into())
+    }
+
     pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
         info!("read");
         let sql = "SELECT * FROM channels WHERE id = $1";
@@ -219,6 +271,26 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
+    // Channels the scheduled worker is allowed to process: only those with the
+    // active flag set. Kept separate from `read_all` on purpose - the SPA
+    // channel list and the slug migration both need *all* channels, inactive
+    // included (otherwise a deactivated channel could not be re-enabled from
+    // the UI and would never get its slug backfilled).
+    pub async fn read_active(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+        info!("read_active");
+        let sql = "SELECT c.*, e.last_date FROM channels c \
+                   LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
+                              FROM episodes GROUP BY channel_id) e \
+                   ON e.channel_id = c.id \
+                   WHERE c.active = 1 \
+                   ORDER BY e.last_date IS NULL, e.last_date DESC";
+        query(sql)
+            .map(Self::from_row)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.into())
+    }
+
     #[allow(unused)]
     pub async fn read_with_pagination(
         pool: &SqlitePool,
@@ -226,6 +298,8 @@ impl Channel{
         per_page: i64,
     ) -> Result<Vec<Channel>, Error> {
         tracing::debug!("Página: {page}. Páginas: {per_page}");
+        // A malformed page (<= 0) must never yield a negative SQL OFFSET.
+        let page = page.max(1);
         let offset = (page - 1) * per_page;
         let sql = "SELECT * FROM channels ORDER BY created_at ASC LIMIT $1 OFFSET $2";
         query(sql)
@@ -240,13 +314,29 @@ impl Channel{
     pub async fn update(pool: &SqlitePool, channel: &UpdateChannel) -> Result<Self, Error>{
         info!("update");
         debug!("{:?}", channel);
+        if channel.max < 1 {
+            return Err(Error::new_with_status_code(
+                "max must be >= 1",
+                StatusCode::BAD_REQUEST,
+            ));
+        }
+        if channel.title.trim().is_empty() {
+            return Err(Error::new_with_status_code(
+                "Channel title cannot be empty",
+                StatusCode::BAD_REQUEST,
+            ));
+        }
         let updated_at = Utc::now();
-        let sql = "UPDATE channels SET active = $1, first = $2, max = $3,
-                   updated_at = $4 WHERE id = $5 RETURNING *";
+        // The slug stays immutable: renaming a channel must not change its slug
+        // or audio directory (see channel-slugs spec).
+        let sql = "UPDATE channels SET url = $1, active = $2, first = $3, max = $4,
+                   title = $5, updated_at = $6 WHERE id = $7 RETURNING *";
         query(sql)
+            .bind(&channel.url)
             .bind(channel.active)
             .bind(channel.first)
             .bind(channel.max)
+            .bind(&channel.title)
             .bind(updated_at)
             .bind(channel.id)
             .map(Self::from_row)

@@ -5,6 +5,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use actix_session::Session;
 use actix_session::SessionExt;
 use actix_web::{
     body::{BoxBody, MessageBody},
@@ -20,6 +21,7 @@ use actix_web::{
 };
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde_json::Value;
+use sqlx::SqlitePool;
 
 use crate::models::{
     AppState,
@@ -27,9 +29,40 @@ use crate::models::{
     User,
     from_session,
 };
+use crate::utils::{
+    USER_ID_KEY,
+    USER_NAME_KEY,
+    USER_ROLE_KEY,
+    USER_ACTIVE_KEY,
+};
 
 type BoxFuture =
     Pin<Box<dyn Future<Output = Result<ServiceResponse<BoxBody>, Error>>>>;
+
+// Revalidates a session claim set against the current `users` table on every
+// request. A cookie that resolves to a missing or deactivated user is rejected
+// (401), closing the gap where stale claims kept working until the cookie TTL.
+// On success the claims (name/role/active) are refreshed from the DB row so the
+// session always reflects the current state.
+async fn validate_session(session: &Session, pool: &SqlitePool) -> bool {
+    let claims = match from_session(session.clone()) {
+        Ok(claims) => claims,
+        Err(_) => return false,
+    };
+    let user = match User::read(pool, claims.id).await {
+        Ok(user) => user,
+        Err(_) => return false, // user deleted → reject
+    };
+    if !user.active {
+        return false; // user deactivated → reject
+    }
+    // Refresh claims so a role/name/active change never lingers in the cookie.
+    let _ = session.insert(USER_ID_KEY, user.id);
+    let _ = session.insert(USER_NAME_KEY, &user.name);
+    let _ = session.insert(USER_ROLE_KEY, &user.role);
+    let _ = session.insert(USER_ACTIVE_KEY, user.active);
+    true
+}
 
 // ---------- require_session ----------
 
@@ -74,15 +107,17 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let session = req.get_session();
-        match from_session(session.clone()) {
-            Ok(_) => {
-                let service = Rc::clone(&self.service);
-                Box::pin(async move {
-                    let res = service.call(req).await?;
-                    Ok(res.map_into_boxed_body())
-                })
-            }
-            Err(_) => {
+        let pool = req.app_data::<Data<AppState>>().map(|data| data.pool.clone());
+        let service = Rc::clone(&self.service);
+        Box::pin(async move {
+            let valid = match pool {
+                Some(pool) => validate_session(&session, &pool).await,
+                None => false,
+            };
+            if valid {
+                let res = service.call(req).await?;
+                Ok(res.map_into_boxed_body())
+            } else {
                 let response = CustomResponse::<Value>::new(
                     StatusCode::UNAUTHORIZED,
                     "Unauthorized",
@@ -90,9 +125,9 @@ where
                     None,
                 );
                 let http_response = HttpResponse::build(StatusCode::UNAUTHORIZED).json(response);
-                Box::pin(async move { Ok(req.into_response(http_response)) })
+                Ok(req.into_response(http_response))
             }
-        }
+        })
     }
 }
 
@@ -157,18 +192,18 @@ where
                 Ok(res.map_into_boxed_body())
             });
         }
-        if from_session(req.get_session()).is_ok() {
-            let service = Rc::clone(&self.service);
-            return Box::pin(async move {
-                let res = service.call(req).await?;
-                Ok(res.map_into_boxed_body())
-            });
-        }
-        let mut payload = Payload::None;
-        let extraction = BasicAuth::from_request(req.request(), &mut payload);
+        let session = req.get_session();
         let service = Rc::clone(&self.service);
         let pool = data.pool.clone();
         Box::pin(async move {
+            // Session branch: revalidated against the DB on every request.
+            if validate_session(&session, &pool).await {
+                let res = service.call(req).await?;
+                return Ok(res.map_into_boxed_body());
+            }
+            // Fallback: HTTP Basic Auth, resolved against the DB.
+            let mut payload = Payload::None;
+            let extraction = BasicAuth::from_request(req.request(), &mut payload);
             let credentials = match extraction.await {
                 Ok(credentials) => credentials,
                 Err(_) => return Ok(unauthorized(req)),
