@@ -31,6 +31,12 @@
 
 	const ageLabel = computed(() => lastEpisodeAge(props.channel.last_date));
 	const syncAgeLabel = computed(() => lastSyncAge(props.channel.last_sync_at));
+	const hasSyncStatus = computed(
+		() => props.channel.last_sync_ok === true || props.channel.last_sync_ok === false
+	);
+	const syncStatusTooltip = computed(
+		() => `Updated ${syncAgeLabel.value} ago. Status: ${props.channel.last_sync_ok ? 'Ok' : 'Error'}`
+	);
 </script>
 
 <template>
@@ -45,20 +51,27 @@
 			{{ ageLabel }}
 		</span>
 
-		<span
-			v-if="channel.last_sync_ok === true || channel.last_sync_ok === false"
-			class="absolute left-4 top-4 z-10 h-2.5 w-2.5 rounded-full shadow"
-			:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
-			:title="channel.last_sync_ok ? 'Last sync succeeded' : 'Last sync failed'"
-		></span>
-
-		<span
-			v-if="syncAgeLabel"
-			class="absolute bottom-4 left-4 z-10 rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
-			:title="channel.last_sync_at ? 'Last sync: ' + channel.last_sync_at : 'Never synced'"
+		<div
+			v-if="hasSyncStatus || syncAgeLabel"
+			class="group absolute bottom-4 left-4 z-10 flex items-center gap-1.5"
 		>
-			{{ syncAgeLabel }}
-		</span>
+			<span
+				v-if="hasSyncStatus"
+				class="h-2.5 w-2.5 rounded-full shadow"
+				:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
+			></span>
+			<span
+				v-if="syncAgeLabel"
+				class="rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
+			>
+				{{ syncAgeLabel }}
+			</span>
+			<span
+				class="pointer-events-none absolute bottom-full left-0 z-20 mb-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+			>
+				{{ syncStatusTooltip }}
+			</span>
+		</div>
 
 		<div class="mb-6 flex gap-6">
 			<div
