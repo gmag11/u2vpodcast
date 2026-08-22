@@ -2,6 +2,7 @@ use tokio::process::Command;
 use serde::{Serialize, Deserialize};
 use tracing::{
     info,
+    debug,
 };
 use chrono::{
     DateTime,
@@ -48,6 +49,51 @@ impl Ytdlp {
             cookies: cookies.to_string(),
         }
     }
+
+    // Runs a yt-dlp command streaming its stderr to the DEBUG log (so long
+    // silent runs are observable: progress lines like `[youtube] Extracting
+    // URL ...` appear as they are produced) while collecting stdout for
+    // parsing. Both pipes are drained concurrently so a large stdout cannot
+    // deadlock the stderr stream (or vice versa).
+    async fn run_streamed(
+        path: &str,
+        args: &[&str],
+    ) -> Result<(std::process::ExitStatus, Vec<u8>), std::io::Error> {
+        use std::process::Stdio;
+        use tokio::io::{
+            AsyncBufReadExt,
+            AsyncReadExt,
+            BufReader,
+        };
+
+        let mut child = Command::new(path)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+
+        let stdout_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            let _ = stdout.read_to_end(&mut bytes).await;
+            bytes
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                debug!("yt-dlp: {line}");
+            }
+        });
+
+        let status = child.wait().await?;
+        let stdout_bytes = stdout_task
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let _ = stderr_task.await;
+        Ok((status, stdout_bytes))
+    }
     // Shared cookie flags: listing and download must never diverge on
     // credentials again, or restricted content silently vanishes from scans
     // (youtube-scan-reliability).
@@ -71,13 +117,10 @@ impl Ytdlp {
         args.push(url);
         // yt-dlp listing is a YouTube connection: it runs through the shared
         // throttle so it serializes with downloads, the update check, and
-        // metadata/image fetches (youtube-throttling).
+        // metadata/image fetches (youtube-throttling). stderr is streamed to
+        // the DEBUG log so a long listing stays observable.
         let stdout = with_youtube_slot(move || async move {
-            Command::new(&self.path)
-                .args(&args)
-                .output()
-                .await
-                .map(|output| output.stdout)
+            Self::run_streamed(&self.path, &args).await.map(|(_status, stdout)| stdout)
         })
         .await?;
         let ytvideos = parse_dump_output(&stdout)?;
@@ -95,26 +138,24 @@ impl Ytdlp {
         args.push(&url);
         // One run carries both the download and the full episode metadata
         // (`--print-json`): no separate extraction pass, still under the
-        // single YouTube throttle (scalable-channel-listing).
-        let output_result = with_youtube_slot(move || async move {
-            Command::new(&self.path)
-                .args(&args)
-                .output()
-                .await
+        // single YouTube throttle (scalable-channel-listing). stderr is
+        // streamed to the DEBUG log (progress during downloads).
+        let (download_status, download_stdout) = with_youtube_slot(move || async move {
+            Self::run_streamed(&self.path, &args).await
         })
         .await
         .map_err(|e| Error::default(&e.to_string()))?;
-        let mut videos = parse_dump_output(&output_result.stdout)?;
+        let mut videos = parse_dump_output(&download_stdout)?;
         let info = match videos.pop() {
             Some(video) => video,
             None => {
                 return Err(Error::default(&format!(
                     "yt-dlp produced no metadata for {url} (exit {:?})",
-                    output_result.status.code()
+                    download_status.code()
                 )))
             }
         };
-        Ok((output_result.status, info))
+        Ok((download_status, info))
     }
 
     pub async fn auto_update() -> Result<(), Error>{
@@ -129,12 +170,7 @@ impl Ytdlp {
         // GitHub, but every yt-dlp execution passes through the same slot so a
         // future update channel cannot bypass the throttle).
         let status = with_youtube_slot(|| async move {
-            let mut child = Command::new(python3)
-                .args(&args)
-                .spawn()?;
-            child
-                .wait()
-                .await
+            Self::run_streamed(python3, &args).await.map(|(status, _stdout)| status)
         })
         // Only Send types cross the slot (io::Error / ExitStatus); the crate
         // `Error` (non-Send) is rebuilt after the cooldown releases.

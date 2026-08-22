@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 use tracing::{
     info,
+    debug,
     error,
 };
 use chrono::{
@@ -162,7 +163,7 @@ async fn process_channel(
     info!("Getting {} videos", ytvideos.len());
     for ytvideo in ytvideos{
         info!("Processing: {}", &ytvideo.title);
-        match process_episode(pool, channel, &ytvideo, ytdlp, folder).await{
+        match process_episode(pool, channel, &ytvideo, ytdlp, folder, last).await{
             Ok(_) => {},
             Err(e) => error!("Cant process episode: {e}"),
         }
@@ -177,6 +178,7 @@ async fn process_episode(
     ytvideo: &YtVideo,
     ytdlp: &Ytdlp,
     folder: &str,
+    window_start: DateTime<Utc>,
 ) -> Result<(), Error>{
     info!("Start processing episode {}", ytvideo.title);
     if channel.episode_exists(pool, &ytvideo.id).await{
@@ -201,6 +203,19 @@ async fn process_episode(
     if !status.success(){
         Err(Error::default(&format!("Cant download {filename}")))?
     }
+    let published_at = get_published_at(&info);
+    // Authoritative re-check against the date window: a flat candidate that
+    // carried no date (and so survived the backstop) may turn out to be out of
+    // window once the real metadata is known — drop it and its downloaded
+    // file instead of storing an episode outside the window.
+    if published_at < window_start {
+        info!(
+            "Discarding {} published {published_at}: before the {window_start} window",
+            ytvideo.id
+        );
+        let _ = tokio::fs::remove_file(&filename).await;
+        return Ok(());
+    }
     let delay = rand::thread_rng().gen_range(20..=40);
     info!("Pausing {delay} seconds before next download");
     sleep(Duration::from_secs(delay)).await;
@@ -211,7 +226,6 @@ async fn process_episode(
     let duration = if info.duration_string.is_empty() { &ytvideo.duration_string } else { &info.duration_string };
     let image = if info.thumbnail.is_empty() { &ytvideo.thumbnail } else { &info.thumbnail };
     info!("{}", &info.upload_date);
-    let published_at = get_published_at(&info);
     let _ = filetime::set_file_mtime(
         &filename,
         filetime::FileTime::from_unix_time(
@@ -248,8 +262,11 @@ fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
             return TimeZone::from_utc_datetime(&Utc, &naive_datetime);
         }
     }
-    // Fallback so a malformed/youtube edge-case date never panics the worker.
-    error!("Cant parse publish date from {:?}, using now()", &ytvideo.upload_date);
+    // Fallback so a malformed/youtube edge-case date never panics the worker,
+    // and flat-listing entries that omit dates do not spam the ERROR log (the
+    // candidate is conservatively kept; the authoritative date comes from the
+    // per-video detail/download metadata - scalable-channel-listing).
+    debug!("Cant parse publish date from {:?}, using now()", &ytvideo.upload_date);
     Utc::now()
 }
 
