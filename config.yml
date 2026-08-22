@@ -15,9 +15,11 @@ per_page: 3
 #   openssl rand -base64 48 | tr -d '\n'
 secret_key: "Idz6CvGkPzEEbvwzNwp6adGodfjBPoRVUdIz5QVOyoi1Llff9o3Fz7NEScsh6tAH"
 # If both admin_username and admin_password are present, the admin user is
-# recreated from these values on every startup. To instead use the admin
-# account already stored in the database, comment out both keys below; the
-# users table is then left untouched.
+# recreated from these values on every startup. Because recreation produces a
+# new row id, existing login sessions DO NOT survive container restarts. To
+# keep sessions across restarts: log in once with these credentials so the
+# user row exists, then comment out both keys below. The users table is then
+# left untouched and sessions persist.
 admin_username: admin
 admin_password: nimda
 # When true, the RSS feed (/channels/{channel_id}/feed.xml) and the media files

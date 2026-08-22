@@ -67,6 +67,8 @@ You need to modify `config.yml`. Change the params as you need, and add all the 
 
 If only one of `admin_username` and `admin_password` is set (or both are missing), both are **ignored**: the `users` table is left untouched on startup and the service authenticates against the admin account already stored in the database. To adopt this mode, log in once with the seeded credentials so the user row exists, then remove both keys from `config.yml` and restart.
 
+**Sessions and restarts:** in seeded mode (both keys present) the admin user is recreated on every startup with a **new database row id**, so existing session cookies stop validating (the session middleware rechecks the user on each request) and you must log in again after every container restart. In the persistent mode above, the `users` table is never rewritten and login sessions survive restarts. Keep `secret_key` unchanged too — changing it invalidates every signed session cookie regardless of mode.
+
 ### Usage
 
 ```
