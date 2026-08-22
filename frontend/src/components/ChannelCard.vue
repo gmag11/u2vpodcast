@@ -42,6 +42,9 @@
 			status: props.channel.last_sync_ok ? t('status.ok') : t('status.error')
 		})
 	);
+	const episodeAgeTooltip = computed(() =>
+		t('card.lastEpisodeTooltip', { age: ageLabel.value })
+	);
 </script>
 
 <template>
@@ -49,32 +52,18 @@
 		class="glass-card relative flex h-full min-h-[300px] cursor-pointer flex-col rounded-3xl p-8"
 		@click="openEpisodes"
 	>
-		<span
-			v-if="ageLabel"
-			class="absolute right-4 top-4 z-10 rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
-		>
-			{{ ageLabel }}
-		</span>
-
-		<div
-			v-if="hasSyncStatus || syncAgeLabel"
-			class="group absolute bottom-4 left-4 z-10 flex items-center gap-1.5"
-		>
+		<div class="group absolute right-4 top-4 z-10">
 			<span
-				v-if="hasSyncStatus"
-				class="h-2.5 w-2.5 rounded-full shadow"
-				:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
-			></span>
-			<span
-				v-if="syncAgeLabel"
-				class="rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
+				v-if="ageLabel"
+				class="block rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
 			>
-				{{ syncAgeLabel }}
+				{{ ageLabel }}
 			</span>
 			<span
-				class="pointer-events-none absolute bottom-full left-0 z-20 mb-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				v-if="ageLabel"
+				class="pointer-events-none absolute top-full right-0 z-20 mt-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 			>
-				{{ syncStatusTooltip }}
+				{{ episodeAgeTooltip }}
 			</span>
 		</div>
 
@@ -101,86 +90,109 @@
 				</p>
 			</div>
 		</div>
-		<div class="mt-auto flex justify-end gap-4 border-t border-outline pt-4">
-			<div class="group relative">
-				<a
-					:href="channel.url"
-					target="_blank"
-					rel="noopener noreferrer"
-					:aria-label="$t('common.youtube')"
-					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-					@click.stop
-				>
-					<PhYoutubeLogo class="h-5 w-5" weight="regular" />
-				</a>
+		<div class="mt-auto flex items-center justify-between gap-4 border-t border-outline pt-4">
+			<div
+				v-if="hasSyncStatus || syncAgeLabel"
+				class="group relative flex items-center gap-1.5"
+			>
 				<span
-					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					v-if="hasSyncStatus"
+					class="h-2.5 w-2.5 rounded-full shadow"
+					:class="channel.last_sync_ok ? 'bg-emerald-500' : 'bg-error'"
+				></span>
+				<span
+					v-if="syncAgeLabel"
+					class="rounded-full bg-surface-high px-2.5 py-1 text-xs font-semibold text-text shadow"
 				>
-					{{ $t('card.openOnYouTube') }}
+					{{ syncAgeLabel }}
+				</span>
+				<span
+					class="pointer-events-none absolute bottom-full left-0 z-20 mb-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+				>
+					{{ syncStatusTooltip }}
 				</span>
 			</div>
-			<div class="group relative">
-				<a
-					:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
-					target="_blank"
-					rel="noopener noreferrer"
-					:aria-label="$t('card.rssAria')"
-					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-					@click.stop
-				>
-					<PhRss class="h-5 w-5" weight="regular" />
-				</a>
-				<span
-					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
-				>
-					{{ $t('card.rssFeed') }}
-				</span>
-			</div>
-			<div class="group relative">
-				<button
-					type="button"
-					:aria-label="$t('card.refreshCoverAria')"
-					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
-					:disabled="refreshing"
-					@click.stop="emit('cover-refresh', channel)"
-				>
-					<PhImage :class="refreshing ? 'h-5 w-5 animate-spin' : 'h-5 w-5'" weight="regular" />
-				</button>
-				<span
-					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
-				>
-					{{ $t('card.reloadCover') }}
-				</span>
-			</div>
-			<div class="group relative">
-				<button
-					type="button"
-					:aria-label="$t('card.edit')"
-					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
-					@click.stop="emit('update', channel)"
-				>
-					<PhPencilSimple class="h-5 w-5" weight="regular" />
-				</button>
-				<span
-					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
-				>
-					{{ $t('card.editLabel') }}
-				</span>
-			</div>
-			<div class="group relative">
-				<button
-					type="button"
-					:aria-label="$t('card.delete')"
-					class="cursor-pointer text-error transition-colors hover:opacity-80"
-					@click.stop="emit('delete', channel)"
-				>
-					<PhTrashSimple class="h-5 w-5" weight="regular" />
-				</button>
-				<span
-					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
-				>
-					{{ $t('card.deleteLabel') }}
-				</span>
+			<div class="flex justify-end gap-4">
+				<div class="group relative">
+					<a
+						:href="channel.url"
+						target="_blank"
+						rel="noopener noreferrer"
+						:aria-label="$t('common.youtube')"
+						class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+						@click.stop
+					>
+						<PhYoutubeLogo class="h-5 w-5" weight="regular" />
+					</a>
+					<span
+						class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					>
+						{{ $t('card.openOnYouTube') }}
+					</span>
+				</div>
+				<div class="group relative">
+					<a
+						:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
+						target="_blank"
+						rel="noopener noreferrer"
+						:aria-label="$t('card.rssAria')"
+						class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+						@click.stop
+					>
+						<PhRss class="h-5 w-5" weight="regular" />
+					</a>
+					<span
+						class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					>
+						{{ $t('card.rssFeed') }}
+					</span>
+				</div>
+				<div class="group relative">
+					<button
+						type="button"
+						:aria-label="$t('card.refreshCoverAria')"
+						class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
+						:disabled="refreshing"
+						@click.stop="emit('cover-refresh', channel)"
+					>
+						<PhImage :class="refreshing ? 'h-5 w-5 animate-spin' : 'h-5 w-5'" weight="regular" />
+					</button>
+					<span
+						class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					>
+						{{ $t('card.reloadCover') }}
+					</span>
+				</div>
+				<div class="group relative">
+					<button
+						type="button"
+						:aria-label="$t('card.edit')"
+						class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
+						@click.stop="emit('update', channel)"
+					>
+						<PhPencilSimple class="h-5 w-5" weight="regular" />
+					</button>
+					<span
+						class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					>
+						{{ $t('card.editLabel') }}
+					</span>
+				</div>
+				<div class="group relative">
+					<button
+						type="button"
+						:aria-label="$t('card.delete')"
+						class="cursor-pointer text-error transition-colors hover:opacity-80"
+						@click.stop="emit('delete', channel)"
+					>
+						<PhTrashSimple class="h-5 w-5" weight="regular" />
+					</button>
+					<span
+						class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
+					>
+						{{ $t('card.deleteLabel') }}
+					</span>
+				</div>
 			</div>
 		</div>
 	</div>

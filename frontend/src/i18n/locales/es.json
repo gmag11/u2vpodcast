@@ -80,7 +80,8 @@
 		"editLabel": "Editar canal",
 		"delete": "Eliminar",
 		"deleteLabel": "Eliminar canal y archivos de audio",
-		"syncTooltip": "Actualizado hace {age}. Estado: {status}"
+		"syncTooltip": "Actualizado hace {age}. Estado: {status}",
+		"lastEpisodeTooltip": "Último episodio hace {age}"
 	},
 	"status": {
 		"ok": "Correcto",
