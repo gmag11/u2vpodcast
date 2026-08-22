@@ -8,6 +8,10 @@ use super::{
     Error,
     images_dir,
 };
+use crate::utils::throttle::{
+    YoutubeGuard,
+    with_youtube_slot,
+};
 
 // Upper bound for the metadata fetch so a hung upstream cannot stall blocking
 // threads (or the async workers waiting on them) indefinitely.
@@ -53,23 +57,34 @@ impl YTInfo{
         // thread pool so two slow/hung fetches can never stall the few tokio
         // worker threads that serve the whole API. The closure returns a plain
         // String error because this crate's `Error` wraps a non-Send `Session`.
+        //
+        // The whole fetch runs inside the single-connection YouTube throttle:
+        // the slot is acquired before the blocking fetch and held through its
+        // cooldown, so a metadata fetch can never overlap a yt-dlp run or a
+        // cover-image fetch (youtube-throttling / limit-youtube-concurrency).
         let url = url.to_string();
-        let html = actix_web::rt::task::spawn_blocking(move || -> Result<String, String> {
-            let agent: Agent = ureq::Agent::config_builder()
-                .timeout_global(Some(METADATA_TIMEOUT))
-                .build()
-                .into();
-            agent.get(&url)
-                .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .call()
-                .map_err(|e| e.to_string())?
-                .body_mut()
-                .read_to_string()
-                .map_err(|e| e.to_string())
+        let html = with_youtube_slot(move || async move {
+            actix_web::rt::task::spawn_blocking(move || -> Result<String, String> {
+                let agent: Agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(METADATA_TIMEOUT))
+                    .build()
+                    .into();
+                agent.get(&url)
+                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .call()
+                    .map_err(|e| e.to_string())?
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| e.to_string())
+            })
+            // The slot closure only transports Send types (String errors), so
+            // the exposed `Error` (which wraps a non-Send session) is rebuilt
+            // here, after the slot and cooldown are released.
+            .await
+            .map_err(|e| e.to_string())?
         })
         .await
-        .map_err(|e| Error::default(&e.to_string()))?
         .map_err(|e| Error::default(&e))?;
 
         let title = get_metadata(&html, "og:title");
@@ -173,6 +188,11 @@ async fn cache_image_in_dir(
             .unwrap_or(0)
     );
     let probe_dest = dest.clone();
+    // The probe + download occupies the single YouTube slot (the whole
+    // HEAD-then-GET image operation counts as one connection); the permit is
+    // released after the cooldown so image traffic serializes with metadata
+    // fetches and yt-dlp runs (youtube-throttling).
+    let permit = YoutubeGuard::acquire().await;
     let outcome = match actix_web::rt::task::spawn_blocking(move || {
         image_fetch_blocking(&probe_dest, &remote_url)
     })
@@ -183,12 +203,17 @@ async fn cache_image_in_dir(
         // `channel.image` (channel-image-cache).
         Ok(Err(reason)) => {
             warn!("Keeping previous cached image for `{slug}`: {reason}");
+            permit.cooldown_and_release().await;
             return Ok(None);
         }
         // Blocking-pool join failure: unrecoverable.
-        Err(e) => return Err(Error::default(&e.to_string())),
+        Err(e) => {
+            permit.cooldown_and_release().await;
+            return Err(Error::default(&e.to_string()));
+        }
         Ok(Ok(outcome)) => outcome,
     };
+    permit.cooldown_and_release().await;
 
     match outcome {
         ImageFetchOutcome::Skip => {
@@ -647,6 +672,86 @@ mod image_cache_tests {
 }
 
 
+
+#[cfg(test)]
+mod metadata_throttle_tests {
+    use super::*;
+    use crate::utils::throttle::init_throttle;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::Duration;
+
+    // Serves one HTML page per incoming connection (a thread per connection so
+    // true concurrency is observable) and tracks the peak number of concurrent
+    // requests. If the caller serializes, the peak stays 1.
+    fn spawn_html_server() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let thread_active = Arc::clone(&active);
+        let thread_max = Arc::clone(&max_active);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let active = Arc::clone(&thread_active);
+                let max_active = Arc::clone(&thread_max);
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let mut buf = [0u8; 4096];
+                    if stream.read(&mut buf).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(now, Ordering::SeqCst);
+                    // Hold the connection briefly so overlap would be visible.
+                    std::thread::sleep(Duration::from_millis(30));
+                    let html = r#"<html><head><meta property="og:title" content="Canal X"></head><body></body></html>"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        html.len(),
+                        html
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    active.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        (addr, max_active)
+    }
+
+    #[tokio::test]
+    async fn concurrent_metadata_fetches_never_overlap() {
+        // Same cooldown value as every other throttle test: `init_throttle`
+        // is first-call-wins, so all modules must agree.
+        init_throttle(Duration::from_millis(30));
+        let (addr, max_active) = spawn_html_server();
+        let url = format!("http://{addr}/channel");
+        let barrier = Arc::new(tokio::sync::Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let url = url.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                YTInfo::new(&url).await.expect("local metadata fetch")
+            }));
+        }
+        for handle in handles {
+            let info = handle.await.expect("fetch task completed");
+            assert_eq!(info.title, "Canal X");
+        }
+        let peak = max_active.load(Ordering::SeqCst);
+        assert_eq!(
+            peak, 1,
+            "metadata fetches overlapped on the server (peak {peak} concurrent requests)"
+        );
+    }
+}
 
 #[tokio::test]
 async fn test_info_channel(){

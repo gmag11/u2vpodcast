@@ -13,6 +13,7 @@ use chrono::{
 #[cfg(test)]
 use chrono::TimeZone;
 use super::Error;
+use crate::utils::throttle::with_youtube_slot;
 
 pub struct Ytdlp{
     path: String,
@@ -62,11 +63,17 @@ impl Ytdlp {
             "--js-runtimes", "deno"];
         args.extend(self.cookies_args());
         args.push(url);
-        let stdout = Command::new(&self.path)
-            .args(&args)
-            .output()
-            .await?
-            .stdout;
+        // yt-dlp listing is a YouTube connection: it runs through the shared
+        // throttle so it serializes with downloads, the update check, and
+        // metadata/image fetches (youtube-throttling).
+        let stdout = with_youtube_slot(move || async move {
+            Command::new(&self.path)
+                .args(&args)
+                .output()
+                .await
+                .map(|output| output.stdout)
+        })
+        .await?;
         let ytvideos = parse_dump_output(&stdout)?;
         info!("{:?}", &ytvideos);
         Ok(ytvideos)
@@ -80,12 +87,20 @@ impl Ytdlp {
             "--retry-sleep", "5"];
         args.extend(self.cookies_args());
         args.push(&url);
-        Command::new(&self.path)
-            .args(&args)
-            .spawn()?
-            .wait()
-            .await
-            .map_err(|e| e.into())
+        // Each download holds the single YouTube slot through the run and the
+        // post-connection cooldown; the result is returned unchanged (exit
+        // status + stderr semantics preserved).
+        with_youtube_slot(move || async move {
+            Command::new(&self.path)
+                .args(&args)
+                .spawn()
+                .map_err(|e| e)?
+                .wait()
+                .await
+                .map_err(|e| e)
+        })
+        .await
+        .map_err(|e| e.into())
     }
 
     pub async fn auto_update() -> Result<(), Error>{
@@ -95,14 +110,22 @@ impl Ytdlp {
         // Async process wait (non-blocking-update-paths): the pip run can take
         // tens of seconds; a synchronous `std::process::Command::wait()` here
         // would pin a tokio worker thread for the whole time.
-        let mut child = Command::new(python3)
-            .args(&args)
-            .spawn()
-            .map_err(|e| Error::default(&e.to_string()))?;
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| Error::default(&e.to_string()))?;
+        //
+        // Gated by the shared YouTube throttle too (the update check hits
+        // GitHub, but every yt-dlp execution passes through the same slot so a
+        // future update channel cannot bypass the throttle).
+        let status = with_youtube_slot(|| async move {
+            let mut child = Command::new(python3)
+                .args(&args)
+                .spawn()?;
+            child
+                .wait()
+                .await
+        })
+        // Only Send types cross the slot (io::Error / ExitStatus); the crate
+        // `Error` (non-Send) is rebuilt after the cooldown releases.
+        .await
+        .map_err(|e| Error::default(&e.to_string()))?;
         if status.success() {
             Ok(())
         } else {
@@ -164,6 +187,98 @@ mod parse_dump_output_tests {
     #[test]
     fn non_json_output_errors() {
         assert!(parse_dump_output(b"not json at all\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod throttle_youtubedl_integration {
+    use super::*;
+    use crate::utils::throttle::init_throttle;
+    use std::path::Path;
+    use std::time::Duration;
+
+    // A fake `yt-dlp` that records `s`/`e` events with millisecond timestamps
+    // to `$YTDLP_LOG`, so concurrent executions can be proven strictly
+    // sequential and separated by the configured cooldown (task 3.1).
+    fn write_fake_ytdlp(dir: &Path) -> std::path::PathBuf {
+        let script = dir.join("fake-yt-dlp");
+        std::fs::write(
+            &script,
+            "#!/bin/bash\n\
+             echo \"s $(date +%s%3N) $$\" >> \"$YTDLP_LOG\"\n\
+             sleep 0.05\n\
+             echo \"e $(date +%s%3N) $$\" >> \"$YTDLP_LOG\"\n\
+             exit 0\n",
+        )
+        .expect("write fake yt-dlp");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        script
+    }
+
+    #[tokio::test]
+    async fn concurrent_downloads_are_sequential_and_respect_cooldown() {
+        init_throttle(Duration::from_millis(30));
+        let dir = std::env::temp_dir().join(format!(
+            "u2v-throttle-int-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let script = write_fake_ytdlp(&dir);
+        let log_path = dir.join("log.txt");
+        // Process-global env var; set before the concurrent tasks spawn.
+        std::env::set_var("YTDLP_LOG", &log_path);
+
+        let ytdlp = std::sync::Arc::new(Ytdlp::new(script.to_str().unwrap(), ""));
+        let mut handles = Vec::new();
+        for i in 0..4 {
+            let ytdlp = std::sync::Arc::clone(&ytdlp);
+            handles.push(tokio::spawn(async move {
+                ytdlp
+                    .download(&format!("id{i}"), "/tmp/u2v-out.mp3")
+                    .await
+                    .expect("fake yt-dlp exits 0")
+                    .success()
+            }));
+        }
+        for handle in handles {
+            assert!(
+                handle.await.expect("task did not panic"),
+                "every fake download must exit successfully"
+            );
+        }
+
+        // Pairs of (start, end) events, one per run.
+        let content = std::fs::read_to_string(&log_path).expect("yt-dlp log");
+        let events: Vec<(char, u128)> = content
+            .lines()
+            .map(|line| {
+                let mut parts = line.split_whitespace();
+                let kind = parts.next().expect("event kind").chars().next().unwrap();
+                let ms: u128 = parts.next().expect("timestamp").parse().expect("ms");
+                (kind, ms)
+            })
+            .collect();
+        assert_eq!(events.len(), 8, "4 runs × (start, end) events");
+
+        let mut previous_end: Option<u128> = None;
+        for chunk in events.chunks(2) {
+            assert_eq!(chunk[0].0, 's', "runs must not overlap (double start)");
+            assert_eq!(chunk[1].0, 'e', "run must end before the next starts");
+            let next_start = chunk[0].1;
+            if let Some(previous_end_ms) = previous_end {
+                assert!(
+                    next_start >= previous_end_ms + 20,
+                    "cooldown not enforced: next start {next_start} too close to previous end {previous_end_ms}"
+                );
+            }
+            previous_end = Some(chunk[1].1);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

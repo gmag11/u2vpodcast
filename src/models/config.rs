@@ -21,6 +21,12 @@ pub struct Config{
     pub log_level: String,
     #[serde(default = "default_db_pool_max_connections")]
     pub db_pool_max_connections: u32,
+    #[serde(default = "default_cooldown_seconds")]
+    pub cooldown_seconds: u64,
+}
+
+fn default_cooldown_seconds() -> u64 {
+    3
 }
 
 fn default_db_pool_max_connections() -> u32 {

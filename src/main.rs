@@ -47,6 +47,7 @@ use models::{
     images_dir,
 };
 use utils::worker::do_the_work;
+use utils::throttle::init_throttle;
 use actix_files as af;
 
 // Explicit origin allowlist for the production CORS policy. The configured
@@ -266,6 +267,11 @@ async fn main() -> Result<(), Error> {
         validate_origin(origin)
             .map_err(|e| Error::default(&e))?;
     }
+
+    // Configure the single YouTube-connection throttle with the (optional)
+    // cooldown from config.yml; the absent-key default applies via serde
+    // (limit-youtube-concurrency / youtube-throttling).
+    init_throttle(std::time::Duration::from_secs(config.cooldown_seconds));
 
     // When both admin credentials are set in config.yml, reseed the only user
     // from the configuration on every startup. When either is missing or empty,
