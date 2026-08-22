@@ -17,6 +17,7 @@ use super::models::{
     Credentials,
     AppState,
     audios_dir,
+    images_dir,
 };
 use super::utils::middleware::{
     RequireSession,
@@ -71,6 +72,11 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 web::scope("/media")
                     .wrap(SessionOrBasicAuth)
                     .service(af::Files::new("", audios_dir()))
+            )
+            .service(
+                web::scope("/images")
+                    .wrap(SessionOrBasicAuth)
+                    .service(af::Files::new("", images_dir()))
             )
     );
 }

@@ -72,6 +72,16 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
     let folder = audios_dir();
     process_channel(pool, &channel, &ytdlp, folder).await?;
     clean_channel(pool, &channel, folder).await?;
+    // Refresh the cached cover as part of the sync so it stays current between
+    // cycles. Skipped for inactive channels per the `active` flag semantics:
+    // the scheduled worker only picks active channels, and a forced sync of an
+    // inactive one must not start image traffic. Best-effort: a failing image
+    // refresh is logged and does not fail the channel sync.
+    if channel.active {
+        if let Err(e) = Channel::refresh_cached_image(pool, &channel).await {
+            error!("Cant refresh cached image for channel {}: {}", channel.id, e);
+        }
+    }
     info!("Channel {} updated", &channel.id);
     Ok(())
 }

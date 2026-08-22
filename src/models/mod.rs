@@ -20,6 +20,7 @@ pub use error::Error;
 pub use config::{
     Config,
     audios_dir,
+    images_dir,
     ytdlp_path,
     cookies_file,
 };
@@ -37,7 +38,10 @@ pub use channel::{
     NewChannel,
     UpdateChannel,
 };
-use ytinfo::YTInfo;
+use ytinfo::{
+    YTInfo,
+    cache_image,
+};
 pub use episode::Episode;
 pub use appstate::AppState;
 pub use user::{

@@ -16,6 +16,7 @@ Cargo.lock
 .opencode/
 cookies.txt
 media
+images/
 *.db*
 audios/
 u2vpodcast.db*

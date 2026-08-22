@@ -10,6 +10,7 @@ use std::fmt::{
 use tracing::{
     info,
     debug,
+    warn,
 };
 use chrono::{
     DateTime,
@@ -29,6 +30,7 @@ use super::{
     Error,
     Episode,
     YTInfo,
+    cache_image,
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -182,6 +184,31 @@ impl Channel{
                 .fetch_one(pool)
                 .await
                 .map_err(|e| Error::default(&e.to_string()))?;
+        }
+        // Populate the image cache now that the final slug is known: the API
+        // `image` field must reference the local copy so rendering never opens
+        // a YouTube connection for covers (channel-image-cache). A failed
+        // download keeps the value inserted above (the remote URL) until the
+        // next successful fetch (graceful degradation). A cache error is
+        // logged, never allowed to fail the channel creation.
+        if !channel_row.image.is_empty() {
+            match cache_image(&channel_row.slug, &channel_row.image).await {
+                Ok(Some(local)) if local != channel_row.image => {
+                    let sql = "UPDATE channels SET image = $1 WHERE id = $2 RETURNING *";
+                    channel_row = query(sql)
+                        .bind(&local)
+                        .bind(channel_row.id)
+                        .map(Self::from_row)
+                        .fetch_one(pool)
+                        .await
+                        .map_err(|e| Error::default(&e.to_string()))?;
+                }
+                Ok(_) => {}
+                Err(e) => warn!(
+                    "Cant cache image for new channel {}: {}",
+                    channel_row.id, e
+                ),
+            }
         }
         Ok(channel_row)
     }
@@ -353,17 +380,59 @@ impl Channel{
 
     pub async fn update_image(pool: &SqlitePool, id: i64, url: &str) -> Result<Self, Error>{
         info!("update_image");
+        let channel = Self::read(pool, id).await?;
+        Self::refresh_image_inner(pool, &channel, url).await
+    }
+
+    // Shared refresh logic for manual (`update_image`) and worker-triggered
+    // (`refresh_cached_image`) refreshes: fetch fresh metadata, probe +
+    // download the cover into the local cache, and point `channel.image` at
+    // the local URL. A failed download keeps the previously stored image (the
+    // field is never blanked); only the metadata fetch itself can fail here,
+    // which the caller decides how to surface.
+    async fn refresh_image_inner(
+        pool: &SqlitePool,
+        channel: &Channel,
+        url: &str,
+    ) -> Result<Self, Error>{
         let ytinfo = YTInfo::new(url).await?;
+        let mut image = channel.image.clone();
+        if !ytinfo.image.is_empty() {
+            match cache_image(&channel.slug, &ytinfo.image).await {
+                Ok(Some(local)) => image = local,
+                Ok(None) => {}
+                // Cache write failure: keep the previously stored image and
+                // log; the refresh itself must not fail the operation
+                // (channel-image-cache: "keep the old file, never blank it").
+                Err(e) => warn!(
+                    "Cant cache image for channel {}: {}",
+                    channel.id, e
+                ),
+            }
+        }
         let updated_at = Utc::now();
         let sql = "UPDATE channels SET image = $1, updated_at = $2 WHERE id = $3 RETURNING *";
         query(sql)
-            .bind(&ytinfo.image)
+            .bind(&image)
             .bind(updated_at)
-            .bind(id)
+            .bind(channel.id)
             .map(Self::from_row)
             .fetch_one(pool)
             .await
             .map_err(|e| e.into())
+    }
+
+    // Worker-facing image refresh during a channel sync. Best-effort by
+    // convention: the caller logs a failure instead of failing the whole sync,
+    // and the previous stored image is kept (refresh_image_inner semantics).
+    pub async fn refresh_cached_image(
+        pool: &SqlitePool,
+        channel: &Channel,
+    ) -> Result<(), Error> {
+        info!("refresh_cached_image");
+        Self::refresh_image_inner(pool, channel, &channel.url)
+            .await
+            .map(|_| ())
     }
 
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{

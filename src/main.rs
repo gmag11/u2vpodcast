@@ -44,6 +44,7 @@ use models::{
     Ytdlp,
     Channel,
     audios_dir,
+    images_dir,
 };
 use utils::worker::do_the_work;
 use actix_files as af;
@@ -290,6 +291,14 @@ async fn main() -> Result<(), Error> {
     Channel::migrate_slugs(&pool, audios_dir())
         .await
         .expect("Cant migrate slugs");
+
+    // The image cache lives inside the `db` volume in the container
+    // (/app/db/images) or a local `images` directory in development; create it
+    // up front so the first cache write never fails on a missing directory
+    // (channel-image-cache).
+    tokio::fs::create_dir_all(images_dir())
+        .await
+        .expect("Cant create images cache directory");
 
 
     let pool2 = pool.clone();

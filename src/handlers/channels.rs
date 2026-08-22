@@ -24,6 +24,7 @@ use super::{
     super::{
         models::{
             audios_dir,
+            images_dir,
             CResponse,
             Channel,
             NewChannel,
@@ -216,6 +217,17 @@ async fn delete(
                             .await {
                             Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
                             Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
+                        };
+                        // Remove the cached cover image alongside the audio
+                        // directory (channel-image-cache). Missing file is not
+                        // an error: the channel may never have had a cached
+                        // image.
+                        match tokio::fs::remove_file(
+                            format!("{}/{}.jpg", images_dir(), &channel.slug)
+                        ).await {
+                            Ok(_) => debug!("Removed cached image for {}", &channel.slug),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                            Err(e) => error!("Can't remove cached image for {}: {}", &channel.slug, e),
                         };
                     }
                 }

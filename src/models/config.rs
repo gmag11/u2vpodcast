@@ -51,6 +51,21 @@ pub fn audios_dir() -> &'static str {
     }
 }
 
+// Cache directory for channel cover images. The `db` volume is already mounted
+// at `/app/db` in the container (see docker-compose.yml), so `/app/db/images`
+// persists across container recreation without any new volume. We only probe
+// the parent mount (`/app/db`) rather than the images subdirectory itself: the
+// `db` volume mount point always exists, while `images/` may legitimately not
+// have been created yet (channel-image-cache). Outside Docker, fall back to a
+// plain local `images` directory for development.
+pub fn images_dir() -> &'static str {
+    if Path::new("/app/db").is_dir() {
+        "/app/db/images"
+    } else {
+        "images"
+    }
+}
+
 pub fn ytdlp_path() -> &'static str {
     if Path::new("/app/.local/bin/yt-dlp").exists() {
         "/app/.local/bin/yt-dlp"
