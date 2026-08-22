@@ -33,4 +33,4 @@
 
 - [x] 5.1 Add a shared mount helper (e.g. `frontend/src/test/i18n.ts`) exporting an `en`-only i18n instance, and wire it into `AppHeader.test.ts` and `HistoryView.test.ts` so existing English assertions keep passing deterministically
 - [x] 5.2 Run `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`; fix any type or lint regressions
-- [ ] 5.3 Manual verification: switch to `Español` in a running SPA and confirm headings, dialogs, toasts, dates, empty states, and player aria-labels render in Spanish; confirm choice survives reload and login redirect; confirm unsupported browser language defaults to English
+- [x] 5.3 Manual verification: switch to `Español` in a running SPA and confirm headings, dialogs, toasts, dates, empty states, and player aria-labels render in Spanish; confirm choice survives reload and login redirect; confirm unsupported browser language defaults to English
