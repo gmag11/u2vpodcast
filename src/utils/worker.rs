@@ -77,6 +77,10 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
     let folder = audios_dir();
     process_channel(pool, &channel, &ytdlp, folder).await?;
     clean_channel(pool, &channel, folder).await?;
+    // Remove transient/orphan files left by interrupted runs (`.part`,
+    // yt-dlp temp files, mp3 without an episode row). Always runs, even when
+    // pruning is skipped for an invalid max.
+    clean_orphan_files(pool, &channel, folder).await;
     // Refresh the cached cover as part of the sync so it stays current between
     // cycles. Skipped for inactive channels per the `active` flag semantics:
     // the scheduled worker only picks active channels, and a forced sync of an
@@ -89,6 +93,49 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
     }
     info!("Channel {} updated", &channel.id);
     Ok(())
+}
+
+// True when a file in the channel audio directory is not the finished mp3 of
+// a stored episode: yt-dlp/ffmpeg transients (`.part`, `.ytdlp-*`, `.tmp`) and
+// any file (mp3 or not) that no episode row references.
+fn is_orphan(name: &str, referenced: bool) -> bool {
+    if name.ends_with(".part") || name.contains(".ytdlp-") || name.ends_with(".tmp") {
+        return true;
+    }
+    !name.ends_with(".mp3") || !referenced
+}
+
+// Cleanup for interrupted runs (or container restarts mid-download/conversion):
+// removes leftover fragments so they neither accumulate on disk nor ever remain
+// half-processed. Runs after the channel's episodes are processed, so a fresh
+// download referenced by a stored row is never touched.
+async fn clean_orphan_files(pool: &SqlitePool, channel: &Channel, folder: &str) {
+    let dir = format!("{folder}/{}", channel.slug);
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(_) => return, // nothing to clean (e.g. channel never downloaded)
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let name = match file_name.to_str() {
+            Some(name) => name,
+            None => continue,
+        };
+        let referenced = match name.strip_suffix(".mp3") {
+            Some(yt_id) => Episode::exists(pool, channel.id, yt_id).await,
+            None => false,
+        };
+        if is_orphan(name, referenced) {
+            info!(
+                "Removing orphan file {}/{} (not a stored episode)",
+                &channel.slug, name
+            );
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
 }
 
 async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error>{
@@ -208,7 +255,7 @@ async fn process_episode(
         let _ = tokio::fs::remove_file(&filename).await;
         return Ok(());
     }
-    let delay = rand::thread_rng().gen_range(20..=40);
+    let delay = rand::thread_rng().gen_range(10..=20);
     info!("Pausing {delay} seconds before next download");
     sleep(Duration::from_secs(delay)).await;
     let title = if info.title.is_empty() { &ytvideo.title } else { &info.title };
@@ -455,6 +502,30 @@ mod selection_tests {
         assert_eq!(thirty.window.len(), 30);
         assert_eq!(thirty.window[20].id, "v20");
         assert_eq!(thirty.window[29].id, "v29");
+    }
+}
+
+#[cfg(test)]
+mod orphan_tests {
+    use super::*;
+
+    #[test]
+    fn transients_are_always_orphans() {
+        assert!(is_orphan("abc.mp3.part", true));
+        assert!(is_orphan("abc.mp3.ytdlp-1a2b3c.tmp", true));
+        assert!(is_orphan("abc.part", false));
+        assert!(is_orphan(".tmp", false));
+    }
+
+    #[test]
+    fn referenced_mp3_is_kept_and_others_removed() {
+        // Stored episode's mp3 → keep.
+        assert!(!is_orphan("abc123.mp3", true));
+        // Mp3 without an episode row → orphan.
+        assert!(is_orphan("def456.mp3", false));
+        // Any non-mp3 final-looking file → orphan (e.g. leftover webm/opus).
+        assert!(is_orphan("abc123.webm", true));
+        assert!(is_orphan("abc123.opus", true));
     }
 }
 
