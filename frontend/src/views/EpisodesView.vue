@@ -1,5 +1,6 @@
 <script setup lang="ts">
 	import { computed, onMounted, ref } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { useRoute, useRouter } from 'vue-router';
 	import { PhArrowLeft, PhArrowsClockwise } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
@@ -16,6 +17,7 @@
 	const router = useRouter();
 	const auth = useAuthStore();
 	const notification = useNotificationStore();
+	const { t } = useI18n();
 
 	const episodes = ref<Episode[]>([]);
 	const channels = ref<Channel[]>([]);
@@ -58,7 +60,7 @@
 			channels.value = channelsResult.data as Array<Channel>;
 		}
 		const channel = channels.value.find((c) => c.id === channelId);
-		channelTitle.value = channel?.title ?? 'Episodes';
+		channelTitle.value = channel?.title ?? t('episodes.titleFallback');
 		channelDescription.value = channel?.description ?? '';
 	}
 
@@ -71,20 +73,20 @@
 	async function refreshChannel() {
 		const slug = await resolveSlugFallback();
 		if (!slug) {
-			notification.show('Unable to identify the channel', 'error');
+			notification.show(t('episodes.unidentified'), 'error');
 			return;
 		}
 		refreshing.value = true;
 		try {
 			const result = await api.refreshChannel(slug);
 			if (result.ok) {
-				notification.show('Channel update started', 'success');
+				notification.show(t('episodes.updateStarted'), 'success');
 			} else {
-				notification.show(result.message || 'Failed to start channel update', 'error');
+				notification.show(t('episodes.updateFailed'), 'error');
 			}
 		} catch (err) {
 			console.error(err);
-			notification.show('Failed to start channel update', 'error');
+			notification.show(t('episodes.updateFailed'), 'error');
 		} finally {
 			refreshing.value = false;
 		}
@@ -118,7 +120,7 @@
 					weight="regular"
 					:class="refreshing ? 'animate-spin' : ''"
 				/>
-				<span class="hidden sm:inline">Refresh</span>
+				<span class="hidden sm:inline">{{ $t('episodes.refresh') }}</span>
 			</AppButton>
 		</template>
 	</AppHeader>
@@ -127,7 +129,7 @@
 		<div class="mb-8 flex w-full max-w-3xl items-center gap-4">
 			<button
 				type="button"
-				aria-label="Back to channels"
+				aria-label="$t('header.backChannels')"
 				class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-text-muted transition-colors hover:text-text"
 				@click="router.push({ name: 'channels' })"
 			>
@@ -145,15 +147,15 @@
 		</p>
 
 		<div class="mb-10 w-full max-w-3xl">
-			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
+			<SearchInput v-model="searchQuery" :placeholder="$t('episodes.searchPlaceholder')" />
 		</div>
 
-		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
+		<p v-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
 
 		<div v-else-if="filteredEpisodes.length === 0" class="mt-10 text-center">
-			<p class="font-display text-xl font-semibold text-text">No episodes yet</p>
+			<p class="font-display text-xl font-semibold text-text">{{ $t('episodes.emptyTitle') }}</p>
 			<p class="mt-2 text-sm text-text-muted">
-				The channel is being processed and episodes will appear here as they are downloaded.
+				{{ $t('episodes.emptyBody') }}
 			</p>
 		</div>
 

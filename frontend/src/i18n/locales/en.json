@@ -1,0 +1,119 @@
+{
+	"common": {
+		"cancel": "Cancel",
+		"ok": "OK",
+		"warning": "Warning",
+		"closeModal": "Close modal",
+		"menuOpen": "Open menu",
+		"toggleTheme": "Toggle theme",
+		"navigation": "Navigation",
+		"noResults": "No results match your search.",
+		"youtube": "YouTube"
+	},
+	"auth": {
+		"title": "Login",
+		"username": "User name",
+		"password": "Password",
+		"submit": "Login",
+		"loggingIn": "Please wait while we log you in...",
+		"success": "Login successful",
+		"invalidCredentials": "Invalid username or password",
+		"unexpectedError": "An unexpected error occurred. Please try again."
+	},
+	"header": {
+		"channels": "Channels",
+		"history": "History",
+		"logout": "Logout",
+		"userFallback": "User",
+		"backChannels": "Back to channels",
+		"language": "Language"
+	},
+	"channels": {
+		"create": "Create New",
+		"dashboard": "Dashboard",
+		"subtitle": "Manage your recent podcast episodes and content.",
+		"searchPlaceholder": "Search channels…",
+		"updated": "Channel updated",
+		"updateFailed": "Failed to update channel",
+		"created": "Channel created. Update started.",
+		"createFailed": "Failed to create channel",
+		"deleted": "Channel deleted",
+		"deleteFailed": "Failed to delete channel",
+		"coverUpdated": "Cover image updated",
+		"coverRefreshFailed": "Failed to refresh cover image",
+		"deleteConfirmMessage": "Are you sure you want to delete this channel?",
+		"dialogNew": "New Channel",
+		"dialogEdit": "Edit Channel",
+		"fieldTitle": "Title",
+		"placeholderTitle": "Channel title",
+		"fieldActive": "Active",
+		"fieldUrl": "Url",
+		"fieldMax": "Max number of episodes",
+		"fieldFirst": "First episode date",
+		"saveChanges": "Save changes",
+		"createChannel": "Create channel"
+	},
+	"episodes": {
+		"refresh": "Refresh",
+		"titleFallback": "Episodes",
+		"searchPlaceholder": "Search episodes…",
+		"emptyTitle": "No episodes yet",
+		"emptyBody": "The channel is being processed and episodes will appear here as they are downloaded.",
+		"unidentified": "Unable to identify the channel",
+		"updateStarted": "Channel update started",
+		"updateFailed": "Failed to start channel update"
+	},
+	"history": {
+		"title": "History",
+		"rssTooltip": "Get global RSS feed",
+		"searchPlaceholder": "Search episodes…",
+		"emptyTitle": "No episodes yet",
+		"emptyBody": "Episodes from your channels will appear here as they are downloaded."
+	},
+	"card": {
+		"openOnYouTube": "Open on YouTube",
+		"rssFeed": "Get RSS feed",
+		"rssAria": "RSS feed",
+		"reloadCover": "Reload cover",
+		"refreshCoverAria": "Refresh cover image",
+		"edit": "Edit",
+		"editLabel": "Edit channel",
+		"delete": "Delete",
+		"deleteLabel": "Delete channel and audio files",
+		"syncTooltip": "Updated {age} ago. Status: {status}"
+	},
+	"status": {
+		"ok": "Ok",
+		"error": "Error"
+	},
+	"player": {
+		"play": "Play",
+		"pause": "Pause",
+		"stop": "Stop",
+		"seek": "Seek",
+		"mute": "Mute",
+		"unmute": "Unmute"
+	},
+	"pagination": {
+		"previous": "Previous",
+		"next": "Next"
+	},
+	"sort": {
+		"channels": "Sort channels",
+		"lastEpisode": "Last episode",
+		"az": "A-Z",
+		"id": "Id",
+		"byLastEpisode": "Sort by last episode date",
+		"byTitle": "Sort alphabetically by title",
+		"byId": "Sort by channel id",
+		"ascending": "Sort ascending",
+		"descending": "Sort descending"
+	},
+	"search": {
+		"default": "Search…"
+	},
+	"languages": {
+		"en": "English",
+		"es": "Español"
+	}
+}

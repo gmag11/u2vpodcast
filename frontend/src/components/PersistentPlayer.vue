@@ -101,7 +101,7 @@
 				<button
 					type="button"
 					class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
-					:aria-label="player.playing ? 'Pause' : 'Play'"
+					:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
 					:disabled="player.loading"
 					@click="player.togglePlay()"
 				>
@@ -112,7 +112,7 @@
 				<button
 					type="button"
 					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-					aria-label="Stop"
+					aria-label="$t('player.stop')"
 					@click="player.stop()"
 				>
 					<PhStop class="h-4 w-4" weight="fill" />
@@ -121,7 +121,7 @@
 				<div
 					class="relative h-5 min-w-0 flex-1 cursor-pointer py-2"
 					role="slider"
-					aria-label="Seek"
+					aria-label="$t('player.seek')"
 					:aria-valuenow="Math.round(player.progress)"
 					:aria-valuemin="0"
 					:aria-valuemax="100"
@@ -174,7 +174,7 @@
 					<button
 						type="button"
 						class="rounded-md p-1 text-text-muted transition-colors hover:text-text"
-						:aria-label="player.muted ? 'Unmute' : 'Mute'"
+						:aria-label="player.muted ? $t('player.unmute') : $t('player.mute')"
 						@click="player.toggleMute()"
 					>
 						<PhSpeakerSlash v-if="player.muted" class="h-4 w-4" weight="regular" />

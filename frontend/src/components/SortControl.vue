@@ -1,8 +1,10 @@
 <script setup lang="ts">
+	import { computed } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { PhArrowDown, PhArrowUp, PhCalendarBlank } from '@phosphor-icons/vue';
 	import type { ChannelSortKey, SortDirection } from '@/lib/utils/channel.sort';
 
-	defineProps<{
+	const props = defineProps<{
 		modelValue: ChannelSortKey;
 		direction: SortDirection;
 	}>();
@@ -12,20 +14,28 @@
 		(e: 'update:direction', value: SortDirection): void;
 	}>();
 
-	const keys: Array<{ value: ChannelSortKey; label: string; tooltip: string; icon?: boolean }> = [
+	const { t } = useI18n();
+
+	const keys = computed<
+		Array<{ value: ChannelSortKey; label: string; tooltip: string; icon?: boolean }>
+	>(() => [
 		{
 			value: 'last_date',
-			label: 'Last episode',
-			tooltip: 'Sort by last episode date',
+			label: t('sort.lastEpisode'),
+			tooltip: t('sort.byLastEpisode'),
 			icon: true
 		},
-		{ value: 'title', label: 'A-Z', tooltip: 'Sort alphabetically by title' },
-		{ value: 'id', label: 'Id', tooltip: 'Sort by channel id' }
-	];
+		{ value: 'title', label: t('sort.az'), tooltip: t('sort.byTitle') },
+		{ value: 'id', label: t('sort.id'), tooltip: t('sort.byId') }
+	]);
+
+	const directionAria = computed(() =>
+		props.direction === 'asc' ? t('sort.ascending') : t('sort.descending')
+	);
 </script>
 
 <template>
-	<div role="group" aria-label="Sort channels" class="flex flex-nowrap items-center gap-2">
+	<div role="group" :aria-label="$t('sort.channels')" class="flex flex-nowrap items-center gap-2">
 		<div
 			class="inline-flex items-center rounded-full border border-outline bg-surface-input p-1 shadow-inner"
 		>
@@ -50,8 +60,8 @@
 		<button
 			type="button"
 			:aria-pressed="direction === 'asc'"
-			:aria-label="direction === 'asc' ? 'Sort ascending' : 'Sort descending'"
-			:title="direction === 'asc' ? 'Sort ascending' : 'Sort descending'"
+			:aria-label="directionAria"
+			:title="directionAria"
 			class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-input text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
 			@click="emit('update:direction', direction === 'asc' ? 'desc' : 'asc')"
 		>

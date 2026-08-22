@@ -1,0 +1,119 @@
+{
+	"common": {
+		"cancel": "Cancelar",
+		"ok": "Aceptar",
+		"warning": "Aviso",
+		"closeModal": "Cerrar modal",
+		"menuOpen": "Abrir menú",
+		"toggleTheme": "Cambiar tema",
+		"navigation": "Navegación",
+		"noResults": "Ningún resultado coincide con tu búsqueda.",
+		"youtube": "YouTube"
+	},
+	"auth": {
+		"title": "Iniciar sesión",
+		"username": "Nombre de usuario",
+		"password": "Contraseña",
+		"submit": "Iniciar sesión",
+		"loggingIn": "Espera mientras iniciamos sesión...",
+		"success": "Sesión iniciada correctamente",
+		"invalidCredentials": "Nombre de usuario o contraseña incorrectos",
+		"unexpectedError": "Se ha producido un error inesperado. Inténtalo de nuevo."
+	},
+	"header": {
+		"channels": "Canales",
+		"history": "Historial",
+		"logout": "Cerrar sesión",
+		"userFallback": "Usuario",
+		"backChannels": "Volver a canales",
+		"language": "Idioma"
+	},
+	"channels": {
+		"create": "Crear nuevo",
+		"dashboard": "Panel de control",
+		"subtitle": "Gestiona tus episodios de podcast y contenido reciente.",
+		"searchPlaceholder": "Buscar canales…",
+		"updated": "Canal actualizado",
+		"updateFailed": "Error al actualizar el canal",
+		"created": "Canal creado. Actualización iniciada.",
+		"createFailed": "Error al crear el canal",
+		"deleted": "Canal eliminado",
+		"deleteFailed": "Error al eliminar el canal",
+		"coverUpdated": "Imagen de portada actualizada",
+		"coverRefreshFailed": "Error al actualizar la imagen de portada",
+		"deleteConfirmMessage": "¿Seguro que quieres eliminar este canal?",
+		"dialogNew": "Nuevo canal",
+		"dialogEdit": "Editar canal",
+		"fieldTitle": "Título",
+		"placeholderTitle": "Título del canal",
+		"fieldActive": "Activo",
+		"fieldUrl": "Url",
+		"fieldMax": "Número máximo de episodios",
+		"fieldFirst": "Fecha del primer episodio",
+		"saveChanges": "Guardar cambios",
+		"createChannel": "Crear canal"
+	},
+	"episodes": {
+		"refresh": "Actualizar",
+		"titleFallback": "Episodios",
+		"searchPlaceholder": "Buscar episodios…",
+		"emptyTitle": "Aún no hay episodios",
+		"emptyBody": "El canal se está procesando y los episodios aparecerán aquí cuando se descarguen.",
+		"unidentified": "No se pudo identificar el canal",
+		"updateStarted": "Actualización del canal iniciada",
+		"updateFailed": "Error al iniciar la actualización del canal"
+	},
+	"history": {
+		"title": "Historial",
+		"rssTooltip": "Obtener feed RSS global",
+		"searchPlaceholder": "Buscar episodios…",
+		"emptyTitle": "Aún no hay episodios",
+		"emptyBody": "Los episodios de tus canales aparecerán aquí a medida que se descarguen."
+	},
+	"card": {
+		"openOnYouTube": "Abrir en YouTube",
+		"rssFeed": "Obtener feed RSS",
+		"rssAria": "Feed RSS",
+		"reloadCover": "Recargar portada",
+		"refreshCoverAria": "Actualizar imagen de portada",
+		"edit": "Editar",
+		"editLabel": "Editar canal",
+		"delete": "Eliminar",
+		"deleteLabel": "Eliminar canal y archivos de audio",
+		"syncTooltip": "Actualizado hace {age}. Estado: {status}"
+	},
+	"status": {
+		"ok": "Correcto",
+		"error": "Error"
+	},
+	"player": {
+		"play": "Reproducir",
+		"pause": "Pausar",
+		"stop": "Detener",
+		"seek": "Buscar",
+		"mute": "Silenciar",
+		"unmute": "Activar sonido"
+	},
+	"pagination": {
+		"previous": "Anterior",
+		"next": "Siguiente"
+	},
+	"sort": {
+		"channels": "Ordenar canales",
+		"lastEpisode": "Último episodio",
+		"az": "A-Z",
+		"id": "Id",
+		"byLastEpisode": "Ordenar por fecha del último episodio",
+		"byTitle": "Ordenar alfabéticamente por título",
+		"byId": "Ordenar por id de canal",
+		"ascending": "Orden ascendente",
+		"descending": "Orden descendente"
+	},
+	"search": {
+		"default": "Buscar…"
+	},
+	"languages": {
+		"en": "English",
+		"es": "Español"
+	}
+}

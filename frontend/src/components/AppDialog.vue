@@ -36,7 +36,7 @@
 						<button
 							v-if="!hideClose"
 							type="button"
-							aria-label="Close modal"
+							aria-label="$t('common.closeModal')"
 							class="rounded-md p-1 text-text-muted transition-colors hover:text-text"
 							@click="emit('update:open', false)"
 						>
