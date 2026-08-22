@@ -3,6 +3,7 @@ import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryView from '@/views/HistoryView.vue';
+import { testI18n } from '@/test/i18n';
 import { api } from '@/lib/api/client';
 import type { Episode } from '@/types';
 
@@ -48,7 +49,7 @@ async function mountView() {
 	await router.push('/history');
 	await router.isReady();
 	const wrapper = mount(HistoryView, {
-		global: { plugins: [router, createPinia()] }
+		global: { plugins: [router, createPinia(), testI18n] }
 	});
 	await flushPromises();
 	return wrapper;

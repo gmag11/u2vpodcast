@@ -79,22 +79,32 @@
 <template>
 	<AppDialog
 		:open="open"
-		:title="isEditing ? 'Edit Channel' : 'New Channel'"
+		:title="isEditing ? $t('channels.dialogEdit') : $t('channels.dialogNew')"
 		@update:open="(v: boolean) => emit('update:open', v)"
 	>
 		<form class="flex flex-col gap-5" @submit.prevent="handleSave">
 			<div v-if="isEditing" class="flex flex-col gap-1.5">
-				<label class="text-sm font-medium text-text" for="channel-title">Title</label>
-				<AppInput id="channel-title" v-model="title" placeholder="Channel title" />
+				<label class="text-sm font-medium text-text" for="channel-title">{{
+					$t('channels.fieldTitle')
+				}}</label>
+				<AppInput
+					id="channel-title"
+					v-model="title"
+					:placeholder="$t('channels.placeholderTitle')"
+				/>
 			</div>
 
 			<div class="flex items-center gap-3">
 				<AppToggle id="active-toggle" v-model="active" />
-				<label class="text-sm font-medium text-text" for="active-toggle">Active</label>
+				<label class="text-sm font-medium text-text" for="active-toggle">{{
+					$t('channels.fieldActive')
+				}}</label>
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<label class="text-sm font-medium text-text" for="channel-url">Url</label>
+				<label class="text-sm font-medium text-text" for="channel-url">{{
+					$t('channels.fieldUrl')
+				}}</label>
 				<AppInput
 					id="channel-url"
 					v-model="url"
@@ -105,24 +115,24 @@
 
 			<div class="flex flex-col gap-1.5">
 				<label class="text-sm font-medium text-text" for="max-episodes">
-					Max number of episodes
+					{{ $t('channels.fieldMax') }}
 				</label>
 				<AppInput id="max-episodes" v-model="max" type="number" min="1" />
 			</div>
 
 			<div class="flex flex-col gap-1.5">
 				<label class="text-sm font-medium text-text" for="first-episode-date">
-					First episode date
+					{{ $t('channels.fieldFirst') }}
 				</label>
 				<AppInput id="first-episode-date" v-model="first" type="date" />
 			</div>
 
 			<div class="mt-2 flex flex-col gap-3">
 				<AppButton type="submit" class="w-full py-2.5">
-					{{ isEditing ? 'Save changes' : 'Create channel' }}
+					{{ isEditing ? $t('channels.saveChanges') : $t('channels.createChannel') }}
 				</AppButton>
 				<AppButton type="button" variant="ghost" class="w-full py-2 text-sm" @click="handleCancel">
-					Cancel
+					{{ $t('common.cancel') }}
 				</AppButton>
 			</div>
 		</form>

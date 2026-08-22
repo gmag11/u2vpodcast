@@ -15,7 +15,7 @@
 	<div class="mt-6 flex items-center justify-center gap-1">
 		<button
 			type="button"
-			aria-label="Previous"
+			aria-label="$t('pagination.previous')"
 			:disabled="currentPage <= 1"
 			class="rounded-lg border border-outline px-3 py-2 text-text-muted transition-colors hover:text-text disabled:opacity-40"
 			@click="emit('page', currentPage - 1)"
@@ -38,7 +38,7 @@
 		</button>
 		<button
 			type="button"
-			aria-label="Next"
+			aria-label="$t('pagination.next')"
 			:disabled="currentPage >= maxPage"
 			class="rounded-lg border border-outline px-3 py-2 text-text-muted transition-colors hover:text-text disabled:opacity-40"
 			@click="emit('page', currentPage + 1)"

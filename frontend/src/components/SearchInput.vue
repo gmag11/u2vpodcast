@@ -1,4 +1,5 @@
 <script setup lang="ts">
+	import { useI18n } from 'vue-i18n';
 	import { PhMagnifyingGlass } from '@phosphor-icons/vue';
 
 	withDefaults(
@@ -7,12 +8,14 @@
 			placeholder?: string;
 		}>(),
 		{
-			placeholder: 'Search…'
+			placeholder: ''
 		}
 	);
 	const emit = defineEmits<{
 		(e: 'update:modelValue', value: string): void;
 	}>();
+
+	const { t } = useI18n();
 </script>
 
 <template>
@@ -23,7 +26,7 @@
 		/>
 		<input
 			:value="modelValue"
-			:placeholder="placeholder"
+			:placeholder="placeholder || t('search.default')"
 			class="w-full rounded-full border border-outline bg-surface-input py-3 pl-12 pr-4 text-text shadow-inner transition-all duration-150 placeholder:text-text-muted/60 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500"
 			@input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
 		/>

@@ -9,6 +9,7 @@
 	} from '@phosphor-icons/vue';
 	import { useRouter } from 'vue-router';
 	import { computed } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { baseEndpoint } from '@/lib/api/client';
 	import { lastEpisodeAge } from '@/lib/utils/channel.age';
 	import { lastSyncAge } from '@/lib/utils/channel.sync.age';
@@ -24,6 +25,7 @@
 		(e: 'cover-refresh', channel: Channel): void;
 	}>();
 	const router = useRouter();
+	const { t } = useI18n();
 
 	function openEpisodes() {
 		router.push({ name: 'episodes', params: { channelId: String(props.channel.id) } });
@@ -34,8 +36,11 @@
 	const hasSyncStatus = computed(
 		() => props.channel.last_sync_ok === true || props.channel.last_sync_ok === false
 	);
-	const syncStatusTooltip = computed(
-		() => `Updated ${syncAgeLabel.value} ago. Status: ${props.channel.last_sync_ok ? 'Ok' : 'Error'}`
+	const syncStatusTooltip = computed(() =>
+		t('card.syncTooltip', {
+			age: syncAgeLabel.value,
+			status: props.channel.last_sync_ok ? t('status.ok') : t('status.error')
+		})
 	);
 </script>
 
@@ -102,7 +107,7 @@
 					:href="channel.url"
 					target="_blank"
 					rel="noopener noreferrer"
-					aria-label="YouTube"
+					:aria-label="$t('common.youtube')"
 					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
 					@click.stop
 				>
@@ -111,7 +116,7 @@
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Open on YouTube
+					{{ $t('card.openOnYouTube') }}
 				</span>
 			</div>
 			<div class="group relative">
@@ -119,7 +124,7 @@
 					:href="`${baseEndpoint}/channels/${channel.slug}/feed.xml`"
 					target="_blank"
 					rel="noopener noreferrer"
-					aria-label="RSS feed"
+					:aria-label="$t('card.rssAria')"
 					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
 					@click.stop
 				>
@@ -128,13 +133,13 @@
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Get RSS feed
+					{{ $t('card.rssFeed') }}
 				</span>
 			</div>
 			<div class="group relative">
 				<button
 					type="button"
-					aria-label="Refresh cover image"
+					:aria-label="$t('card.refreshCoverAria')"
 					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
 					:disabled="refreshing"
 					@click.stop="emit('cover-refresh', channel)"
@@ -144,13 +149,13 @@
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Reload cover
+					{{ $t('card.reloadCover') }}
 				</span>
 			</div>
 			<div class="group relative">
 				<button
 					type="button"
-					aria-label="Edit"
+					:aria-label="$t('card.edit')"
 					class="cursor-pointer text-accent-500 transition-colors hover:text-accent-400"
 					@click.stop="emit('update', channel)"
 				>
@@ -159,13 +164,13 @@
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Edit channel
+					{{ $t('card.editLabel') }}
 				</span>
 			</div>
 			<div class="group relative">
 				<button
 					type="button"
-					aria-label="Delete"
+					:aria-label="$t('card.delete')"
 					class="cursor-pointer text-error transition-colors hover:opacity-80"
 					@click.stop="emit('delete', channel)"
 				>
@@ -174,7 +179,7 @@
 				<span
 					class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Delete channel and audio files
+					{{ $t('card.deleteLabel') }}
 				</span>
 			</div>
 		</div>

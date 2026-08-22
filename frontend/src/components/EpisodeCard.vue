@@ -1,5 +1,6 @@
 <script setup lang="ts">
 	import { computed } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
 	import { usePlayerStore } from '@/stores/player';
 	import type { Episode } from '@/types';
@@ -15,6 +16,7 @@
 	);
 
 	const player = usePlayerStore();
+	const { d } = useI18n();
 
 	const isCurrent = computed(() => player.isCurrent(props.episode));
 	const isPlaying = computed(() => isCurrent.value && player.playing);
@@ -23,7 +25,7 @@
 	);
 
 	function formatDate(value: Date | string) {
-		return new Date(value).toLocaleDateString('en-US');
+		return d(new Date(value), 'short');
 	}
 </script>
 
@@ -51,7 +53,7 @@
 						<button
 							type="button"
 							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
-							:aria-label="isPlaying ? 'Pause' : 'Play'"
+							:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 							:disabled="isCurrent && player.loading"
 							@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
 						>
@@ -62,7 +64,7 @@
 						<button
 							type="button"
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-							aria-label="Stop"
+							aria-label="$t('player.stop')"
 							:disabled="!isCurrent"
 							@click="player.stop()"
 						>
@@ -76,7 +78,7 @@
 					<button
 						type="button"
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
-						:aria-label="isPlaying ? 'Pause' : 'Play'"
+						:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 						:disabled="isCurrent && player.loading"
 						@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
 					>
@@ -87,7 +89,7 @@
 					<button
 						type="button"
 						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-						aria-label="Stop"
+						aria-label="$t('player.stop')"
 						:disabled="!isCurrent"
 						@click="player.stop()"
 					>
@@ -122,7 +124,7 @@
 						rel="noopener noreferrer"
 					>
 						<PhLinkSimple class="h-4 w-4" weight="regular" />
-						YouTube
+						{{ $t('common.youtube') }}
 					</a>
 					<time class="shrink-0 text-sm text-text-muted">
 						{{ formatDate(props.episode.published_at) }}

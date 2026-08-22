@@ -67,39 +67,41 @@
 		<div class="mb-8 flex w-full max-w-6xl items-center gap-4">
 			<button
 				type="button"
-				aria-label="Back to channels"
+				aria-label="$t('header.backChannels')"
 				class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-text-muted transition-colors hover:text-text"
 				@click="router.push({ name: 'channels' })"
 			>
 				<PhArrowLeft class="h-5 w-5" weight="regular" />
 			</button>
-			<h1 class="truncate font-display text-2xl font-semibold text-text">History</h1>
+			<h1 class="truncate font-display text-2xl font-semibold text-text">
+				{{ $t('history.title') }}
+			</h1>
 			<a
 				:href="`${baseEndpoint}/feed.xml`"
 				target="_blank"
 				rel="noopener noreferrer"
-				aria-label="Get global RSS feed"
+				:aria-label="$t('history.rssTooltip')"
 				class="group relative ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-accent-500 transition-colors hover:text-accent-400"
 			>
 				<PhRss class="h-5 w-5" weight="regular" />
 				<span
 					class="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-surface-high px-2 py-1 text-xs text-text shadow-lg opacity-0 transition-opacity group-hover:opacity-100"
 				>
-					Get global RSS feed
+					{{ $t('history.rssTooltip') }}
 				</span>
 			</a>
 		</div>
 
 		<div class="mb-10 w-full max-w-6xl">
-			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
+			<SearchInput v-model="searchQuery" :placeholder="$t('history.searchPlaceholder')" />
 		</div>
 
-		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
+		<p v-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
 
 		<div v-else-if="filteredEpisodes.length === 0" class="mt-10 text-center">
-			<p class="font-display text-xl font-semibold text-text">No episodes yet</p>
+			<p class="font-display text-xl font-semibold text-text">{{ $t('history.emptyTitle') }}</p>
 			<p class="mt-2 text-sm text-text-muted">
-				Episodes from your channels will appear here as they are downloaded.
+				{{ $t('history.emptyBody') }}
 			</p>
 		</div>
 
