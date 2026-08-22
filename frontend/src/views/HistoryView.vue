@@ -74,7 +74,7 @@
 				<PhArrowLeft class="h-5 w-5" weight="regular" />
 			</button>
 			<h1 class="truncate font-display text-2xl font-semibold text-text">
-				{{ $t('history.title') }}
+				{{ $t('history.title') }} ({{ episodes.length }})
 			</h1>
 			<a
 				:href="`${baseEndpoint}/feed.xml`"
