@@ -137,6 +137,10 @@ impl Episode {
             .await
             .map_err(|e| e.into())
     }
+    // Unused today (handlers use `read_all_with_channels`); kept as the plain
+    // variant of the same query, following the `#[allow(unused)]` precedent
+    // used on other optional model helpers.
+    #[allow(dead_code)]
     pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
         info!("read_all");
         let sql = "SELECT * FROM episodes ORDER BY published_at DESC";

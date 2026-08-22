@@ -5,9 +5,13 @@ use tracing::{
 };
 use chrono::{
     DateTime,
-    TimeZone,
     Utc,
 };
+// `timestamp_opt` (used only by the `#[cfg(test)]` helper tests) needs the
+// `TimeZone` trait in scope; gated on test builds so the release build stays
+// warning-free.
+#[cfg(test)]
+use chrono::TimeZone;
 use super::Error;
 
 pub struct Ytdlp{

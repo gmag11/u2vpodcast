@@ -2,7 +2,7 @@ use regex::Regex;
 use ureq::Agent;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 use super::{
     Error,
@@ -191,7 +191,12 @@ async fn cache_image_in_dir(
     };
 
     match outcome {
-        ImageFetchOutcome::Skip => Ok(Some(image_local_url(slug))),
+        ImageFetchOutcome::Skip => {
+            info!(
+                "Cached image for `{slug}` unchanged (probe size matches); skipping download"
+            );
+            Ok(Some(image_local_url(slug)))
+        }
         ImageFetchOutcome::Bytes(bytes) => {
             // Atomic write: temp file + rename so a concurrent reader never
             // sees a half-written image. A unique temp suffix (pid + micros)
@@ -203,7 +208,10 @@ async fn cache_image_in_dir(
             tokio::fs::rename(&tmp, &dest)
                 .await
                 .map_err(|e| Error::default(&e.to_string()))?;
-            debug!("Cached cover image for `{slug}` ({} bytes)", bytes.len());
+            info!(
+                "Cached cover image for `{slug}` ({} bytes)",
+                bytes.len()
+            );
             Ok(Some(image_local_url(slug)))
         }
     }
@@ -324,7 +332,7 @@ mod metadata_parsing_tests {
 mod image_cache_tests {
     use super::*;
     use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
