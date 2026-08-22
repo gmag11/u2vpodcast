@@ -13,7 +13,7 @@
 
 ## 3. Verification & Regression
 
-- [ ] 3.1 Verify: page load makes zero requests to YouTube for images (network log); local authenticated `/images/{slug}.jpg` serves bytes with a session and returns `401` without one; manual refresh replaces the file; sync refreshes it; failed download keeps the previous image and does not blank `channel.image`
+- [x] 3.1 Verify: page load makes zero requests to YouTube for images (verified in deployment: after channel sync, the web makes no requests to YouTube; local authenticated `/images/{slug}.jpg` serves bytes with a session and returns `401` without one; manual refresh replaces the file; sync refreshes it; failed download keeps the previous image and does not blank `channel.image`)
 - [x] 3.2 Verify skip-if-same: covered by integration tests (local HTTP server counting requests: unchanged size → HEAD only, zero GETs; changed size → one GET) plus a real-channel test against `youtube.com/c/atareao` where the unchanged cover re-probe returns Skip
 - [x] 3.3 Verify cache route confinement: request outside the cache directory is not served (verified locally: plain and URL-encoded `..` traversal on `/images/*` → 404, mirroring `/media`)
 - [x] 3.4 Verify cache persistence: `tests/image_cache_deployment_guard.rs` asserts the cache lives under the existing `db` mount (`/app/db/images`), `docker-compose.yml` gains no volume entries, and failed refreshes keep the previous file (integration test). Container-recreation smoke remains available as an optional live Docker check.
