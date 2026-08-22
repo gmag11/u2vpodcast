@@ -4,6 +4,7 @@ context: |
   Tech stack: Rust (actix-web 4, actix-session, sqlx/sqlite, argon2), SvelteKit frontend served as static files.
   IMPORTANT: Generate ALL artifact content (proposal, design, specs, tasks) in English.
   IMPORTANT: When bumping the application version, update the `version` field in `Cargo.toml` (Rust crate), the `version` field in `frontend/package.json` (SPA), and the image tag `vX.Y.Z` in `docker-bake.hcl`. These three must stay in sync; the release tag follows the same `vX.Y.Z` pattern.
+  IMPORTANT: Always create a new branch for a new proposal; never work on the default branch.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
