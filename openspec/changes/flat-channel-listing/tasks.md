@@ -1,15 +1,15 @@
-## 1. Flat Listing
+## 1. Flat Bounded Listing
 
-- [x] 1.1 Switch `Ytdlp::get_latest` to `--flat-playlist` (keeping `--dateafter`, `--break-on-reject`, cookies and throttle); `YtVideo` is serde-default tolerant of omitted flat fields
-- [x] 1.2 Per-video metadata source: `Ytdlp::download` gains `--print-json`, captures stdout, and returns `(ExitStatus, YtVideo)` with the parsed info dict (same line-JSON parsing, throttled)
+- [ ] 1.1 `get_latest` becomes `list_videos_wanted(url, count)` using `--flat-playlist` + `--playlist-items 1:<count>` (no `--dateafter`), keeping cookies and the throttle; `YtVideo` tolerates missing fields and gains optional `release_date` / `live_status` (serde defaults)
+- [ ] 1.2 `Ytdlp::download` gains `--print-json`, captures stdout, and returns `(ExitStatus, YtVideo)` with the parsed info dict (same line-JSON parsing, throttled)
 
-## 2. Worker Flow
+## 2. Count-Window Selection & Processing
 
-- [x] 2.1 Worker filters flat candidates Rust-side by the `last` boundary (`filter_by_window` backstop) so out-of-window videos never reach a per-video connection; already-stored videos are skipped as today
-- [x] 2.2 Complete episode rows are built from the download run's metadata (`--print-json`), falling back to the flat candidate for omitted fields; per-episode delay, throttle slot, and failure semantics unchanged
+- [ ] 2.1 Candidate selection in the worker: take candidates **in listing order** (the `/videos` tab is newest-first, flat listing preserves it); exclude `is_upcoming`, `is_live`, and future-dated (1h tolerance) entries; stop the scan at the first entry older than the `first` floor (undated entries keep their listing position, floor enforced at download); the window is the first `max` candidates (listing requested with `max + MARGIN`)
+- [ ] 2.2 Per-video processing: skip already-stored episodes; download missing ones; after download re-check the authoritative date against the `first` floor and discard (file removed, no episode row) when older; build the episode row from the `--print-json` metadata otherwise
 
 ## 3. Verification & Regression
 
-- [x] 3.1 Integration test with a fake `yt-dlp`: synthetic 300-entry flat listing spanning the window — parses all entries; the backstop keeps exactly the 50 in-window candidates (no per-video work for the 250 out-of-window)
-- [x] 3.2 Unit tests: flat-listing parse tolerant of missing fields, `--print-json` full metadata parse, backstop boundary behavior (on-edge/older/no-date)
-- [x] 3.3 Full test suite green (63 tests, 0 warnings). Live spot-check on a large channel (e.g. Defected Music) pending redeploy: listing should complete in seconds and per-video downloads resume immediately with metadata
+- [ ] 3.1 Acceptance test (20→30) with a fake `yt-dlp`: synthetic channel (~35 entries: dated across the window + one upcoming + one future-dated + undated) — with `max=20` only the missing among the 20 newest dated are downloaded; raising to `max=30` downloads the 10 older missing ones; upcoming/future never downloaded
+- [ ] 3.2 Unit tests: date scoring/ordering (undated last, future and `is_upcoming`/`is_live` excluded, deterministic tiebreak), floor filtering, `--print-json` metadata parse (tolerant)
+- [ ] 3.3 Run the full test suite; live spot-check a large channel (e.g. Defected Music): listing capped, gap-fill works, and raising `max` pulls the older missing episodes

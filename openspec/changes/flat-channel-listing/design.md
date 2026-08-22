@@ -2,49 +2,50 @@
 
 ## Context
 
-Today the worker's `process_channel` calls `Ytdlp::get_latest(url, last)` which runs `yt-dlp --dateafter <last> --dump-json ... <channel>` (no `--flat-playlist`). `--dump-json` without `--flat-playlist` forces full extraction of every video that yt-dlp touches, and `--dateafter` only knows a video's date after extracting it. On a 4000-video channel with a 2023 backfill window (~1000-2000 videos), the app spends tens of minutes silently holding the single throttle slot before `get_latest` returns; `Command::output()` buffers everything, so there is no progress signal at all.
-
-Goal: make the listing cheap (`--flat-playlist`), and obtain complete metadata only for the videos we will actually download, from the download run itself.
+The current sync is date-boundary based: `process_channel` computes `last` (newest stored episode, or `channel.first`), lists with `--dateafter`, and downloads everything on/after that date. Pruning or gaps make this fragile — raising `max` never recovers older episodes, and undated flat entries are mishandled (the old fallback ranked them as newest). This change replaces the boundary with a count-window: the `max` most recent videos are the candidates, ordered by published date, with upcoming/future entries excluded and `first` acting as a hard floor.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Flat, page-bounded listing for any channel size.
-- Per-video full metadata exactly once, from the download run (no separate extraction pass).
-- Rust-side backstop for the date boundary so a flat-listing extractor gap cannot blow up the candidate set.
-- Preserve current semantics: `first`/`last`, `max` retention, episode rows, throttle coverage, per-episode logging.
+- Candidate window = the `max` most recent videos (newest by date), independent of what was downloaded before.
+- Raising `max` backfills the older missing episodes; shrinking it keeps the existing pruning behaviour.
+- Upcoming/live/future-dated entries never selected; undated entries never displace dated ones and are validated at download.
+- Flat, bounded listing (max + margin) so the per-cycle cost is constant.
+- `first` as a hard floor; full metadata from the single download run; throttle preserved.
 
 **Non-Goals:**
-- No Caching/DB changes; episode schema unchanged.
-- No changes to `max` pruning, channel delete, or image caching.
-- No pagination API redesign of the throttle change itself.
+- No change to retention pruning (`clean_channel`), channel delete, image cache, or the public API.
+- No per-channel priority, scheduling changes, or queue semantics beyond the window.
 
 ## Decisions
 
-- **Flat listing:** `get_latest` runs `yt-dlp --flat-playlist --dateafter <ymd> --break-on-reject --dump-json <channel>` through the existing `with_youtube_slot` + `parse_dump_output` pipeline. `--flat-playlist` requests only the channel API pages (id/title/url/timestamp), which for a thousands-video channel is seconds. `--break-on-reject` limits flat output to the in-window prefix when the extractor applies the date filter to flat entries.
-  - **Backstop in code:** regardless of whether `--dateafter` filters flat entries, `get_latest` returns entries with whatever date fields are present plus the parsed `timestamp` when available. The worker filters candidates Rust-side (`timestamp >= window`) so out-of-window videos never reach per-video work even if the extractor does not filter flat entries.
-  - If a YouTube flat entry lacks any usable date field, the candidate is conservatively kept (rare; per-video work decides from its own metadata and skips if the actual date is out of window). This keeps correctness at the cost of an occasional detail fetch — bounded by the `max`/retention limit in the worst case.
-- **Single-run metadata (`--print-json`):** `Ytdlp::download` adds `--print-json` and captures stdout; the info dict is parsed with the same line-JSON approach as `parse_dump_output` to fill the `YtVideo` (title, description, duration, thumbnail, upload date, id). This makes each new episode exactly one throttled connection: download + metadata in the same run. If the download fails, no json is emitted and the episode is not stored (unchanged semantics).
-  - Rejected: a separate `get_video_info` extraction pass per video — an extra throttled connection per new video and slower backfills.
-- **Worker flow (unchanged boundaries):** `process_channel` keeps computing `last` as today, calls the flat `get_latest`, and for each candidate: skip if already stored (`episode_exists`), skip if backstop-filtered out of window, otherwise `download` + parse metadata + `Episode::new`. Per-episode delay and throttle behavior unchanged.
-- **Parsing reuse:** `parse_dump_output` already handles newline-delimited JSON objects; flat and `--print-json` outputs use the same shape. `YtVideo` gets serde defaults for fields that flat listings may omit.
+- **Flat bounded listing.** `list_videos_wanted(url, count)` runs `yt-dlp --flat-playlist --dump-json --playlist-items 1:<count>` (cookies + throttle as today). `--playlist-items` caps the pages yt-dlp walks (≈ the "month by month" walk in the user's description, minus the dateafter). `count = max + MARGIN` so exclusions (upcoming/failed/private) cannot starve the window.
+  - `MARGIN` = 5 fixed (open question: proportional). A shortfall heals on the next cycle.
+- **Selection.** The channel `/videos` tab orders by publish date, newest first, and the flat listing preserves it; therefore candidates are taken **in listing order** (the "n most recent" is the first `max` entries). Dates are used only for the exclusion rules and the `first` floor:
+  - Exclusion: `live_status == "is_upcoming"` or `"is_live"` → drop; parsed date strictly in the future beyond the 1h tolerance → drop.
+  - Floor: walking newest-first, the scan stops at the first candidate whose date is older than `first` (the rest are older still). Entries without a parseable date keep their listing position; the floor is enforced at download.
+  - When no date is available at all for a candidate, its listing position decides; the authoritative date arrives with `--print-json` and is validated against the floor.
+- **`first` = floor.** `process_channel` passes `channel.first` to the per-video step. After the download, if the authoritative published date is before the floor, the file is removed and the episode is not stored (this also resolves undated candidates that slipped through selection).
+- **Single-run metadata.** `download` adds `--print-json` and returns `(ExitStatus, YtVideo)` from its stdout — one throttled connection per new episode. Undated flat candidates resolved here. Rejected: a separate per-video extraction pass.
+- **Parsing.** `YtVideo` gains serde-default fields `release_date` and `live_status`; `parse_dump_output` (line-JSON) is reused for flat listings and `--print-json` output. The old `--dateafter`/`--break-on-reject` and the date-window backstop disappear (replaced by count selection + floor).
 
 ## Risks / Trade-offs
 
-- [Flat entries may not carry a parseable date in every extractor version] → Backstop keeps the candidate and the per-video metadata decides; worst case one extra detail per candidate, bounded by the window/retention size. If this becomes common, the follow-up is a separate bounded detail pass.
-- [`--print-json` output reliability with `-x`/`-o`] → Parses the line JSON defensively; a missing/empty episode just errors that run (skipped, logged), same as today's parse failures.
-- [`--break-on-reject` ordering assumption (newest-first)] → Filtering is also done Rust-side against the `last` boundary, so a wrong ordering only costs listing output size, never wrong episodes.
-- [Larger flat output for very old windows] → Listing pays pages, not extraction; the candidate set is then filtered Rust-side before any per-video connection.
+- [Fixed margin may be short with many upcoming/failed entries] → Next cycle re-selects and heals; proportional margin is a documented follow-up.
+- [Newest-first assumption vs date ordering] → Selection is by parsed date, not listing order; a wrong listing order only costs listing size (`--playlist-items` cap), never wrong episodes.
+- [`release_date`/`live_status` presence varies by yt-dlp version] → All optional (serde default); absence degrades to the undated path (ranked last, resolved at download).
+- [Future-date tolerance too small/large] → 1h default covers clock skew; documented constant, easy to adjust.
 
 ## Migration Plan
 
-1. Switch `get_latest` to flat listing; make `YtVideo` serde-default tolerant.
-2. Add `--print-json` + stdout capture to `download`; parse the info dict.
-3. Worker: backstop date filter on candidates; build complete episodes from the download metadata.
-4. Verify: local fake-yt-dlp integration test with a synthetic 1000-entry flat listing asserting only in-window candidates hit download; full test suite; live spot-check on Defected Music.
-5. Rollback: revert `get_latest`/`download`; old behavior returns without migration.
+1. `list_videos_wanted` (flat + `--playlist-items` cap); `YtVideo` tolerates and gains `release_date`/`live_status`.
+2. `download` with `--print-json` returning `(ExitStatus, YtVideo)`.
+3. Worker selection (date ordering, exclusions, floor) + per-video processing with floor re-check.
+4. Tests: 20→30 acceptance with a fake `yt-dlp`; exclusion/ordering unit tests; full suite; live spot-check.
+5. Rollback: date-boundary behaviour resumes by reverting the listing/worker changes; no migration.
 
 ## Open Questions
 
-- Does `--dateafter` filter YouTube flat-playlist entries in the installed yt-dlp (stable 2026.08.19)? The code backstop makes this an optimization, not a correctness requirement; verify during verification.
-- Does `--print-json` always emit before `-x`/post-processing? The parse reads the first JSON line; if conversion reorders output, fall back to capturing `--print-json` into a separate call (documented fallback, not currently planned).
+- Margin: fixed +5 vs proportional (e.g. 20%) — fixed chosen; revisit if cycles report persistent shortfall.
+- Whether `is_live` entries should be excluded (decided: yes, no usable audio until the stream ends) or skipped only on failure stay.
+- `--playlist-items` semantics on YouTube channel tabs: verified during implementation; if unsupported, fall back to flat listing + Rust-side truncation (same bounded cost).

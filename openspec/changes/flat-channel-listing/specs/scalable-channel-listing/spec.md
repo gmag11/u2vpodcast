@@ -2,50 +2,78 @@
 
 ## ADDED Requirements
 
-### Requirement: Channel listing is flat and does not extract every video
+### Requirement: The sync window is the most recent `max` videos
 
-Listing a channel's coverage SHALL be cheap: a flat scan that returns in-window video references from the channel API pages, without fully extracting out-of-window videos (no per-video webpage/JS-challenge/PO-token round trip during the listing itself). The listing SHALL complete in seconds for channels with thousands of videos, bounded by the number of pages, not by the number of videos in the date window.
+The channel sync SHALL target the `max` most recent videos as its candidate window, regardless of what was previously downloaded. Already-stored videos within the window SHALL be kept untouched; missing ones SHALL be downloaded. The window SHALL NOT depend on the last-downloaded date, so raising `max` automatically adds the older missing videos.
 
-#### Scenario: Large channel is listed without per-video extraction
-- **WHEN** a channel with thousands of videos is scanned for a backfill window
-- **THEN** the listing returns the candidate references quickly and transparently (logged per episode, not a silent multi-minute scan)
+#### Scenario: First backfill stores the N most recent missing videos
+- **WHEN** a channel has never been synced, with `first` 3 years ago and `max=20`
+- **THEN** the worker selects the 20 most recent videos, skips the ones already stored, and downloads the missing ones (audio + full metadata)
 
-#### Scenario: Out-of-window videos are not fully extracted by the listing
-- **WHEN** the scan encounters videos older than the channel's `first`/`last` boundary
-- **THEN** they are excluded from candidates without full metadata extraction
+#### Scenario: Raising max recovers older missing episodes
+- **WHEN** `max` is raised from 20 to 30 on an already-synced channel
+- **THEN** the 21st–30th most recent videos enter the window and the missing ones are downloaded, even though they are older than the previous window
 
-### Requirement: Full episode metadata is deferred to per-video processing
+#### Scenario: Unchanged window does no work
+- **WHEN** all videos within the current window are already stored
+- **THEN** the sync completes without downloads
 
-Full metadata (description, duration, thumbnail, exact upload date) SHALL be fetched only for videos that will be stored: in-window and not already present. Each new episode SHALL obtain its metadata from its own download run (one connection), under the single YouTube throttle.
+### Requirement: The window is the newest `max` videos in listing order
 
-#### Scenario: In-window new video stores complete metadata
-- **WHEN** a candidate video inside the window is not yet stored
-- **THEN** its full metadata is obtained during its own processing run and the episode row is complete (title, description, duration, thumbnail, upload date)
+The candidate window SHALL be the `max` most recent videos **in the order the channel listing presents them** (the `/videos` tab sorts by publish date, newest first, and the flat listing preserves that order). Publish dates SHALL be used to enforce exclusion rules and the `first` floor — not to re-sort the window. The flat listing SHALL be bounded to `max + margin` entries so the per-cycle cost does not grow with channel age.
 
-#### Scenario: Already-stored videos are not reprocessed
-- **WHEN** the scan revisits a video already present
-- **THEN** no metadata fetch or download is performed for it
+#### Scenario: Top-N selection follows the channel listing order
+- **WHEN** a channel lists more than `max` videos
+- **THEN** the chosen candidates are the first `max` entries in the listing (the `max` most recently published), and older videos are not detail-fetched
 
-#### Scenario: Out-of-window videos never trigger detail fetch
-- **WHEN** a flat candidate has a timestamp older than the window
-- **THEN** it is skipped before any per-video work (backstop filtering when the flat listing cannot apply `--dateafter` itself)
+#### Scenario: Floor stops the scan early
+- **WHEN** walking newest-first, a candidate's date is older than `first`
+- **THEN** the walk stops (the remaining entries are older still) and no older candidate is selected
 
-### Requirement: Date window is honored without extraction cost
+#### Scenario: Shorter catalog covers the whole channel
+- **WHEN** a channel has fewer than `max` videos within the floor
+- **THEN** all of them are candidates and the listing stops when exhausted
 
-The `first`/`last` boundary SHALL be applied to flat entries (via `--dateafter --break-on-reject` where the extractor supports it, and/or by Rust-side timestamp comparison) so the number of per-video detail fetches is proportional to the in-window candidates, not the channel size.
+#### Scenario: Listing cost is bounded
+- **WHEN** a channel has thousands of videos
+- **THEN** the listing requests at most `max + margin` entries (flat), independent of channel size
 
-#### Scenario: Backfill window candidates are bounded
-- **WHEN** a channel has 4000 videos and the window covers 1000
-- **THEN** at most the ~1000 in-window candidates are considered for per-video work, and the rest are skipped by date comparison alone
+### Requirement: Upcoming, live and future-dated videos are excluded
 
-#### Scenario: Empty window costs only the listing
-- **WHEN** no video falls inside the window
-- **THEN** the cycle completes with zero per-video detail fetches
+Videos that are upcoming (`live_status` is `is_upcoming`), currently live (`is_live`), or whose parsed date is in the future SHALL be excluded from candidates; they SHALL not displace real episodes and SHALL not be downloaded before they become available. Entries without a parseable date SHALL be kept but ordered last (never displacing a dated candidate), with their real date resolved at the download step.
 
-### Requirement: Throttle coverage is preserved
+#### Scenario: Upcoming premiere is not downloaded
+- **WHEN** a candidate is flagged as upcoming
+- **THEN** it is excluded from the window and not downloaded
 
-The flat listing, any per-video detail fetch, and every download SHALL remain inside the single-connection YouTube throttle (youtube-throttling), so this change never opens parallel connections or bypasses the cooldown.
+#### Scenario: Future-dated entry is excluded
+- **WHEN** a candidate's parsed date is in the future (beyond a small clock-skew tolerance)
+- **THEN** it is excluded from the window
 
-#### Scenario: Listing and downloads serialize with other YouTube traffic
-- **WHEN** the worker scans a channel while other channels or image fetches are active
-- **THEN** the listing and each per-video run acquire the shared slot like any other YouTube operation
+#### Scenario: Undated entry keeps its listing position
+- **WHEN** a candidate has no parseable date
+- **THEN** it keeps its position in the listing (no fabricated date, no reordering); if selected, the download step resolves and validates its real date against the floor
+
+### Requirement: `first` acts as a hard floor
+
+The sync SHALL never select or download videos published before `first`; it SHALL act as a floor, not as a "last downloaded" marker. A candidate whose real date (resolved during download) turns out to predate `first` SHALL be discarded together with its downloaded file, and SHALL NOT be stored.
+
+#### Scenario: Floor excludes older candidates
+- **WHEN** `first` is set to a date 3 years ago
+- **THEN** no video older than that date is selected or stored
+
+#### Scenario: Undated candidate validated against the floor
+- **WHEN** an undated candidate resolves (at download) to a date before `first`
+- **THEN** it is discarded with its file and not stored
+
+### Requirement: Full episode metadata is obtained per processed video
+
+Full metadata (description, duration, thumbnail, exact upload date) SHALL be obtained from the download run itself (`--print-json`), under the single YouTube throttle — no separate extraction pass for the listing.
+
+#### Scenario: Missing in-window video downloads with complete metadata
+- **WHEN** a candidate inside the window is not yet stored
+- **THEN** one throttled run downloads the audio and returns the info dict from which the episode row is built
+
+#### Scenario: Throttle coverage is preserved
+- **WHEN** the worker scans and downloads
+- **THEN** the flat listing and each per-video run acquire the shared single-connection slot
