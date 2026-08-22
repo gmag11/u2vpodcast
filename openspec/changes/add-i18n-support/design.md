@@ -51,8 +51,9 @@ The notification store already accepts a rendered `message: string`; it displays
 - **Alternative considered:** Storing `key + params` in the store and translating inside `AppNotification.vue`. Rejected: adds indirection and makes dismissal/timing logic less transparent; call-site translation is idiomatic and keeps the store pure.
 
 ### D7: Language switcher in the header using radix-vue primitives
-A compact dropdown (`DropdownMenu`/`DropdownMenuTrigger`/`DropdownMenuContent` from radix-vue, already a dependency) rendered in `AppHeader`'s actions cluster, repeated in the mobile drawer. Each entry shows the autoglottonym (`English`, `Español`); no flag icons (a11y + neutrality). Selecting a language calls `locale.apply(code)`.
+A compact dropdown (`DropdownMenu`/`DropdownMenuTrigger`/`DropdownMenuContent` from radix-vue, already a dependency) rendered in `AppHeader`'s actions cluster next to the theme toggle, visible at all screen widths (icon-only trigger on mobile). Each entry shows the autoglottonym (`English`, `Español`); no flag icons (a11y + neutrality). Selecting a language calls `locale.apply(code)`. The mobile drawer carries no duplicate control; the header-bar dropdown is the single language selector.
 - **Alternative considered:** Single toggle button flipping `en`↔`es`. Rejected: becomes ambiguous the moment a third locale is added.
+- **Alternative considered:** Duplicating the selector inside the mobile drawer. Rejected during implementation: on mobile the drawer is overlayed but the header bar stays visible, so a second control is redundant and clutters the drawer.
 
 ### D8: Language fallback and translation parity checking
 `fallbackLocale: 'en'` ensures missing `es` keys degrade to English rather than raw keys. A unit test asserts every key in `en.json` exists in `es.json` (parity guard), preventing silent English fallbacks from creeping in.

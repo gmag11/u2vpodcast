@@ -35,7 +35,7 @@ The SPA SHALL remember the user's chosen locale in `localStorage` under the `loc
 
 ### Requirement: Reactive language switching from the header
 
-The SPA SHALL provide a language selector in the header, present on both desktop (actions cluster) and mobile (drawer) layouts. The selector SHALL list every available locale by its autoglottonym (`English`, `Español`), SHALL indicate the currently active locale, and selecting an entry SHALL switch the entire UI reactively without a full page reload.
+The SPA SHALL provide a language selector in the header bar, present on desktop and mobile layouts. The selector SHALL list every available locale by its autoglottonym (`English`, `Español`), SHALL indicate the currently active locale, and selecting an entry SHALL switch the entire UI reactively without a full page reload.
 
 #### Scenario: Switching to Spanish updates the whole UI without reload
 
@@ -44,8 +44,8 @@ The SPA SHALL provide a language selector in the header, present on both desktop
 
 #### Scenario: Selector is reachable on mobile
 
-- **WHEN** a user on a mobile-width screen opens the header drawer
-- **THEN** the language selector is available inside the drawer and switches locale the same way as on desktop
+- **WHEN** a user on a mobile-width screen views a header-rendering page
+- **THEN** the language selector is available in the header bar (rendered as an icon-only trigger alongside the theme toggle) and switches locale the same way as on desktop
 
 ### Requirement: All user-facing UI strings are localized
 
