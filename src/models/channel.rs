@@ -507,6 +507,10 @@ impl Channel{
         }
     }
 
+    // Retained query helpers, unused by the count-window sync (which no longer
+    // needs the newest-stored-episode boundary); kept following the
+    // `#[allow(unused)]` precedent for optional model helpers.
+    #[allow(dead_code)]
     pub async fn number_of_episodes(&self, pool: &SqlitePool) -> i64 {
         Self::total(pool, self.id).await
     }
@@ -532,6 +536,7 @@ impl Channel{
         Episode::exists(pool, self.id, yt_id).await
     }
 
+    #[allow(dead_code)]
     pub async fn get_max_date(&self, pool: &SqlitePool) -> DateTime<Utc> {
         let sql = "SELECT MAX(published_at) as last_date FROM episodes WHERE channel_id = $1";
         match query(sql).bind(self.id).fetch_one(pool).await {

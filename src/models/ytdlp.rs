@@ -4,15 +4,10 @@ use tracing::{
     info,
     debug,
 };
-use chrono::{
-    DateTime,
-    Utc,
-};
-// `timestamp_opt` (used only by the `#[cfg(test)]` helper tests) needs the
-// `TimeZone` trait in scope; gated on test builds so the release build stays
-// warning-free.
+// `timestamp_opt` / `Utc` are used only by the `#[cfg(test)]` network smoke
+// tests; gated on test builds so the release build stays warning-free.
 #[cfg(test)]
-use chrono::TimeZone;
+use chrono::{Utc, TimeZone};
 use super::Error;
 use crate::utils::throttle::with_youtube_slot;
 
@@ -39,6 +34,10 @@ pub struct YtVideo{
     pub timestamp: Option<i64>,
     #[serde(default)]
     pub duration_string: String,
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(default)]
+    pub live_status: String,
 }
 
 impl Ytdlp {
@@ -104,14 +103,15 @@ impl Ytdlp {
             vec!["--cookies", self.cookies.as_str()]
         }
     }
-    pub async fn get_latest(&self, url: &str, last: DateTime<Utc>) -> Result<Vec<YtVideo>, Error>{
-        info!("get_latest");
-        // Fetch every video published on or after the date of the last stored
-        // episode. Using the absolute date (not "today-Ndays") avoids missing
-        // videos published earlier the same day the scheduler/worker runs.
-        let elapsed = last.format("%Y%m%d").to_string();
-        let mut args = vec!["--dateafter", &elapsed, "--dump-json",
-            "--break-on-reject", "--flat-playlist", "--js-runtimes", "node",
+    pub async fn list_videos(&self, url: &str, want: usize) -> Result<Vec<YtVideo>, Error>{
+        info!("list_videos");
+        // Flat, bounded listing: the channel `/videos` tab is newest-first, so
+        // the first `want` flat entries are "the most recent `want` videos".
+        // `--playlist-items` caps the pages yt-dlp walks; the worker further
+        // selects the `max`-sized window (scalable-channel-listing).
+        let spec = format!("1:{want}");
+        let mut args = vec!["--flat-playlist", "--dump-json",
+            "--playlist-items", &spec, "--js-runtimes", "node",
             "--js-runtimes", "deno"];
         args.extend(self.cookies_args());
         args.push(url);
@@ -124,7 +124,12 @@ impl Ytdlp {
         })
         .await?;
         let ytvideos = parse_dump_output(&stdout)?;
-        info!("{:?}", &ytvideos);
+        info!(
+            "Listed {} flat candidates for {} (requested {})",
+            ytvideos.len(),
+            &url,
+            want
+        );
         Ok(ytvideos)
     }
 
@@ -202,7 +207,6 @@ fn parse_dump_output(stdout: &[u8]) -> Result<Vec<YtVideo>, Error> {
 #[cfg(test)]
 mod flat_listing_tests {
     use super::*;
-    use crate::utils::worker::filter_by_window;
     use std::path::Path;
     use std::time::Duration;
 
@@ -212,9 +216,10 @@ mod flat_listing_tests {
         let data = dir.join("listing.jsonl");
         let mut content = String::new();
         for i in 0..total {
-            // The last `in_window` entries are in-window (2026); the rest are
-            // older (2022-04-03).
-            let (timestamp, date) = if i >= total - in_window {
+            // Newest-first, like the `/videos` tab: the first `in_window`
+            // entries are recent (2026-08-19); the rest are older (2022-04-03)
+            // and below the test floor (2023).
+            let (timestamp, date) = if i < in_window {
                 (1_755_619_200i64, "20260819") // 2026-08-19
             } else {
                 (1_648_944_000i64, "20220403") // 2022-04-03
@@ -239,7 +244,7 @@ mod flat_listing_tests {
     }
 
     #[tokio::test]
-    async fn flat_listing_parses_and_backstop_keeps_only_in_window_candidates() {
+    async fn flat_listing_parses_every_entry_tolerantly() {
         crate::utils::throttle::init_throttle(Duration::from_millis(30));
         let dir = std::env::temp_dir().join(format!(
             "u2v-flat-list-{}",
@@ -253,32 +258,30 @@ mod flat_listing_tests {
         std::env::set_var("FAKE_LISTING", &data);
 
         let ytdlp = Ytdlp::new(script.to_str().unwrap(), "");
-        let since = chrono::TimeZone::timestamp_opt(
-            &Utc,
-            1_672_531_200, /* 2023-01-01 */
-            0,
-        )
-        .unwrap();
         let videos = ytdlp
-            .get_latest("https://youtu.be/channel", since)
+            .list_videos("https://youtu.be/channel", 300)
             .await
             .expect("flat listing succeeds");
         // Every flat entry parses; omitted fields default to empty.
         assert_eq!(videos.len(), 300, "flat listing must parse every entry");
         assert!(videos.iter().all(|v| v.description.is_empty()));
         assert!(videos.iter().all(|v| v.duration_string.is_empty()));
+        assert!(videos.iter().all(|v| v.live_status.is_empty()));
+        assert!(videos.iter().all(|v| v.release_date.is_empty()));
 
-        // The worker backstop reduces the candidate set to the in-window 50
-        // (+ never a per-video run for the 250 out-of-window ones).
-        let mut candidates = videos;
-        filter_by_window(&mut candidates, since);
+        // Count-window selection on top of the listing: newest-first order,
+        // floor 2023 → the 50 in-window entries are selected and the scan
+        // stops when the first pre-floor entry appears.
+        let floor = chrono::TimeZone::timestamp_opt(&Utc, 1_672_531_200, 0).unwrap();
+        let now = chrono::TimeZone::timestamp_opt(&Utc, 1_755_619_200, 0).unwrap();
+        let selection = crate::utils::worker::select_window(videos, 50, floor, now);
         assert_eq!(
-            candidates.len(),
+            selection.window.len(),
             50,
-            "only in-window candidates may proceed to per-video work"
+            "the 50 most recent candidates form the window"
         );
-        for (offset, candidate) in candidates.iter().enumerate() {
-            assert_eq!(candidate.id, format!("vid_{}", 250 + offset));
+        for (offset, candidate) in selection.window.iter().enumerate() {
+            assert_eq!(candidate.id, format!("vid_{offset}"));
         }
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -436,8 +439,8 @@ mod throttle_youtubedl_integration {
 async fn test_e(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     // Old date: the "error" channel yields no parseable videos.
-    let old = Utc.timestamp_opt(0, 0).unwrap();
-    let salida = ytdlp.get_latest("error", old).await;
+    let _old = Utc.timestamp_opt(0, 0).unwrap();
+    let salida = ytdlp.list_videos("error", 5).await;
     match salida{
         Ok(videos) => {
             assert!(videos.is_empty());
@@ -451,8 +454,7 @@ async fn test_e(){
 async fn test_0(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     // Recent date: expect no/very few videos on this channel.
-    let today = Utc::now();
-    let salida = ytdlp.get_latest("atareao", today).await;
+    let salida = ytdlp.list_videos("atareao", 5).await;
     match salida{
         Ok(videos) => {
             assert!(videos.is_empty());
