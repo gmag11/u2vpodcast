@@ -1,5 +1,9 @@
 use tokio::process::Command;
-use serde::{Serialize, Deserialize};
+use serde::{
+    Serialize,
+    Deserialize,
+    de::Deserializer,
+};
 use tracing::{
     info,
     debug,
@@ -20,24 +24,35 @@ pub struct Ytdlp{
 pub struct YtVideo{
     pub id: String,
     pub title: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub thumbnail: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub original_url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub webpage_url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub upload_date: String,
     #[serde(default)]
     pub timestamp: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub duration_string: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub release_date: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_default")]
     pub live_status: String,
+}
+
+// yt-dlp flat entries and info dicts frequently emit explicit `null` for
+// optional string fields (e.g. `"description": null`, `"release_date": null`).
+// `#[serde(default)]` alone only covers a missing key, so these deserialize
+// `null` as an empty string instead of failing the whole listing parse.
+fn string_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 impl Ytdlp {
@@ -435,8 +450,40 @@ mod throttle_youtubedl_integration {
     }
 }
 
-#[tokio::test]
-async fn test_e(){
+#[test]
+    fn null_string_fields_default_to_empty() {
+        // yt-dlp flat entries emit explicit `null` for optional strings.
+        let line = br#"{"id":"n1","title":"T","description":null,"thumbnail":null,"original_url":null,"webpage_url":"https://x","upload_date":null,"timestamp":null,"duration_string":null,"release_date":null,"live_status":null}"#;
+        let videos = parse_dump_output(line).expect("null fields must not fail the parse");
+        assert_eq!(videos.len(), 1);
+        assert_eq!(videos[0].description, "");
+        assert_eq!(videos[0].duration_string, "");
+        assert_eq!(videos[0].release_date, "");
+        assert_eq!(videos[0].live_status, "");
+        assert_eq!(videos[0].webpage_url, "https://x");
+    }
+
+    #[test]
+    fn real_atareao_flat_listing_parses() {
+        // Fixture captured from `yt-dlp --flat-playlist --dump-json
+        // --playlist-items 1:12 https://www.youtube.com/@atareao/videos`
+        // (2026.08.19) — the exact shape that broke parsing: explicit
+        // `"live_status": null` / `"timestamp": null` plus absent
+        // description/date fields.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/atareao_flat_first.jsonl");
+        let bytes = std::fs::read(path).expect("fixture file");
+        let videos = parse_dump_output(&bytes).expect("real flat listing must parse");
+        assert_eq!(videos.len(), 12);
+        assert!(videos.iter().all(|v| v.live_status.is_empty()));
+        assert!(videos.iter().all(|v| v.timestamp.is_none()));
+        assert!(videos.iter().all(|v| v.id.len() == 11), "yt video ids are 11 chars");
+        assert!(!videos[0].title.is_empty());
+        assert_eq!(videos[0].id, "FuxbDWsB6so");
+    }
+
+    #[tokio::test]
+    async fn test_e(){
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     // Old date: the "error" channel yields no parseable videos.
     let _old = Utc.timestamp_opt(0, 0).unwrap();
