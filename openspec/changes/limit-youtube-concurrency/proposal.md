@@ -25,4 +25,3 @@ Every operation that talks to YouTube — metadata reads, cover images, and each
 - New shared throttle utility (global semaphore + cooldown, tokio-based).
 - Optional `config.yml` keys for the cooldown (defaults apply when absent).
 - Expected: longer wall-clock for multi-channel refreshes (serialized + cooldown). No API contract change.
-- Regression guard applies after implementation: re-analysis against `docs/bug-review-2026-08-21.md`; the throttle must not introduce new bugs (no deadlocks, no unbounded queueing, no deadlock with the existing spawn_blocking path).

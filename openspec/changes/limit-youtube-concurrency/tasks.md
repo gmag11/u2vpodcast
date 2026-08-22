@@ -13,4 +13,3 @@
 - [ ] 3.1 Force a refresh of several channels at once: assert strictly sequential yt-dlp runs separated by the configured cooldown, with no overlapping timestamps
 - [ ] 3.2 Fire concurrent channel creates/cover refreshes: assert metadata fetches never overlap; assert a failed connection still enforces the cooldown; assert the API (login/status/other endpoints) stays responsive during a held slot
 - [ ] 3.3 Unit-test the throttle guard (tiny cooldown) for release-on-success, release-on-error and release-on-panic; run the full test suite
-- [ ] 3.4 Re-run a bug review taking `docs/bug-review-2026-08-21.md` as reference; confirm the new throttling introduces no new bugs (no deadlocks, no unbounded queueing) and the prior fixes (CORS, hash, active flag, blocking I/O) still hold
