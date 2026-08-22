@@ -20,17 +20,23 @@ pub struct Ytdlp{
     cookies: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct YtVideo{
     pub id: String,
     pub title: String,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub thumbnail: String,
+    #[serde(default)]
     pub original_url: String,
+    #[serde(default)]
     pub webpage_url: String,
+    #[serde(default)]
     pub upload_date: String,
     #[serde(default)]
     pub timestamp: Option<i64>,
+    #[serde(default)]
     pub duration_string: String,
 }
 
@@ -59,7 +65,7 @@ impl Ytdlp {
         // videos published earlier the same day the scheduler/worker runs.
         let elapsed = last.format("%Y%m%d").to_string();
         let mut args = vec!["--dateafter", &elapsed, "--dump-json",
-            "--break-on-reject", "--js-runtimes", "node",
+            "--break-on-reject", "--flat-playlist", "--js-runtimes", "node",
             "--js-runtimes", "deno"];
         args.extend(self.cookies_args());
         args.push(url);
@@ -79,28 +85,36 @@ impl Ytdlp {
         Ok(ytvideos)
     }
 
-    pub async fn download(&self, id: &str, output: &str) -> Result<std::process::ExitStatus, Error>{
+    pub async fn download(&self, id: &str, output: &str) -> Result<(std::process::ExitStatus, YtVideo), Error>{
         let url = format!("https://www.youtube.com/watch?v={}", id);
         let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3",
-            "-o", output, "--js-runtimes", "node",
+            "-o", output, "--print-json", "--js-runtimes", "node",
             "--js-runtimes", "deno", "--retries", "10",
             "--retry-sleep", "5"];
         args.extend(self.cookies_args());
         args.push(&url);
-        // Each download holds the single YouTube slot through the run and the
-        // post-connection cooldown; the result is returned unchanged (exit
-        // status + stderr semantics preserved).
-        with_youtube_slot(move || async move {
+        // One run carries both the download and the full episode metadata
+        // (`--print-json`): no separate extraction pass, still under the
+        // single YouTube throttle (scalable-channel-listing).
+        let output_result = with_youtube_slot(move || async move {
             Command::new(&self.path)
                 .args(&args)
-                .spawn()
-                .map_err(|e| e)?
-                .wait()
+                .output()
                 .await
-                .map_err(|e| e)
         })
         .await
-        .map_err(|e| e.into())
+        .map_err(|e| Error::default(&e.to_string()))?;
+        let mut videos = parse_dump_output(&output_result.stdout)?;
+        let info = match videos.pop() {
+            Some(video) => video,
+            None => {
+                return Err(Error::default(&format!(
+                    "yt-dlp produced no metadata for {url} (exit {:?})",
+                    output_result.status.code()
+                )))
+            }
+        };
+        Ok((output_result.status, info))
     }
 
     pub async fn auto_update() -> Result<(), Error>{
@@ -147,6 +161,104 @@ fn parse_dump_output(stdout: &[u8]) -> Result<Vec<YtVideo>, Error> {
     let content = format!("[{}]", lines);
     serde_json::from_str(&content)
         .map_err(|e| Error::default(&format!("Cant parse yt-dlp output: {e}")))
+}
+
+#[cfg(test)]
+mod flat_listing_tests {
+    use super::*;
+    use crate::utils::worker::filter_by_window;
+    use std::path::Path;
+    use std::time::Duration;
+
+    // A fake `yt-dlp` whose listing invocation emits a synthetic flat listing
+    // (hundreds of entries spanning the window) with parseable timestamps.
+    fn write_listing_fake(dir: &Path, total: usize, in_window: usize) -> (std::path::PathBuf, std::path::PathBuf) {
+        let data = dir.join("listing.jsonl");
+        let mut content = String::new();
+        for i in 0..total {
+            // The last `in_window` entries are in-window (2026); the rest are
+            // older (2022-04-03).
+            let (timestamp, date) = if i >= total - in_window {
+                (1_755_619_200i64, "20260819") // 2026-08-19
+            } else {
+                (1_648_944_000i64, "20220403") // 2022-04-03
+            };
+            // Flat entries omit description/duration/thumbnail on purpose.
+            content.push_str(&format!(
+                "{{\"id\":\"vid_{i}\",\"title\":\"Title {i}\",\"timestamp\":{timestamp},\
+                 \"upload_date\":\"{date}\",\"webpage_url\":\"https://youtu.be/vid_{i}\"}}\n"
+            ));
+        }
+        std::fs::write(&data, content).expect("listing data file");
+
+        let script = dir.join("fake-listing-yt-dlp");
+        std::fs::write(
+            &script,
+            "#!/bin/bash\ncat \"$FAKE_LISTING\"\nexit 0\n",
+        )
+        .expect("write fake listing script");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        (data, script)
+    }
+
+    #[tokio::test]
+    async fn flat_listing_parses_and_backstop_keeps_only_in_window_candidates() {
+        crate::utils::throttle::init_throttle(Duration::from_millis(30));
+        let dir = std::env::temp_dir().join(format!(
+            "u2v-flat-list-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let (data, script) = write_listing_fake(&dir, 300, 50);
+        std::env::set_var("FAKE_LISTING", &data);
+
+        let ytdlp = Ytdlp::new(script.to_str().unwrap(), "");
+        let since = chrono::TimeZone::timestamp_opt(
+            &Utc,
+            1_672_531_200, /* 2023-01-01 */
+            0,
+        )
+        .unwrap();
+        let videos = ytdlp
+            .get_latest("https://youtu.be/channel", since)
+            .await
+            .expect("flat listing succeeds");
+        // Every flat entry parses; omitted fields default to empty.
+        assert_eq!(videos.len(), 300, "flat listing must parse every entry");
+        assert!(videos.iter().all(|v| v.description.is_empty()));
+        assert!(videos.iter().all(|v| v.duration_string.is_empty()));
+
+        // The worker backstop reduces the candidate set to the in-window 50
+        // (+ never a per-video run for the 250 out-of-window ones).
+        let mut candidates = videos;
+        filter_by_window(&mut candidates, since);
+        assert_eq!(
+            candidates.len(),
+            50,
+            "only in-window candidates may proceed to per-video work"
+        );
+        for (offset, candidate) in candidates.iter().enumerate() {
+            assert_eq!(candidate.id, format!("vid_{}", 250 + offset));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn print_json_info_dict_parses_full_metadata() {
+        // Simulates the stdout of `yt-dlp --print-json` during a download.
+        let line = br#"{"id":"abc123","title":"Full Episode","description":"desc","thumbnail":"https://x/t.jpg","original_url":"https://youtu.be/abc123","webpage_url":"https://youtu.be/abc123","upload_date":"20260819","timestamp":1755619200,"duration_string":"00:05:30"}"#;
+        let videos = parse_dump_output(line).expect("info dict parses");
+        assert_eq!(videos.len(), 1);
+        assert_eq!(videos[0].title, "Full Episode");
+        assert_eq!(videos[0].description, "desc");
+        assert_eq!(videos[0].duration_string, "00:05:30");
+        assert_eq!(videos[0].timestamp, Some(1_755_619_200));
+    }
 }
 
 #[cfg(test)]
@@ -198,8 +310,9 @@ mod throttle_youtubedl_integration {
     use std::time::Duration;
 
     // A fake `yt-dlp` that records `s`/`e` events with millisecond timestamps
-    // to `$YTDLP_LOG`, so concurrent executions can be proven strictly
-    // sequential and separated by the configured cooldown (task 3.1).
+    // to `$YTDLP_LOG` and emits a minimal `--print-json` info dict on stdout,
+    // so concurrent executions can be proven strictly sequential and separated
+    // by the configured cooldown (task 3.1).
     fn write_fake_ytdlp(dir: &Path) -> std::path::PathBuf {
         let script = dir.join("fake-yt-dlp");
         std::fs::write(
@@ -208,6 +321,7 @@ mod throttle_youtubedl_integration {
              echo \"s $(date +%s%3N) $$\" >> \"$YTDLP_LOG\"\n\
              sleep 0.05\n\
              echo \"e $(date +%s%3N) $$\" >> \"$YTDLP_LOG\"\n\
+             echo '{\"id\":\"x\",\"title\":\"Fake Video\",\"description\":\"d\",\"thumbnail\":\"\",\"original_url\":\"http://x\",\"webpage_url\":\"http://x\",\"upload_date\":\"20260101\",\"duration_string\":\"00:01:00\"}'\n\
              exit 0\n",
         )
         .expect("write fake yt-dlp");
@@ -237,11 +351,11 @@ mod throttle_youtubedl_integration {
         for i in 0..4 {
             let ytdlp = std::sync::Arc::clone(&ytdlp);
             handles.push(tokio::spawn(async move {
-                ytdlp
+                let (status, _info) = ytdlp
                     .download(&format!("id{i}"), "/tmp/u2v-out.mp3")
                     .await
-                    .expect("fake yt-dlp exits 0")
-                    .success()
+                    .expect("fake yt-dlp exits 0");
+                status.success()
             }));
         }
         for handle in handles {

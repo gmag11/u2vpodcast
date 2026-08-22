@@ -146,7 +146,19 @@ async fn process_channel(
         first
     };
     info!("Last video: {}", &last);
-    let ytvideos = ytdlp.get_latest(&channel.url, last).await?;
+    let mut ytvideos = ytdlp.get_latest(&channel.url, last).await?;
+    // Backstop: `get_latest` now runs flat, and `--dateafter` may not apply to
+    // flat entries in every extractor version. Filter by the same `last`
+    // boundary here so out-of-window videos never trigger a per-video
+    // connection (scalable-channel-listing).
+    let before = ytvideos.len();
+    filter_by_window(&mut ytvideos, last);
+    if ytvideos.len() != before {
+        info!(
+            "Backstop date filter dropped {} out-of-window candidates",
+            before - ytvideos.len()
+        );
+    }
     info!("Getting {} videos", ytvideos.len());
     for ytvideo in ytvideos{
         info!("Processing: {}", &ytvideo.title);
@@ -181,25 +193,30 @@ async fn process_episode(
         &ytvideo.id
     );
 
-    if !ytdlp.download(&ytvideo.id, &filename).await?.success(){
+    // The download run carries the full `yt-dlp` info dict (`--print-json`),
+    // so the stored episode is built from authoritative metadata; the flat
+    // listing candidate fills any field yt-dlp omitted (scalable-channel
+    // -listing).
+    let (status, info) = ytdlp.download(&ytvideo.id, &filename).await?;
+    if !status.success(){
         Err(Error::default(&format!("Cant download {filename}")))?
     }
     let delay = rand::thread_rng().gen_range(20..=40);
     info!("Pausing {delay} seconds before next download");
     sleep(Duration::from_secs(delay)).await;
-    let title = &ytvideo.title;
-    let description = &ytvideo.description;
-    let yt_id = &ytvideo.id;
-    let webpage_url = &ytvideo.webpage_url;
-    let duration = &ytvideo.duration_string;
-    info!("{}", &ytvideo.upload_date);
-    let published_at = get_published_at(ytvideo);
+    let title = if info.title.is_empty() { &ytvideo.title } else { &info.title };
+    let description = if info.description.is_empty() { &ytvideo.description } else { &info.description };
+    let yt_id = if info.id.is_empty() { &ytvideo.id } else { &info.id };
+    let webpage_url = if info.webpage_url.is_empty() { &ytvideo.webpage_url } else { &info.webpage_url };
+    let duration = if info.duration_string.is_empty() { &ytvideo.duration_string } else { &info.duration_string };
+    let image = if info.thumbnail.is_empty() { &ytvideo.thumbnail } else { &info.thumbnail };
+    info!("{}", &info.upload_date);
+    let published_at = get_published_at(&info);
     let _ = filetime::set_file_mtime(
         &filename,
         filetime::FileTime::from_unix_time(
             published_at.timestamp(), 0)
     );
-    let image = &ytvideo.thumbnail;
     let listen = false;
     let _ = Episode::new(
         pool,
@@ -234,5 +251,46 @@ fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
     // Fallback so a malformed/youtube edge-case date never panics the worker.
     error!("Cant parse publish date from {:?}, using now()", &ytvideo.upload_date);
     Utc::now()
+}
+
+// Backstop date filter applied to flat-listing candidates (scalable-channel
+// -listing): keeps videos whose parseable date is on/after the window
+// boundary. Candidates with no parseable date are conservatively kept
+// (`get_published_at` falls back to now()).
+pub(crate) fn filter_by_window(videos: &mut Vec<YtVideo>, since: DateTime<Utc>) {
+    videos.retain(|video| get_published_at(video) >= since);
+}
+
+#[cfg(test)]
+mod backstop_tests {
+    use super::*;
+
+    fn video(id: &str, timestamp: Option<i64>, upload_date: &str) -> YtVideo {
+        YtVideo {
+            id: id.to_string(),
+            title: format!("Title {id}"),
+            description: String::new(),
+            thumbnail: String::new(),
+            original_url: String::new(),
+            webpage_url: String::new(),
+            upload_date: upload_date.to_string(),
+            timestamp,
+            duration_string: String::new(),
+        }
+    }
+
+    #[test]
+    fn keeps_only_in_window_candidates() {
+        let since = TimeZone::timestamp_opt(&Utc, 1_704_067_200, 0).unwrap(); // 2024-01-01 UTC
+        let mut videos = vec![
+            video("older", Some(since.timestamp() - 86_400), "20231231"),
+            video("on_edge", Some(since.timestamp()), "20240101"),
+            video("newer", Some(since.timestamp() + 86_400), "20240102"),
+            video("no_date", None, ""), // conservative keep
+        ];
+        filter_by_window(&mut videos, since);
+        let ids: Vec<&str> = videos.iter().map(|v| v.id.as_str()).collect();
+        assert_eq!(ids, vec!["on_edge", "newer", "no_date"]);
+    }
 }
 
