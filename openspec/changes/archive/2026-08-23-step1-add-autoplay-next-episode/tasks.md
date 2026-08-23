@@ -6,13 +6,13 @@
 
 ## 2. Episode card context prop
 
-- [ ] 2.1 In `frontend/src/components/EpisodeCard.vue` add optional prop `list?: Episode[]` (default `undefined`).
-- [ ] 2.2 Change both play buttons (`sm:hidden` block and desktop block) to call `player.play(props.episode, props.list)`.
+- [x] 2.1 In `frontend/src/components/EpisodeCard.vue` add optional prop `list?: Episode[]` (default `undefined`).
+- [x] 2.2 Change both play buttons (`sm:hidden` block and desktop block) to call `player.play(props.episode, props.list)`.
 
 ## 3. View wiring
 
-- [ ] 3.1 In `frontend/src/views/EpisodesView.vue` pass `:list="filteredEpisodes"` to `EpisodeCard`.
-- [ ] 3.2 In `frontend/src/views/HistoryView.vue` pass `:list="filteredEpisodes"` to `EpisodeCard`.
+- [x] 3.1 In `frontend/src/views/EpisodesView.vue` pass `:list="filteredEpisodes"` to `EpisodeCard`.
+- [x] 3.2 In `frontend/src/views/HistoryView.vue` pass `:list="filteredEpisodes"` to `EpisodeCard`.
 
 ## 4. Tests
 
@@ -23,9 +23,9 @@
 
 - [x] 5.1 Run `pnpm test` in `frontend/` and confirm the new player tests pass.
 - [x] 5.2 Run `pnpm build` in `frontend/` and confirm no type/build errors.
-- [ ] 5.3 Manual: open a channel's episodes, press play on a middle episode, let it finish (or seek near the end) and confirm the next visible episode starts; repeat on the History screen with an active search filter; confirm the last episode stops instead of throwing.
-- [ ] 5.4 Manual: confirm play from a card while another episode is playing still swaps source as before (regression check).
-- [ ] 5.5 Manual: with a queue active, the next button in the player bar (right of stop) advances; with an empty queue the button appears disabled and does nothing.
+- [x] 5.3 Manual: open a channel's episodes, press play on a middle episode, let it finish (or seek near the end) and confirm the next visible episode starts; repeat on the History screen with an active search filter; confirm the last episode stops instead of throwing.
+- [x] 5.4 Manual: confirm play from a card while another episode is playing still swaps source as before (regression check).
+- [x] 5.5 Manual: with a queue active, the next button in the player bar (right of stop) advances; with an empty queue the button appears disabled and does nothing.
 
 ## 6. Player bar next control
 
