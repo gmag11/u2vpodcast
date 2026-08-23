@@ -1,6 +1,11 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Episode } from '@/types';
+import { loadQueue, saveQueue } from '@/lib/utils/queue.storage';
+
+// Upper bound for the playback history so long sessions cannot grow it
+// without limit (its only purpose is the previous control).
+const PLAY_STACK_LIMIT = 50;
 
 export const usePlayerStore = defineStore('player', () => {
 	const currentEpisode = ref<Episode | null>(null);
@@ -13,8 +18,30 @@ export const usePlayerStore = defineStore('player', () => {
 	const loading = ref(false);
 	const stopped = ref(true);
 	const upNext = ref<Episode[]>([]);
+	const playStack = ref<Episode[]>([]);
 
 	let audio: HTMLAudioElement | null = null;
+
+	function persistQueue() {
+		saveQueue({ upNext: upNext.value, playStack: playStack.value });
+	}
+
+	function pushToPlayStack(episode: Episode) {
+		playStack.value.push(episode);
+		if (playStack.value.length > PLAY_STACK_LIMIT) {
+			playStack.value.splice(0, playStack.value.length - PLAY_STACK_LIMIT);
+		}
+	}
+
+	// Rehydrate the persisted queue once at store creation. A malformed payload
+	// is discarded by queue.storage and leaves the queue empty.
+	{
+		const stored = loadQueue();
+		if (stored) {
+			upNext.value = stored.upNext;
+			playStack.value = stored.playStack;
+		}
+	}
 
 	function ensureAudio(): HTMLAudioElement | null {
 		if (typeof window === 'undefined') return null;
@@ -84,19 +111,71 @@ export const usePlayerStore = defineStore('player', () => {
 		if (list) {
 			const index = list.findIndex((e) => e.id === episode.id);
 			upNext.value = index < 0 ? [] : list.slice(index + 1);
-		} else {
-			upNext.value = [];
+			persistQueue();
 		}
+		// Without a context list the existing queue is kept untouched, so a
+		// single-episode play (e.g. replaying something already queued) does
+		// not wipe the up-next flow.
 		await loadEpisode(episode);
 	}
 
 	async function advance() {
+		const finished = currentEpisode.value;
 		const next = upNext.value.shift();
 		if (next) {
+			if (finished) pushToPlayStack(finished);
+			persistQueue();
 			await loadEpisode(next);
 		} else {
 			stop();
+			upNext.value = [];
+			persistQueue();
 		}
+	}
+
+	async function skipNext(markCurrent: boolean = false) {
+		const finished = currentEpisode.value;
+		if (markCurrent && finished) {
+			// Local half of the "skip and mark listened" gesture. The server
+			// persistence of the listened mark lands with step 3; the card sees
+			// the updated state immediately.
+			finished.listen = true;
+			currentEpisode.value = { ...currentEpisode.value! };
+		}
+		const next = upNext.value.shift();
+		if (next) {
+			if (finished) pushToPlayStack(finished);
+			persistQueue();
+			await loadEpisode(next);
+		} else {
+			upNext.value = [];
+			persistQueue();
+		}
+	}
+
+	async function playPrevious() {
+		// Dual behavior: past 3 seconds the previous control restarts the
+		// current episode; within 3 seconds it navigates back in history.
+		if (currentTime.value > 3) {
+			if (audio) audio.currentTime = 0;
+			currentTime.value = 0;
+			return;
+		}
+		const previous = playStack.value.pop();
+		if (previous) {
+			persistQueue();
+			await loadEpisode(previous);
+		}
+	}
+
+	function removeFromQueue(episodeId: number) {
+		upNext.value = upNext.value.filter((e) => e.id !== episodeId);
+		persistQueue();
+	}
+
+	function clearQueue() {
+		upNext.value = [];
+		persistQueue();
 	}
 
 	async function togglePlay() {
@@ -200,11 +279,16 @@ export const usePlayerStore = defineStore('player', () => {
 		loading,
 		stopped,
 		upNext,
+		playStack,
 		progress,
 		currentLabel,
 		durationLabel,
 		play,
 		advance,
+		skipNext,
+		playPrevious,
+		removeFromQueue,
+		clearQueue,
 		togglePlay,
 		pause,
 		stop,

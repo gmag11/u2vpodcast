@@ -94,7 +94,13 @@
 		"seek": "Seek",
 		"mute": "Mute",
 		"unmute": "Unmute",
-		"next": "Next"
+		"next": "Next",
+		"previous": "Previous",
+		"queue": "Up next queue",
+		"upNext": "Up next",
+		"removeFromQueue": "Remove from queue",
+		"clearQueue": "Clear",
+		"emptyQueue": "No episodes queued"
 	},
 	"pagination": {
 		"previous": "Previous",

@@ -94,7 +94,13 @@
 		"seek": "Buscar",
 		"mute": "Silenciar",
 		"unmute": "Activar sonido",
-		"next": "Siguiente"
+		"next": "Siguiente",
+		"previous": "Anterior",
+		"queue": "Cola",
+		"upNext": "A continuación",
+		"removeFromQueue": "Quitar de la cola",
+		"clearQueue": "Vaciar",
+		"emptyQueue": "No hay episodios en cola"
 	},
 	"pagination": {
 		"previous": "Anterior",
