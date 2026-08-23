@@ -201,4 +201,25 @@ describe('PersistentPlayer controls', () => {
 		await toggle.trigger('click');
 		expect(bar.text()).toContain('No episodes queued');
 	});
+
+	it('keeps the bar visible after stop while the queue is non-empty, then hides when it empties', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2), episode(3)];
+		const bar = await mountBar();
+		expect(bar.find('.fixed.bottom-0').exists()).toBe(true);
+
+		// stop playback with items still queued -> stays visible
+		player.playing = false;
+		player.stopped = true;
+		await flushPromises();
+		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
+
+		// empty the queue -> the 10s hide timer arms and the bar leaves
+		player.clearQueue();
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(false);
+	});
 });

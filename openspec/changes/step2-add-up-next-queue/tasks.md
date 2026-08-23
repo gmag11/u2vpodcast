@@ -17,6 +17,7 @@
 - [x] 3.2 Implement next long-press on the button: `pointerdown` starts a 500ms timer; `pointerup` before it fires `skipNext()` (short); crossing it fires `skipNext({ markCurrent: true })` (long) and suppresses the release action. Ensure the timer is cleaned up on `pointerleave`/unmount; enter/space keeps the short action for keyboard users.
 - [x] 3.3 Add a queue toggle button (e.g. `PhList` icon) opening an "Up next" popover (radix-vue `DropdownMenuRoot` or similar) listing `upNext` with thumbnail, title, channel, count, per-item remove (→ `removeFromQueue`) and a "clear all" (→ `clearQueue`).
 - [x] 3.4 Show an empty-state line in the popover when the queue is empty (i18n string in en/es).
+- [x] 3.5 Update the auto-hide watch in `PersistentPlayer.vue` to include `upNext.length`: when stopped with a non-empty queue the bar stays visible; the 10s hide timer arms only once the queue empties.
 
 ## 4. Seed wiring (reuse step 1)
 
@@ -27,9 +28,10 @@
 - [x] 5.1 Extend `frontend/src/stores/player.test.ts`: seed replaces queue; play without list keeps queue; `removeFromQueue`/`clearQueue`; `skipNext` (plain skips without marking, with `markCurrent: true` marks listened); `playPrevious` dual behavior (currentTime > 3s → restart at 0, ≤ 3s → pop `playStack`); advance pushes to `playStack`; stop clears and persists empty.
 - [x] 5.2 Test that `saveQueue`/`loadQueue` tolerate corrupt data and that rehydration restores a previously saved queue.
 - [x] 5.3 Component test for the bar (per `AppHeader.test.ts` pattern with `@vue/test-utils`): next/prev disabled states, popover rendering, and long-press via fake timers — release before 500ms fires short skip, hold past 500ms fires skip + listened mark.
+- [x] 5.4 Component test for the stay-visible rule: stopped with a non-empty queue keeps the bar rendered; clearing the queue arms the hide timer (fake timers) and the bar disappears.
 
 ## 6. Verification
 
 - [x] 6.1 `pnpm test` and `pnpm build` in `frontend/`.
-- [ ] 6.2 Manual: play a list, open the Up Next panel, remove an item, skip next, go previous; reload the page and confirm the queue survives; finish the queue and confirm stop + empty panel.
+- [ ] 6.2 Manual: play a list, open the Up Next panel, remove an item, skip next, go previous; reload the page and confirm the queue survives; finish the queue and confirm stop + empty panel; stop with episodes still queued — the bar must stay visible; clear the queue — the bar auto-hides after 10s.
 - [ ] 6.3 Manual: regression — single play (no list) still keeps any previously queued episodes.

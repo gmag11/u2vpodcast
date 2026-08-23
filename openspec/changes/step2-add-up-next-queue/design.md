@@ -80,6 +80,12 @@ The next control was added by step 1 (immediately right of stop, disabled when t
 
 **Why**: a popover keeps the bar compact and does not require new routing; `radix-vue` is already used for menus so placement/focus behavior is consistent.
 
+### Decision 6: Keep the bar visible while the queue is non-empty
+
+The bar's auto-hide watch gains `upNext.length` as an input and adds a rule: when playback is stopped but the queue still holds episodes, the bar stays visible — the 10s hide timer is only armed once the queue is empty. The queue panel lives exclusively in the bar, so hiding the bar would make the queue unreachable.
+
+**Why**: the queue is the thing being managed; while it exists the control surface must exist. The auto-hide rule collapses back to the original behavior as soon as the last item is removed or cleared.
+
 ## Risks / Trade-offs
 
 - **[Risk] Stale episode objects after data refresh.** Episode titles/images are stable once downloaded; worst case the bar shows an outdated thumbnail until next play. → Accepted; mitigable later by rehydrating from API.

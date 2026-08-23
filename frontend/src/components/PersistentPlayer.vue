@@ -40,14 +40,21 @@
 	}
 
 	watch(
-		() => [player.playing, player.stopped, player.currentEpisode?.id] as const,
-		([playing, stopped, episodeId]) => {
+		() => [player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
+		([playing, stopped, episodeId, queueLength]) => {
 			if (episodeId == null) {
 				visible.value = false;
 				clearHideTimer();
 				return;
 			}
 			if (!stopped) {
+				visible.value = true;
+				clearHideTimer();
+				return;
+			}
+			if (stopped && queueLength > 0) {
+				// A non-empty queue must stay reachable: keep the bar visible so
+				// the user can inspect and manage up-next without playing.
 				visible.value = true;
 				clearHideTimer();
 				return;
