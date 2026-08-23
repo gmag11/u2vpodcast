@@ -40,7 +40,7 @@
 
 ## 7. Backend tests
 
-- [ ] 7.1 Add tests in `src/models/episode.rs` (existing memory-pool pattern): progress update sets position only; progress update with `listened` sets `listen=true` + `listened_at`; unknown id errors.
+- [ ] 7.1 Add tests in `src/models/episode.rs` (existing memory-pool pattern): progress update sets position only; progress update with `listened` sets `listen=true` + `listened_at`; progress update with `listened=false` clears both `listen` and `listened_at` while storing the position; unknown id errors.
 - [ ] 7.2 Add a handler test if the handler pattern supports it (otherwise cover via model tests and `cargo test`.
 
 ## 8. Frontend tests
