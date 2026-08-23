@@ -1,7 +1,7 @@
 ## 1. Queue store API
 
 - [ ] 1.1 In `frontend/src/stores/player.ts` make `upNext` public state and add a private `playStack: Episode[]` for the previous control.
-- [ ] 1.2 Add mutations: `removeFromQueue(episodeId)`, `clearQueue()`, `skipNext()` (shift + play), `playPrevious()` (dual: when `currentTime > 3s` restart the current episode via `seek(0)`; otherwise pop `playStack` and play without re-seeding), and seed on play: when `list` provided replace `upNext`; when omitted keep it.
+- [ ] 1.2 Add mutations: `removeFromQueue(episodeId)`, `clearQueue()`, `skipNext(markCurrent?: boolean)` (shift + play; when `markCurrent` is true, mark the finished episode listened via the step-3 save path), `playPrevious()` (dual: when `currentTime > 3s` restart the current episode via `seek(0)`; otherwise pop `playStack` and play without re-seeding), and seed on play: when `list` provided replace `upNext`; when omitted keep it.
 - [ ] 1.3 Update `advance()` from step 1: shift, push the finished episode onto `playStack`, play, persist; on empty queue stop and clear.
 - [ ] 1.4 Keep `playStack` bounded (e.g. keep last 50) to avoid unbounded growth in long sessions.
 
@@ -14,8 +14,9 @@
 ## 3. Persistent player UI
 
 - [ ] 3.1 In `frontend/src/components/PersistentPlayer.vue` add previous and next buttons; disable next when `upNext` is empty; keep previous enabled while an episode is loaded (it can always restart the current episode) and only disable it when nothing is loaded; wire to `playPrevious`/`skipNext`.
-- [ ] 3.2 Add a queue toggle button (e.g. `PhList` icon) opening an "Up next" popover (radix-vue `DropdownMenuRoot` or similar) listing `upNext` with thumbnail, title, channel, count, per-item remove (→ `removeFromQueue`) and a "clear all" (→ `clearQueue`).
-- [ ] 3.3 Show an empty-state line in the popover when the queue is empty (i18n string in en/es).
+- [ ] 3.2 Implement next long-press on the button: `pointerdown` starts a 500ms timer; `pointerup` before it fires `skipNext()` (short); crossing it fires `skipNext({ markCurrent: true })` (long) and suppresses the release action. Ensure the timer is cleaned up on `pointerleave`/unmount; enter/space keeps the short action for keyboard users.
+- [ ] 3.3 Add a queue toggle button (e.g. `PhList` icon) opening an "Up next" popover (radix-vue `DropdownMenuRoot` or similar) listing `upNext` with thumbnail, title, channel, count, per-item remove (→ `removeFromQueue`) and a "clear all" (→ `clearQueue`).
+- [ ] 3.4 Show an empty-state line in the popover when the queue is empty (i18n string in en/es).
 
 ## 4. Seed wiring (reuse step 1)
 
@@ -23,9 +24,9 @@
 
 ## 5. Tests
 
-- [ ] 5.1 Extend `frontend/src/stores/player.test.ts`: seed replaces queue; play without list keeps queue; `removeFromQueue`/`clearQueue`; `skipNext`; `playPrevious` dual behavior (currentTime > 3s → restart at 0, ≤ 3s → pop `playStack`); advance pushes to `playStack`; stop clears and persists empty.
+- [ ] 5.1 Extend `frontend/src/stores/player.test.ts`: seed replaces queue; play without list keeps queue; `removeFromQueue`/`clearQueue`; `skipNext` (plain skips without marking, with `markCurrent: true` marks listened); `playPrevious` dual behavior (currentTime > 3s → restart at 0, ≤ 3s → pop `playStack`); advance pushes to `playStack`; stop clears and persists empty.
 - [ ] 5.2 Test that `saveQueue`/`loadQueue` tolerate corrupt data and that rehydration restores a previously saved queue.
-- [ ] 5.3 Component test for the bar: next/prev disabled states and popover rendering (per `AppHeader.test.ts` pattern with `@vue/test-utils`).
+- [ ] 5.3 Component test for the bar (per `AppHeader.test.ts` pattern with `@vue/test-utils`): next/prev disabled states, popover rendering, and long-press via fake timers — release before 500ms fires short skip, hold past 500ms fires skip + listened mark.
 
 ## 6. Verification
 

@@ -28,6 +28,10 @@ The API SHALL expose an authenticated endpoint to update an episode's progress i
 - **WHEN** the player saves progress for an episode with the listened flag set
 - **THEN** `listen` becomes true, `listened_at` is set to the current server time, and `position_seconds` stores the final position
 
+#### Scenario: Marking listened via long-press skip
+- **WHEN** the user long-presses next (step-2 dual next control) on the current episode
+- **THEN** the episode is marked listened exactly as if it had completed: `listen` true, `listened_at` set, `position_seconds` stored as its duration
+
 ### Requirement: Player resumes from the stored position
 
 When playback starts on an episode whose stored position is above 30 seconds and below 95% of its duration, the player SHALL seek to that position automatically and continue from there. A "start over" affordance SHALL let the user play the episode from zero, clearing the stored position.

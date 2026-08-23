@@ -61,6 +61,8 @@ On `play(episode)`, run once after `loadedmetadata` (so `duration` is known):
 
 In `onEnded` (before advancing per step 1): save `{ position_seconds: duration, listened: true }`, and optimistically update the in-memory episode + the card should it be visible.
 
+The same mark path is reached from the step-2 long-press next control (`skipNext({ markCurrent: true })`), which stores `position_seconds` as the episode's duration exactly like completion. All marking goes through one shared `markListened()` helper in the store.
+
 **Why**: completion is the agreed definition of "reproducido" (≥95% also counts via the resume threshold).
 
 ### Decision 6: Episode serialization and card UI

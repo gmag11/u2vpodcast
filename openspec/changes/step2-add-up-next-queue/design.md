@@ -25,7 +25,8 @@ The store exposes `upNext: Ref<Episode[]>` plus functions that all mutate throug
 
 ```
 seedQueue(list, index)   // replaces upNext = list.slice(index+1)
-skipNext()               // upNext.shift() → play it
+skipNext(markCurrent?)   // upNext.shift() → play it; markCurrent=true also
+                         //   marks the finished episode listened (step-3 path)
 playPrevious()           // dual: currentTime > 3s → seek(0) restart current;
                          //       otherwise pop playStack → play (applies step-3 resume)
 removeFromQueue(id)      // filter out by episode id
@@ -72,8 +73,10 @@ else: stop(); clearQueue()
 ### Decision 5: Bar surfaces queue via next/prev + "Up next" popover
 
 In `PersistentPlayer.vue`:
-- prev/next buttons flanking the play/pause button (disabled when the respective stack/queue is empty).
+- prev/next buttons flanking the play/pause button (next disabled when the queue is empty; prev enabled while an episode is loaded per the dual behavior above).
 - A queue button (list icon, `PhList`) toggles a `radix-vue` popover/dropdown anchored to the bar listing upcoming episodes (thumbnail, title, channel, remove `×`), plus "Clear all" and a count badge.
+
+**Next long-press**: the next button distinguishes short vs long press with a 500ms threshold implemented via pointer events: `pointerdown` starts a timer; `pointerup` before the threshold fires the short action (`skipNext()`); crossing the threshold fires the long action (`skipNext({ markCurrent: true })`) and suppresses the subsequent release. Keyboard users keep the short action on Enter/Space; the "skip + mark listened" behavior remains reachable through the existing step-3 path (an episode already marked listens on its own `ended`).
 
 **Why**: a popover keeps the bar compact and does not require new routing; `radix-vue` is already used for menus so placement/focus behavior is consistent.
 

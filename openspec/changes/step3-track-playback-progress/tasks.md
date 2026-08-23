@@ -27,7 +27,7 @@
 - [ ] 5.2 Save on `pause`, on `stop`, and on `ended`; register a `pagehide`/`visibilitychange(hidden)` listener on the audio element or window to flush the final position.
 - [ ] 5.3 Resume: in `play()`, capture a `shouldResume` flag when `episode.position_seconds > 30`; on `loadedmetadata`, if the flag is set and `position < duration * 0.95`, `seek(position)` and clear the flag. The same path covers navigation back (step-2 dual previous), which reuses `play()`.
 - [ ] 5.4 Add opt-out: `play(episode, list?, { fromStart?: boolean })` — when `fromStart` is true skip resume and immediately persist `position_seconds = 0`.
-- [ ] 5.5 In `onEnded` (before advance from step 1/2): save `{ position_seconds: duration, listened: true }` and update the in-memory current episode (`listen=true`, `listened_at`), sending progress with `listened: true`.
+- [ ] 5.5 In `onEnded` (before advance from step 1/2): save `{ position_seconds: duration, listened: true }` and update the in-memory current episode (`listen=true`, `listened_at`), sending progress with `listened: true`. Extract a shared `markListened()` helper so the step-2 long-press skip (`skipNext({ markCurrent: true })`) uses the same path.
 - [ ] 5.6 Suppress resume for repeat-one replays (step 5) by reusing `fromStart`.
 
 ## 6. Card badge and resume UI

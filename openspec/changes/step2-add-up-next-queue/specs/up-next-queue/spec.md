@@ -52,6 +52,22 @@ Starting playback with a context list SHALL replace the current queue with the r
 - **WHEN** the user starts playback on an episode with no context list while a queue already exists
 - **THEN** the existing queue is untouched and auto-advance proceeds through it when the episode ends
 
+### Requirement: Long-press next skips and marks the current episode listened
+
+The next control SHALL distinguish a short press from a long press (threshold 500ms). A short press SHALL skip to the first queued episode without changing listened state. A long press SHALL also skip AND mark the current episode as listened — storing the final position as its duration — without waiting for the episode to finish. The listened mark SHALL follow the same persistence path as `ended` (per the `playback-progress` capability) and SHALL be reflected immediately on the episode card.
+
+#### Scenario: Short press skips without marking
+- **WHEN** the user presses and releases the next control within 500ms
+- **THEN** the first queued episode plays and the current episode is not marked listened
+
+#### Scenario: Long press skips and marks listened
+- **WHEN** the user holds the next control for more than 500ms
+- **THEN** the first queued episode plays and the current episode is marked listened with its final position stored as its duration
+
+#### Scenario: Holding during playback of a finished episode
+- **WHEN** the user long-presses next on an episode whose card already shows the played mark
+- **THEN** the skip happens and the listened state stays as-is (no duplicate marking)
+
 ### Requirement: Queue consumption at end of playback
 
 When an episode ends, the player SHALL remove it from the queue, persist the updated queue, and advance to the next queued episode, pushing the finished episode onto the playback history for the previous control. When no episode remains, the player SHALL stop and clear the queue.
