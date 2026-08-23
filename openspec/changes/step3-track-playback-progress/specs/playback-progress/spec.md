@@ -36,6 +36,10 @@ When playback starts on an episode whose stored position is above 30 seconds and
 - **WHEN** the user plays an episode previously left at 45 minutes of a 60-minute duration
 - **THEN** playback starts at 45 minutes instead of zero
 
+#### Scenario: Resume also applies when navigating back
+- **WHEN** the user navigates back (step-2 dual previous) to an episode whose stored position is above 30 seconds and below 95% of the duration
+- **THEN** playback resumes from the stored position, identical to a fresh play of that episode
+
 #### Scenario: No resume for near-start or near-end positions
 - **WHEN** the user plays an episode whose stored position is at most 30 seconds, or at least 95% of the duration
 - **THEN** playback starts from the beginning

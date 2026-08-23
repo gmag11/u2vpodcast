@@ -26,12 +26,17 @@ The store exposes `upNext: Ref<Episode[]>` plus functions that all mutate throug
 ```
 seedQueue(list, index)   // replaces upNext = list.slice(index+1)
 skipNext()               // upNext.shift() → play it
-playPrevious()           // pop from playStack → play it (no re-seed)
+playPrevious()           // dual: currentTime > 3s → seek(0) restart current;
+                         //       otherwise pop playStack → play (applies step-3 resume)
 removeFromQueue(id)      // filter out by episode id
 clearQueue()
 ```
 
 A private `playStack: Episode[]` records episodes as playback advances, enabling `playPrevious`. Pushing onto the stack happens in `advance()` right before switching source.
+
+**Dual previous behavior**: matching podcast-client conventions, the previous control restarts the current episode when it has played more than 3 seconds, and only navigates to the previous episode within the first 3 seconds. This also means the previous control SHALL NOT be disabled while an episode is loaded (a restart is always possible), only the navigation half depends on `playStack`.
+
+**Resume integration (step 3)**: navigating back to a previous episode reuses the standard play path (`play()`), so the step-3 resume policy (seek when saved position > 30s and < 95% of duration) applies automatically to the newly loaded episode — a freshly played or never-resumed episode starts at zero.
 
 **Why**: a single mutation chokepoint keeps the queue consistent and gives one place to persist. `playPrevious` needs its own stack because the queue only holds *upcoming* items.
 

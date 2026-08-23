@@ -55,7 +55,7 @@ On `play(episode)`, run once after `loadedmetadata` (so `duration` is known):
 
 `play(episode, { fromStart: true })` opts out of resume ("start over" affordance) and immediately persists `position_seconds = 0`.
 
-**Why**: 30s skips accidental replay-induced seeks; 95% treats near-complete episodes as finished (ad-heavy endings). Awaiting `loadedmetadata` avoids seeking before the element knows its duration.
+**Why**: 30s skips accidental replay-induced seeks; 95% treats near-complete episodes as finished (ad-heavy endings). Awaiting `loadedmetadata` avoids seeking before the element knows its duration. Because navigating back (step-2 dual previous) goes through the same `play()` path, this resume policy also applies when returning to a previously played episode — a fresh episode or one without a saved position starts at zero.
 
 ### Decision 5: Completion marks listened
 

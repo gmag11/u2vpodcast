@@ -12,9 +12,13 @@ The player bar SHALL expose next/previous navigation controls and a queue panel 
 - **WHEN** the user presses the next control while episodes remain in the queue
 - **THEN** the player immediately loads and plays the first queued episode
 
-#### Scenario: Previous returns to the last played episode
-- **WHEN** the user presses the previous control after at least one advance
-- **THEN** the player reloads the most recently played episode from the playback history and resumes it
+#### Scenario: Previous restarts the current episode past the threshold
+- **WHEN** the user presses the previous control while the current episode has played for more than 3 seconds
+- **THEN** the current episode restarts from zero instead of navigating
+
+#### Scenario: Previous navigates back within the threshold
+- **WHEN** the user presses the previous control while the current episode has played for at most 3 seconds
+- **THEN** the player loads the most recently played episode from the playback history
 
 #### Scenario: Queue panel shows upcoming episodes
 - **WHEN** the user opens the queue panel while episodes are queued
@@ -59,3 +63,15 @@ When an episode ends, the player SHALL remove it from the queue, persist the upd
 #### Scenario: Empty queue on stop
 - **WHEN** the last queued episode finishes and there is no repeat mode active
 - **THEN** the player stops and the queue is emptied and persisted as empty
+
+### Requirement: Navigating back applies saved playback position
+
+When playback navigates back to a previously played episode, the player SHALL apply the same resume policy as starting an episode (per the `playback-progress` capability): resume from the saved position when it is above 30 seconds and below 95% of the duration, otherwise start from zero.
+
+#### Scenario: Resume after navigating back
+- **WHEN** the user navigates back to an episode whose saved position is at 45 minutes of a 60-minute duration
+- **THEN** the episode resumes at 45 minutes instead of starting from zero
+
+#### Scenario: Restart without a saved position
+- **WHEN** the user navigates back to an episode with no meaningful saved position
+- **THEN** the episode plays from the beginning
