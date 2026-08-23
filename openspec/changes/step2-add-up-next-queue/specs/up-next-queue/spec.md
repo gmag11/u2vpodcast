@@ -30,11 +30,19 @@ The player bar SHALL expose previous/next navigation controls (the next control 
 
 ### Requirement: Queue persists across page reloads
 
-The up-next queue and playback history SHALL be serialized to `localStorage` and rehydrated when the app loads, so a page reload does not lose the queue. Malformed or unreadable stored payloads SHALL be discarded silently.
+The up-next queue, the playback history, and the currently loaded episode SHALL be serialized to `localStorage` and rehydrated when the app loads, so a page reload does not lose the queue or the session's current episode. Malformed or unreadable stored payloads SHALL be discarded silently.
 
 #### Scenario: Reload keeps the queue
 - **WHEN** the user reloads the page while episodes remain queued
 - **THEN** the queue panel shows the same upcoming episodes and playback can continue from the queue
+
+#### Scenario: Reload restores the current episode
+- **WHEN** the user reloads the page while an episode is loaded
+- **THEN** that episode is restored as the player's current episode, so the bar and its controls reflect it
+
+#### Scenario: Reload with a queue but no episode keeps the bar reachable
+- **WHEN** the loader restores a non-empty queue yet no current episode (e.g. a legacy payload)
+- **THEN** the player bar is still shown in a queue-only state, so the queue remains accessible until the user plays an episode
 
 #### Scenario: Corrupt stored queue is discarded
 - **WHEN** the stored queue payload cannot be parsed

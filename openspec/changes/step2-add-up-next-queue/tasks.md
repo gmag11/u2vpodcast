@@ -18,6 +18,7 @@
 - [x] 3.3 Add a queue toggle button (e.g. `PhList` icon) opening an "Up next" popover (radix-vue `DropdownMenuRoot` or similar) listing `upNext` with thumbnail, title, channel, count, per-item remove (→ `removeFromQueue`) and a "clear all" (→ `clearQueue`).
 - [x] 3.4 Show an empty-state line in the popover when the queue is empty (i18n string in en/es).
 - [x] 3.5 Update the auto-hide watch in `PersistentPlayer.vue` to include `upNext.length`: when stopped with a non-empty queue the bar stays visible; the 10s hide timer arms only once the queue empties.
+- [x] 3.6 Persist and restore the current episode alongside the queue; show the bar in queue-only mode when a queue is restored without a current episode (neutral title, play disabled) so the queue stays reachable.
 
 ## 4. Seed wiring (reuse step 1)
 
@@ -29,6 +30,7 @@
 - [x] 5.2 Test that `saveQueue`/`loadQueue` tolerate corrupt data and that rehydration restores a previously saved queue.
 - [x] 5.3 Component test for the bar (per `AppHeader.test.ts` pattern with `@vue/test-utils`): next/prev disabled states, popover rendering, and long-press via fake timers — release before 500ms fires short skip, hold past 500ms fires skip + listened mark.
 - [x] 5.4 Component test for the stay-visible rule: stopped with a non-empty queue keeps the bar rendered; clearing the queue arms the hide timer (fake timers) and the bar disappears.
+- [x] 5.5 Component test for queue-only mode (reload with a queue but no current episode): the bar renders with the neutral title, play is disabled, and the queue popover opens.
 
 ## 6. Verification
 

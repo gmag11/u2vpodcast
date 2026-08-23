@@ -23,7 +23,11 @@ export const usePlayerStore = defineStore('player', () => {
 	let audio: HTMLAudioElement | null = null;
 
 	function persistQueue() {
-		saveQueue({ upNext: upNext.value, playStack: playStack.value });
+		saveQueue({
+			upNext: upNext.value,
+			playStack: playStack.value,
+			currentEpisode: currentEpisode.value
+		});
 	}
 
 	function pushToPlayStack(episode: Episode) {
@@ -40,6 +44,7 @@ export const usePlayerStore = defineStore('player', () => {
 		if (stored) {
 			upNext.value = stored.upNext;
 			playStack.value = stored.playStack;
+			currentEpisode.value = stored.currentEpisode;
 		}
 	}
 
@@ -111,12 +116,12 @@ export const usePlayerStore = defineStore('player', () => {
 		if (list) {
 			const index = list.findIndex((e) => e.id === episode.id);
 			upNext.value = index < 0 ? [] : list.slice(index + 1);
-			persistQueue();
 		}
 		// Without a context list the existing queue is kept untouched, so a
 		// single-episode play (e.g. replaying something already queued) does
 		// not wipe the up-next flow.
 		await loadEpisode(episode);
+		persistQueue();
 	}
 
 	async function advance() {
@@ -124,8 +129,8 @@ export const usePlayerStore = defineStore('player', () => {
 		const next = upNext.value.shift();
 		if (next) {
 			if (finished) pushToPlayStack(finished);
-			persistQueue();
 			await loadEpisode(next);
+			persistQueue();
 		} else {
 			stop();
 			upNext.value = [];
@@ -145,8 +150,8 @@ export const usePlayerStore = defineStore('player', () => {
 		const next = upNext.value.shift();
 		if (next) {
 			if (finished) pushToPlayStack(finished);
-			persistQueue();
 			await loadEpisode(next);
+			persistQueue();
 		} else {
 			upNext.value = [];
 			persistQueue();

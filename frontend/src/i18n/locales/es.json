@@ -100,7 +100,8 @@
 		"upNext": "A continuación",
 		"removeFromQueue": "Quitar de la cola",
 		"clearQueue": "Vaciar",
-		"emptyQueue": "No hay episodios en cola"
+		"emptyQueue": "No hay episodios en cola",
+		"queueReady": "Cola lista"
 	},
 	"pagination": {
 		"previous": "Anterior",

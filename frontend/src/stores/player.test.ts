@@ -190,11 +190,16 @@ describe('player store queue', () => {
 	it('rehydrates the queue from localStorage on store creation', async () => {
 		localStorage.setItem(
 			'u2vpodcast.up-next.v1',
-			JSON.stringify({ upNext: [episode(7)], playStack: [episode(3)] })
+			JSON.stringify({
+				upNext: [episode(7)],
+				playStack: [episode(3)],
+				currentEpisode: episode(5)
+			})
 		);
 		const player = usePlayerStore();
 		expect(player.upNext.map((e) => e.id)).toEqual([7]);
 		expect(player.playStack.map((e) => e.id)).toEqual([3]);
+		expect(player.currentEpisode?.id).toBe(5);
 	});
 
 	it('persists queue changes to localStorage', async () => {
@@ -204,5 +209,6 @@ describe('player store queue', () => {
 
 		const stored = JSON.parse(localStorage.getItem('u2vpodcast.up-next.v1') ?? '{}');
 		expect(stored.upNext.map((e: Episode) => e.id)).toEqual([2]);
+		expect(stored.currentEpisode?.id).toBe(1);
 	});
 });

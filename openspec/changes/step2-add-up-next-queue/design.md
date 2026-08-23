@@ -43,9 +43,9 @@ A private `playStack: Episode[]` records episodes as playback advances, enabling
 
 ### Decision 2: Persistence in `localStorage` with full episode objects
 
-A small helper (`frontend/src/lib/utils/queue.storage.ts`) serializes `upNext` (and `playStack`) to `localStorage` under key `u2vpodcast.up-next.v1` using full episode JSON; rehydration happens once in the store setup. The store persists after every queue mutation and on `watch` over the queue.
+A small helper (`frontend/src/lib/utils/queue.storage.ts`) serializes `upNext`, `playStack`, and the currently loaded `currentEpisode` to `localStorage` under key `u2vpodcast.up-next.v1` using full episode JSON; rehydration happens once in the store setup. The store persists after every queue mutation and after playback advances to a new episode. Legacy payloads without `currentEpisode` are normalized to `null`.
 
-**Why**: full objects let the bar render title/thumbnail/channel without extra fetches; episode metadata (title, image, slug, yt_id) is stable. `localStorage` matches the "session/ephemeral" nature of the queue. Survives reload only within the same browser, which is exactly the scope.
+**Why**: full objects let the bar render title/thumbnail/channel without extra fetches; episode metadata (title, image, slug, yt_id) is stable. Persisting the current episode makes the bar restorable after a reload instead of leaving it hidden. `localStorage` matches the "session/ephemeral" nature of the queue. Survives reload only within the same browser, which is exactly the scope.
 
 **Alternative considered**: persisting only ids and refetching. Rejected: adds async rehydration and coupling to API latency for zero practical gain.
 
@@ -83,6 +83,8 @@ The next control was added by step 1 (immediately right of stop, disabled when t
 ### Decision 6: Keep the bar visible while the queue is non-empty
 
 The bar's auto-hide watch gains `upNext.length` as an input and adds a rule: when playback is stopped but the queue still holds episodes, the bar stays visible — the 10s hide timer is only armed once the queue is empty. The queue panel lives exclusively in the bar, so hiding the bar would make the queue unreachable.
+
+A companion queue-only mode covers a reload that restored a queue but no current episode (e.g. legacy payloads): the bar renders with a neutral title ("Queue ready") and play disabled, solely to keep the queue reachable until the user plays an episode.
 
 **Why**: the queue is the thing being managed; while it exists the control surface must exist. The auto-hide rule collapses back to the original behavior as soon as the last item is removed or cleared.
 

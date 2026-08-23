@@ -27,12 +27,13 @@ describe('queue.storage', () => {
 		localStorage.clear();
 	});
 
-	it('round-trips upNext and playStack', () => {
-		saveQueue({ upNext: [episode(1), episode(2)], playStack: [episode(3)] });
+	it('round-trips upNext, playStack and currentEpisode', () => {
+		saveQueue({ upNext: [episode(1), episode(2)], playStack: [episode(3)], currentEpisode: episode(9) });
 		const loaded = loadQueue();
 		expect(loaded).not.toBeNull();
 		expect(loaded!.upNext.map((e) => e.id)).toEqual([1, 2]);
 		expect(loaded!.playStack.map((e) => e.id)).toEqual([3]);
+		expect(loaded!.currentEpisode?.id).toBe(9);
 	});
 
 	it('returns null when nothing is stored', () => {
@@ -57,5 +58,16 @@ describe('queue.storage', () => {
 	it('survives an unreadable payload produced by older versions', () => {
 		localStorage.setItem('u2vpodcast.up-next.v1', JSON.stringify({ upNext: [] }));
 		expect(loadQueue()).toBeNull();
+	});
+
+	it('normalizes legacy payloads without currentEpisode to null', () => {
+		localStorage.setItem(
+			'u2vpodcast.up-next.v1',
+			JSON.stringify({ upNext: [episode(1)], playStack: [] })
+		);
+		const loaded = loadQueue();
+		expect(loaded).not.toBeNull();
+		expect(loaded!.upNext.map((e) => e.id)).toEqual([1]);
+		expect(loaded!.currentEpisode).toBeNull();
 	});
 });

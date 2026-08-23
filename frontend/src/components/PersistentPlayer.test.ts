@@ -222,4 +222,22 @@ describe('PersistentPlayer controls', () => {
 		await flushPromises();
 		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(false);
 	});
+
+	it('shows the bar in queue-only mode after a reload with no current episode', async () => {
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+
+		const bar = await mountBar();
+		expect(bar.find('.fixed.bottom-0').exists()).toBe(true);
+		expect(bar.text()).toContain('Queue ready');
+
+		const playBtn = bar.get('button[aria-label="Play"]');
+		expect((playBtn.element as HTMLButtonElement).disabled).toBe(true);
+
+		// queue stays reachable: the popover opens without a current episode
+		await bar.get('button[aria-label="Up next queue"]').trigger('click');
+		expect(bar.text()).toContain('Episode 2');
+	});
 });

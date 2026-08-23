@@ -100,7 +100,8 @@
 		"upNext": "Up next",
 		"removeFromQueue": "Remove from queue",
 		"clearQueue": "Clear",
-		"emptyQueue": "No episodes queued"
+		"emptyQueue": "No episodes queued",
+		"queueReady": "Queue ready"
 	},
 	"pagination": {
 		"previous": "Previous",

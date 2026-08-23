@@ -42,12 +42,20 @@
 	watch(
 		() => [player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
 		([playing, stopped, episodeId, queueLength]) => {
-			if (episodeId == null) {
+			if (episodeId == null && queueLength === 0) {
 				visible.value = false;
 				clearHideTimer();
 				return;
 			}
 			if (!stopped) {
+				visible.value = true;
+				clearHideTimer();
+				return;
+			}
+			if (episodeId == null) {
+				// Queue-only mode (e.g. right after a reload that restored the
+				// queue but no current episode): the bar exists so the queue
+				// stays reachable until the user plays something.
 				visible.value = true;
 				clearHideTimer();
 				return;
@@ -151,13 +159,13 @@
 		leave-to-class="translate-y-full"
 	>
 		<div
-			v-if="visible && player.currentEpisode"
+			v-if="visible && (player.currentEpisode != null || player.upNext.length > 0)"
 			class="fixed bottom-0 left-0 right-0 z-30 border-t border-outline bg-surface/95 shadow-[0_-4px_20px_var(--glow)] backdrop-blur-xl"
 		>
 			<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-2 px-4 md:gap-4 md:px-8">
 				<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
 					<img
-						v-if="player.currentEpisode.image"
+						v-if="player.currentEpisode?.image"
 						:src="player.currentEpisode.image"
 						:alt="player.currentEpisode.title"
 						class="h-full w-full object-cover"
@@ -165,10 +173,13 @@
 				</div>
 
 				<div class="hidden min-w-0 flex-col sm:flex">
-					<p class="max-w-60 truncate text-sm font-semibold text-text">
+					<p v-if="player.currentEpisode" class="max-w-60 truncate text-sm font-semibold text-text">
 						{{ player.currentEpisode.title }}
 					</p>
-					<p class="max-w-60 truncate text-xs text-text-muted">
+					<p v-else class="max-w-60 truncate text-sm font-semibold text-text">
+						{{ $t('player.queueReady') }}
+					</p>
+					<p v-if="player.currentEpisode" class="max-w-60 truncate text-xs text-text-muted">
 						{{ player.currentLabel }} / {{ player.durationLabel }}
 					</p>
 				</div>
@@ -187,7 +198,7 @@
 					type="button"
 					class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 					:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
-					:disabled="player.loading"
+					:disabled="player.loading || player.currentEpisode == null"
 					@click="player.togglePlay()"
 				>
 					<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />

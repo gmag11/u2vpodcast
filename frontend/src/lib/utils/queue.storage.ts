@@ -3,6 +3,7 @@ import type { Episode } from '@/types';
 export interface QueuePayload {
 	upNext: Episode[];
 	playStack: Episode[];
+	currentEpisode: Episode | null;
 }
 
 const STORAGE_KEY = 'u2vpodcast.up-next.v1';
@@ -22,6 +23,8 @@ export function saveQueue(payload: QueuePayload): void {
 /**
  * Loads a previously persisted queue, returning `null` when nothing is stored
  * or the payload is unreadable/malformed so callers can fall back to empty.
+ * Payloads written by earlier versions (without `currentEpisode`) still load;
+ * the missing field is normalized to `null`.
  */
 export function loadQueue(): QueuePayload | null {
 	try {
@@ -36,7 +39,8 @@ export function loadQueue(): QueuePayload | null {
 		) {
 			return null;
 		}
-		return parsed as QueuePayload;
+		const payload = parsed as QueuePayload;
+		return { upNext: payload.upNext, playStack: payload.playStack, currentEpisode: payload.currentEpisode ?? null };
 	} catch {
 		return null;
 	}
