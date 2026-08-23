@@ -12,6 +12,7 @@ export const usePlayerStore = defineStore('player', () => {
 	const speed = ref(1);
 	const loading = ref(false);
 	const stopped = ref(true);
+	const upNext = ref<Episode[]>([]);
 
 	let audio: HTMLAudioElement | null = null;
 
@@ -59,14 +60,14 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function onEnded() {
 		playing.value = false;
-		stop();
+		advance();
 	}
 
 	function mediaUrl(episode: Episode) {
 		return `/media/${episode.channel_slug}/${episode.yt_id}.mp3`;
 	}
 
-	async function play(episode: Episode) {
+	async function loadEpisode(episode: Episode) {
 		const el = ensureAudio();
 		if (!el) return;
 		const isSame = currentEpisode.value != null && currentEpisode.value.id === episode.id;
@@ -77,6 +78,25 @@ export const usePlayerStore = defineStore('player', () => {
 			el.load();
 		}
 		await el.play();
+	}
+
+	async function play(episode: Episode, list?: Episode[]) {
+		if (list) {
+			const index = list.findIndex((e) => e.id === episode.id);
+			upNext.value = index < 0 ? [] : list.slice(index + 1);
+		} else {
+			upNext.value = [];
+		}
+		await loadEpisode(episode);
+	}
+
+	async function advance() {
+		const next = upNext.value.shift();
+		if (next) {
+			await loadEpisode(next);
+		} else {
+			stop();
+		}
 	}
 
 	async function togglePlay() {
@@ -179,10 +199,12 @@ export const usePlayerStore = defineStore('player', () => {
 		speed,
 		loading,
 		stopped,
+		upNext,
 		progress,
 		currentLabel,
 		durationLabel,
 		play,
+		advance,
 		togglePlay,
 		pause,
 		stop,

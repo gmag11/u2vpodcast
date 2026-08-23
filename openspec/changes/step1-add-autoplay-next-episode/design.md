@@ -57,6 +57,12 @@ The queue holds copies of the episode objects captured at play time, not a refer
 
 **Why**: the view may change (new search query, data refresh) while playback progresses; a snapshot keeps "next" deterministic and stable for the whole listening session. Copying is cheap, and episodes are immutable-enough in practice.
 
+### Decision 5: Manual next button in the player bar reuses advance()
+
+`PersistentPlayer.vue` gains a next control (`PhSkipForward`) placed immediately to the right of the stop button. It calls the same `advance()` used by auto-advance, so the behavior is identical (drain queue, play next) and there is no second code path. The button is disabled when `upNext` is empty (`:disabled="player.upNext.length === 0"`), surfacing that there is nothing to skip to.
+
+**Why**: one advance mechanism for auto- and manual skip. Placing it after stop matches the control order users expect in the bar.
+
 ## Risks / Trade-offs
 
 - **[Risk] List changes mid-playback make the queue stale.** → Accepted by design: the snapshot matches the moment of play; refreshing the view does not silently alter what plays next. Re-seeding is possible by pressing play again.

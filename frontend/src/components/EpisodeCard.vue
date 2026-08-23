@@ -9,9 +9,11 @@
 		defineProps<{
 			episode: Episode;
 			compact?: boolean;
+			list?: Episode[];
 		}>(),
 		{
-			compact: false
+			compact: false,
+			list: undefined
 		}
 	);
 
@@ -55,7 +57,7 @@
 							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 							:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 							:disabled="isCurrent && player.loading"
-							@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
+							@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list)"
 						>
 							<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 							<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
@@ -80,7 +82,7 @@
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 						:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 						:disabled="isCurrent && player.loading"
-						@click="isCurrent ? player.togglePlay() : player.play(props.episode)"
+						@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list)"
 					>
 						<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 						<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />

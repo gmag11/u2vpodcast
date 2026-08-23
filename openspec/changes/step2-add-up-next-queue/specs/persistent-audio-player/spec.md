@@ -6,7 +6,7 @@ Extends the persistent bottom player bar with next/previous navigation and an "U
 
 ### Requirement: Persistent bottom player bar
 
-The app SHALL render a persistent player bar fixed to the bottom of the viewport, spanning the full width, overlaying page content. The bar SHALL be hidden by default. When playback starts on any episode, the bar SHALL appear with an upward slide animation. The bar SHALL display the current episode's thumbnail, title, and controls for play/pause, stop, position (scrubber), volume (mute + level), and playback speed. In addition, the bar SHALL expose next/previous navigation controls and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability.
+The app SHALL render a persistent player bar fixed to the bottom of the viewport, spanning the full width, overlaying page content. The bar SHALL be hidden by default. When playback starts on any episode, the bar SHALL appear with an upward slide animation. The bar SHALL display the current episode's thumbnail, title, and controls for play/pause, stop, position (scrubber), volume (mute + level), and playback speed. In addition, the bar SHALL expose a previous control and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability. The next control already present from the `auto-advance` capability (step 1) is retained and gains the dual short/long press behavior of that capability.
 
 #### Scenario: Bar is hidden before any playback
 - **WHEN** the app loads and no episode has been played yet

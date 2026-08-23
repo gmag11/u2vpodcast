@@ -13,7 +13,7 @@
 
 ## 3. Persistent player UI
 
-- [ ] 3.1 In `frontend/src/components/PersistentPlayer.vue` add previous and next buttons; disable next when `upNext` is empty; keep previous enabled while an episode is loaded (it can always restart the current episode) and only disable it when nothing is loaded; wire to `playPrevious`/`skipNext`.
+- [ ] 3.1 In `frontend/src/components/PersistentPlayer.vue` add a previous button (the next button already exists beside the stop control from step 1 and stays wired to skip/advance); disable next when `upNext` is empty; keep previous enabled while an episode is loaded (it can always restart the current episode) and only disable it when nothing is loaded; wire to `playPrevious`/`skipNext`.
 - [ ] 3.2 Implement next long-press on the button: `pointerdown` starts a 500ms timer; `pointerup` before it fires `skipNext()` (short); crossing it fires `skipNext({ markCurrent: true })` (long) and suppresses the release action. Ensure the timer is cleaned up on `pointerleave`/unmount; enter/space keeps the short action for keyboard users.
 - [ ] 3.3 Add a queue toggle button (e.g. `PhList` icon) opening an "Up next" popover (radix-vue `DropdownMenuRoot` or similar) listing `upNext` with thumbnail, title, channel, count, per-item remove (→ `removeFromQueue`) and a "clear all" (→ `clearQueue`).
 - [ ] 3.4 Show an empty-state line in the popover when the queue is empty (i18n string in en/es).

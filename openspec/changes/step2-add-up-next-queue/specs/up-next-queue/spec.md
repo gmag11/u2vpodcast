@@ -6,7 +6,7 @@ Defines the persistent bar extension for queue control and the visible, editable
 
 ### Requirement: Shown the up-next queue and controls in the persistent bar
 
-The player bar SHALL expose next/previous navigation controls and a queue panel ("Up next") listing the upcoming episodes. The next control SHALL be disabled when the queue is empty; the previous control SHALL be disabled when there is no playback history. The queue panel SHALL allow removing an individual upcoming episode and clearing the whole queue.
+The player bar SHALL expose previous/next navigation controls (the next control is already provided by the `auto-advance` capability / step 1, next to the stop button) and a queue panel ("Up next") listing the upcoming episodes. The next control SHALL be disabled when the queue is empty; the previous control SHALL be disabled when there is no playback history. The queue panel SHALL allow removing an individual upcoming episode and clearing the whole queue.
 
 #### Scenario: Skipping to the next episode
 - **WHEN** the user presses the next control while episodes remain in the queue

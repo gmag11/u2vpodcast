@@ -4,6 +4,7 @@
 		PhGauge,
 		PhPause,
 		PhPlay,
+		PhSkipForward,
 		PhSpeakerHigh,
 		PhSpeakerSlash,
 		PhStop
@@ -111,17 +112,27 @@
 
 				<button
 					type="button"
-					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-					aria-label="$t('player.stop')"
+					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+					:aria-label="$t('player.stop')"
 					@click="player.stop()"
 				>
 					<PhStop class="h-4 w-4" weight="fill" />
 				</button>
 
+				<button
+					type="button"
+					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+					:aria-label="$t('player.next')"
+					:disabled="player.upNext.length === 0"
+					@click="player.advance()"
+				>
+					<PhSkipForward class="h-4 w-4" weight="fill" />
+				</button>
+
 				<div
 					class="relative h-5 min-w-0 flex-1 cursor-pointer py-2"
 					role="slider"
-					aria-label="$t('player.seek')"
+					:aria-label="$t('player.seek')"
 					:aria-valuenow="Math.round(player.progress)"
 					:aria-valuemin="0"
 					:aria-valuemax="100"

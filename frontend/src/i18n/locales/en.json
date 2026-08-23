@@ -93,7 +93,8 @@
 		"stop": "Stop",
 		"seek": "Seek",
 		"mute": "Mute",
-		"unmute": "Unmute"
+		"unmute": "Unmute",
+		"next": "Next"
 	},
 	"pagination": {
 		"previous": "Previous",

@@ -110,6 +110,7 @@
 				v-for="episode in filteredEpisodes"
 				:key="episode.id"
 				:episode="episode"
+				:list="filteredEpisodes"
 				compact
 			/>
 		</div>

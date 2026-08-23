@@ -93,7 +93,8 @@
 		"stop": "Detener",
 		"seek": "Buscar",
 		"mute": "Silenciar",
-		"unmute": "Activar sonido"
+		"unmute": "Activar sonido",
+		"next": "Siguiente"
 	},
 	"pagination": {
 		"previous": "Anterior",

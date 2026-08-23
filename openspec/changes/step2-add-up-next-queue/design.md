@@ -70,13 +70,13 @@ else: stop(); clearQueue()
 
 **Why**: shift-then-persist keeps storage in lockstep with in-memory state; clearing on stop avoids a zombie queue after finishing. Repeat/shuffle deliberately left to step 5 to keep this change reviewable.
 
-### Decision 5: Bar surfaces queue via next/prev + "Up next" popover
+### Decision 5: Bar surfaces queue via previous control + "Up next" popover
 
-In `PersistentPlayer.vue`:
-- prev/next buttons flanking the play/pause button (next disabled when the queue is empty; prev enabled while an episode is loaded per the dual behavior above).
-- A queue button (list icon, `PhList`) toggles a `radix-vue` popover/dropdown anchored to the bar listing upcoming episodes (thumbnail, title, channel, remove `×`), plus "Clear all" and a count badge.
+The next control was added by step 1 (immediately right of stop, disabled when the queue is empty, wired to `advance()`). This change layers onto the bar:
+- a previous button flanking the play/pause control (enabled while an episode is loaded per the dual behavior above),
+- a queue button (list icon, `PhList`) toggling a `radix-vue` popover/dropdown anchored to the bar listing upcoming episodes (thumbnail, title, channel, remove `×`), plus "Clear all" and a count badge.
 
-**Next long-press**: the next button distinguishes short vs long press with a 500ms threshold implemented via pointer events: `pointerdown` starts a timer; `pointerup` before the threshold fires the short action (`skipNext()`); crossing the threshold fires the long action (`skipNext({ markCurrent: true })`) and suppresses the subsequent release. Keyboard users keep the short action on Enter/Space; the "skip + mark listened" behavior remains reachable through the existing step-3 path (an episode already marked listens on its own `ended`).
+**Next long-press**: the step-1 next button obtains the dual behavior here: start a 500ms pointer timer (`pointerdown`), fire `skipNext()` for a short release, `skipNext({ markCurrent: true })` when the threshold is crossed (suppressing the release). Keyboard users keep the short action on Enter/Space; the "skip + mark listened" behavior stays reachable through the step-3 path.
 
 **Why**: a popover keeps the bar compact and does not require new routing; `radix-vue` is already used for menus so placement/focus behavior is consistent.
 

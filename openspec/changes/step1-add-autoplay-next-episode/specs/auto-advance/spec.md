@@ -39,3 +39,19 @@ When playback starts from a list, the player SHALL build its queue as a snapshot
 #### Scenario: Queue snapshot is stable when the view changes
 - **WHEN** playback started from a list and the user later changes the search filter or the list refreshes
 - **THEN** the queued next episodes remain those captured at play time, unaffected by the view change
+
+### Requirement: Manual next control in the player bar
+
+The persistent player bar SHALL expose a next/skip control placed immediately to the right of the stop control. When the queue contains an episode, activating it SHALL advance playback to the next queued episode immediately using the same mechanism as end-of-playback advance. When the queue is empty the control SHALL be disabled.
+
+#### Scenario: Skipping to the next queued episode
+- **WHEN** the next control is activated while the queue holds an episode
+- **THEN** the player immediately loads and plays that episode, and the queue drains by one
+
+#### Scenario: Disabled without a queue
+- **WHEN** the queue is empty
+- **THEN** the next control is disabled and activating it does nothing
+
+#### Scenario: Placement next to stop
+- **WHEN** the player bar is visible
+- **THEN** the next control renders immediately to the right of the stop control
