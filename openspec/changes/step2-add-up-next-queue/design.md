@@ -43,7 +43,7 @@ A private `playStack: Episode[]` records episodes as playback advances, enabling
 
 ### Decision 2: Persistence in `localStorage` with full episode objects
 
-A small helper (`frontend/src/lib/utils/queue.storage.ts`) serializes `upNext`, `playStack`, and the currently loaded `currentEpisode` to `localStorage` under key `u2vpodcast.up-next.v1` using full episode JSON; rehydration happens once in the store setup. The store persists after every queue mutation and after playback advances to a new episode. Legacy payloads without `currentEpisode` are normalized to `null`.
+A small helper (`frontend/src/lib/utils/queue.storage.ts`) serializes `upNext`, `playStack`, and the currently loaded `currentEpisode` to `localStorage` under key `u2vpodcast.up-next.v1` using full episode JSON; rehydration happens once in the store setup. The store persists after every queue mutation and after playback advances to a new episode. Legacy payloads without `currentEpisode` are normalized to `null`. Because a restored session creates the shared element lazily with an empty source, `togglePlay()` reloads the current episode's `src`/`load()` before the first play when the element has no source yet.
 
 **Why**: full objects let the bar render title/thumbnail/channel without extra fetches; episode metadata (title, image, slug, yt_id) is stable. Persisting the current episode makes the bar restorable after a reload instead of leaving it hidden. `localStorage` matches the "session/ephemeral" nature of the queue. Survives reload only within the same browser, which is exactly the scope.
 

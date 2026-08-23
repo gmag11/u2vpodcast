@@ -61,6 +61,7 @@ describe('PersistentPlayer controls', () => {
 
 	beforeEach(() => {
 		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
 		localStorage.clear();
 		setActivePinia(createPinia());
 	});

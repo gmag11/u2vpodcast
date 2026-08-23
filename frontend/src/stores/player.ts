@@ -188,6 +188,12 @@ export const usePlayerStore = defineStore('player', () => {
 		if (!el || !currentEpisode.value) return;
 		if (el.paused) {
 			stopped.value = false;
+			// After a reload/restore the shared element may have been created
+			// with an empty source: (re)load the current episode before playing.
+			if (!el.src || el.src === '') {
+				el.src = mediaUrl(currentEpisode.value);
+				el.load();
+			}
 			await el.play();
 		} else {
 			el.pause();

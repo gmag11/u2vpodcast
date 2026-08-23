@@ -33,6 +33,7 @@
 - [x] 5.4 Component test for the stay-visible rule: stopped with a non-empty queue keeps the bar rendered; clearing the queue arms the hide timer (fake timers) and the bar disappears.
 - [x] 5.5 Component test for queue-only mode (reload with a queue but no current episode): the bar renders with the neutral title, play is disabled, and the queue popover opens.
 - [x] 5.6 App-level test: with no authenticated user the `PersistentPlayer` component is not mounted; setting a user mounts it; clearing the user stops playback (player store stopped state).
+- [x] 5.7 Store test: a restored episode plays after reload — `togglePlay()` loads the element's source (`src`/`load()`) when the shared element has none.
 
 ## 6. Verification
 

@@ -9,6 +9,8 @@ import type { Episode } from '@/types';
  * `ensureAudio()` wiring gets a controllable fake in these tests.
  */
 class MockAudioElement {
+	static instances: MockAudioElement[] = [];
+
 	src = '';
 	currentTime = 0;
 	duration = 0;
@@ -19,6 +21,10 @@ class MockAudioElement {
 	preload = 'metadata';
 
 	private listeners: Record<string, Array<() => void>> = {};
+
+	constructor() {
+		MockAudioElement.instances.push(this);
+	}
 
 	play = vi.fn(async () => {
 		this.paused = false;
@@ -64,6 +70,8 @@ function episode(id: number, listen = false): Episode {
 describe('player store queue', () => {
 	beforeEach(() => {
 		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
 		localStorage.clear();
 		setActivePinia(createPinia());
 	});
@@ -210,5 +218,27 @@ describe('player store queue', () => {
 		const stored = JSON.parse(localStorage.getItem('u2vpodcast.up-next.v1') ?? '{}');
 		expect(stored.upNext.map((e: Episode) => e.id)).toEqual([2]);
 		expect(stored.currentEpisode?.id).toBe(1);
+	});
+
+	it('togglePlay loads the source of a restored episode after a reload', async () => {
+		localStorage.setItem(
+			'u2vpodcast.up-next.v1',
+			JSON.stringify({
+				upNext: [],
+				playStack: [],
+				currentEpisode: episode(1)
+			})
+		);
+		const player = usePlayerStore();
+		// the episode is restored but the shared element has never been loaded
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.stopped).toBe(true);
+
+		await player.togglePlay();
+		const el = MockAudioElement.instances[0];
+		expect(el.src).toBe('/media/c/yt1.mp3');
+		expect(el.load).toHaveBeenCalled();
+		expect(el.play).toHaveBeenCalled();
+		expect(player.stopped).toBe(false);
 	});
 });
