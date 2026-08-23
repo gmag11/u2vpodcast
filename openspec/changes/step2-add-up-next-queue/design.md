@@ -88,6 +88,12 @@ A companion queue-only mode covers a reload that restored a queue but no current
 
 **Why**: the queue is the thing being managed; while it exists the control surface must exist. The auto-hide rule collapses back to the original behavior as soon as the last item is removed or cleared.
 
+### Decision 7: Player bar is bound to the session
+
+`App.vue` renders `<PersistentPlayer v-if="auth.isAuthenticated" />` so the bar (and its queue popover) is never available on the login screen. A `watch` on `isAuthenticated` calls `player.stop()` when the session disappears, halting any playback audio that would otherwise keep sounding after logout.
+
+**Why**: the player and its queue are post-login features ("solo estará disponible tras iniciar la sesión"). Without the stop, logout would only unmount the bar while the shared `<audio>` kept playing (it lives in the store, not the component).
+
 ## Risks / Trade-offs
 
 - **[Risk] Stale episode objects after data refresh.** Episode titles/images are stable once downloaded; worst case the bar shows an outdated thumbnail until next play. → Accepted; mitigable later by rehydrating from API.

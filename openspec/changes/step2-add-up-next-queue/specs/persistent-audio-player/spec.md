@@ -6,7 +6,7 @@ Extends the persistent bottom player bar with next/previous navigation and an "U
 
 ### Requirement: Persistent bottom player bar
 
-The app SHALL render a persistent player bar fixed to the bottom of the viewport, spanning the full width, overlaying page content. The bar SHALL be hidden by default. When playback starts on any episode, the bar SHALL appear with an upward slide animation. The bar SHALL display the current episode's thumbnail, title, and controls for play/pause, stop, position (scrubber), volume (mute + level), and playback speed. In addition, the bar SHALL expose a previous control and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability. The next control already present from the `auto-advance` capability (step 1) is retained and gains the dual short/long press behavior of that capability.
+The app SHALL render a persistent player bar fixed to the bottom of the viewport, spanning the full width, overlaying page content. The bar SHALL be hidden by default. When playback starts on any episode, the bar SHALL appear with an upward slide animation. The bar SHALL display the current episode's thumbnail, title, and controls for play/pause, stop, position (scrubber), volume (mute + level), and playback speed. In addition, the bar SHALL expose a previous control and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability. The next control already present from the `auto-advance` capability (step 1) is retained and gains the dual short/long press behavior of that capability. The bar SHALL only be rendered while an authenticated session exists: on the login screen it SHALL not appear, and losing the session SHALL stop any playback.
 
 #### Scenario: Bar is hidden before any playback
 - **WHEN** the app loads and no episode has been played yet
@@ -27,6 +27,14 @@ The app SHALL render a persistent player bar fixed to the bottom of the viewport
 #### Scenario: Queue panel opens from the bar
 - **WHEN** the user presses the queue button in the visible bar
 - **THEN** an "Up next" panel opens listing the upcoming episodes with a per-item remove action, and closes on a second press or outside interaction
+
+#### Scenario: Bar is absent on the login screen
+- **WHEN** the user is not authenticated (the login screen is shown)
+- **THEN** the player bar is not rendered and no playback is active
+
+#### Scenario: Losing the session stops playback
+- **WHEN** the session disappears (logout) while playback was active
+- **THEN** playback stops and the bar no longer renders
 
 ### Requirement: Animated auto-hide on stop
 
