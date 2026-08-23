@@ -38,5 +38,5 @@
 ## 6. Verification
 
 - [x] 6.1 `pnpm test` and `pnpm build` in `frontend/`.
-- [ ] 6.2 Manual: play a list, open the Up Next panel, remove an item, skip next, go previous; reload the page and confirm the queue survives; finish the queue and confirm stop + empty panel; stop with episodes still queued — the bar must stay visible; clear the queue — the bar auto-hides after 10s.
-- [ ] 6.3 Manual: regression — single play (no list) still keeps any previously queued episodes.
+- [x] 6.2 Manual: play a list, open the Up Next panel, remove an item, skip next, go previous; reload the page and confirm the queue survives; finish the queue and confirm stop + empty panel; stop with episodes still queued — the bar must stay visible; clear the queue — the bar auto-hides after 10s.
+- [x] 6.3 Manual: regression — single play (no list) still keeps any previously queued episodes.
