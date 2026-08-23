@@ -52,9 +52,33 @@ When playback starts on an episode whose stored position is above 30 seconds and
 - **WHEN** the user presses "start over" for an episode with a stored position
 - **THEN** playback starts at zero and the stored position is reset to 0
 
+### Requirement: Keyboard shortcut seeks by 15 seconds
+
+While an episode is loaded, the player SHALL seek 15 seconds forward on the `ArrowRight` key and 15 seconds backward on the `ArrowLeft` key, clamping to the episode bounds. The shortcuts SHALL only apply while the frontend document has focus and SHALL NOT capture the keys when focus is in an editable control (input, textarea, select, contenteditable) or a slider.
+
+#### Scenario: Arrow right seeks forward
+- **WHEN** the frontend has focus, an episode is loaded, and the user presses `ArrowRight`
+- **THEN** playback seeks 15 seconds forward, clamped to the episode duration
+
+#### Scenario: Arrow left seeks backward
+- **WHEN** the frontend has focus, an episode is loaded, and the user presses `ArrowLeft`
+- **THEN** playback seeks 15 seconds backward, clamped to zero
+
+#### Scenario: No episode loaded
+- **WHEN** the frontend has focus but no episode is loaded and the user presses an arrow key
+- **THEN** nothing happens
+
+#### Scenario: Editable controls keep the keys
+- **WHEN** the focus is inside a text input, textarea, select, contenteditable element, or a slider
+- **THEN** arrow keys behave normally (input cursor / slider value) and do not seek
+
+#### Scenario: Page without focus
+- **WHEN** the frontend tab/window does not have focus
+- **THEN** the arrow shortcuts do not fire
+
 ### Requirement: Player saves position during playback
 
-While an episode is playing, the player SHALL persist its current position at least once every 10 seconds, and SHALL persist again on pause, on stop, and immediately before the page is hidden or unloaded. The listened flag SHALL be sent true only when the episode completes.
+While an episode is playing, the player SHALL persist its current position at least once every 10 seconds, and SHALL persist again on pause, on stop, and immediately before the page is hidden or unloaded. The listened flag SHALL be sent true only when the episode completes or the user explicitly marks it (long-press skip).
 
 #### Scenario: Throttled position saves
 - **WHEN** an episode plays for several minutes in a single session

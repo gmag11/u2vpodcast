@@ -29,6 +29,7 @@
 - [ ] 5.4 Add opt-out: `play(episode, list?, { fromStart?: boolean })` — when `fromStart` is true skip resume and immediately persist `position_seconds = 0`.
 - [ ] 5.5 In `onEnded` (before advance from step 1/2): save `{ position_seconds: duration, listened: true }` and update the in-memory current episode (`listen=true`, `listened_at`), sending progress with `listened: true`. Extract a shared `markListened()` helper so the step-2 long-press skip (`skipNext({ markCurrent: true })`) uses the same path.
 - [ ] 5.6 Suppress resume for repeat-one replays (step 5) by reusing `fromStart`.
+- [ ] 5.7 Add `seekRelative(delta)` (clamp `currentTime + delta` to `[0, duration]` then `seek()`) and register the window `keydown` listener in the store: handle `ArrowRight`/`ArrowLeft` only when `document.hasFocus()`, an episode is loaded, and the event target is not an input/textarea/select/contenteditable or inside a `[role=slider]`.
 
 ## 6. Card badge and resume UI
 
@@ -46,11 +47,13 @@
 
 - [ ] 8.1 Extend `frontend/src/stores/player.test.ts`: position saved on pause/ended; throttled saves at most every 10s; resume seeks only when `position_seconds > 30` and `< duration*0.95`; `fromStart` clears position; completion sends `listened: true`.
 - [ ] 8.2 Add a card test asserting the played mark and resume hint render conditions.
+- [ ] 8.3 Add keyboard-seek tests (fake key events): `ArrowRight` seeks +15 clamped to duration; `ArrowLeft` seeks -15 clamped to 0; no-op without an episode; no-op when `document.hasFocus()` is false; no-op when focus is in an input/textarea/slider.
 
 ## 9. Verification
 
 - [ ] 9.1 `cargo test` (backend) and `pnpm test`/`pnpm build` (frontend) all pass.
 - [ ] 9.2 Manual: play an episode, stop at ~20s, reopen it — resumes at the saved point; finish an episode (seek near end) — card shows the played mark and the next episode plays; press start over — position resets.
+- [ ] 9.3 Manual: with focus on the page, press `ArrowRight`/`ArrowLeft` during playback — seek moves ±15s clamped; typing in the search inputs keeps arrows working as text navigation; pressing arrows with no episode loaded does nothing.
 
 ## 10. Rollback note
 

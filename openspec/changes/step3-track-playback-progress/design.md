@@ -74,6 +74,26 @@ The same mark path is reached from the step-2 long-press next control (`skipNext
 
 **Why**: cards are the shared surface across both views; the History screen list itself stays untouched.
 
+### Decision 7: Keyboard seek ±15 seconds
+
+A window-level `keydown` listener (registered once in the player store; the app is a single-screen SPA so the store lives for the whole session) handles `ArrowRight`/`ArrowLeft`:
+
+```
+onKeydown(e):
+  if !document.hasFocus()                        → ignore (no forced hijack)
+  if episode not loaded                          → ignore
+  if e.target is input/textarea/select/contenteditable → return (let it work)
+  if e.target closest('[role=slider]')           → return (scrubber owns arrows)
+  if ArrowRight → seekRelative(+15)
+  if ArrowLeft  → seekRelative(-15)
+```
+
+`seekRelative(delta)` computes `clamp(currentTime + delta, 0, duration)` and calls `seek()`. The resulting position is persisted by the existing step-3 plumbing (throttled saves while playing, final save on pause/stop/ended), identical to scrubber seeks — no extra write path.
+
+**Why**: ±15s is the standard web-player convention. The `document.hasFocus()` gate implements "only when the frontend is in focus", and the editable/slider guards prevent breaking text navigation in the search inputs and the scrubber.
+
+**Alternative considered**: handling keys only when focus is inside the player bar or a card. Rejected by the "frontend in focus" requirement: the keys should work anywhere on the page without requiring a specific focus target.
+
 ## Risks / Trade-offs
 
 - **[Risk] Frequent writes to SQLite.** Throttle to 10s + event-driven saves bounds writes to ~1 per 10s per active listener. → Acceptable for single-user; WAL + busy timeout already configured.
