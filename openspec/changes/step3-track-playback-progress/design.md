@@ -30,9 +30,9 @@ ALTER TABLE episodes ADD COLUMN listened_at DATETIME;
 
 **Why**: matches the existing `add_sync_status` migration pattern (sqlx ALTERs); reuses `listen` instead of adding a redundant flag column.
 
-### Decision 2: Single endpoint `PUT /api/1.0/episodes/{id}/progress/`
+### Decision 2: Single endpoint `PUT /api/1.0/episodes/{yt_id}/progress/`
 
-Body: `{ "position_seconds": number, "listened": boolean }`. The handler updates both columns and returns the refreshed episode via `CResponse::ok(session, episode)`. Implemented as a `modify`-style model method on `Episode` following `update`, plus a small handler in `src/handlers/episodes.rs` registered in `src/handlers/mod.rs`.
+The episode is addressed by its public id (`yt_id`) — the same identity the media URLs use (`/media/{channel_slug}/{yt_id}.mp3`) — so progress is associated with the individual episode regardless of whether it was played alone or from a playlist/queue. Body: `{ "position_seconds": number, "listened": boolean }`. The handler resolves the row by `yt_id`, calls a `modify`-style model method on `Episode` (`update_progress` on the resolved row id), and answers `204 No Content` on success — the frontend save is fire-and-forget, so the status code is enough and no response body is emitted; a missing episode is answered with the `404` error envelope. Implemented as a small handler in `src/handlers/episodes.rs` registered in `src/handlers/mod.rs`.
 
 **Why**: one round-trip covers save-position and mark-played; the client decides when each applies (`listened` only true on completion).
 
@@ -49,13 +49,15 @@ Saves are fire-and-forget `api.updateEpisodeProgress(id, { position_seconds, lis
 
 ### Decision 4: Resume policy and thresholds
 
-On `play(episode)`, run once after `loadedmetadata` (so `duration` is known):
-- if `episode.position_seconds > 30` and `< duration * 0.95` → `seek(position)` (resume);
+On `play(episode)`, the flow is: load the source, **wait for `loadedmetadata`** (so `duration` is known), call `el.play()`, and apply the resume **on the `playing` event** — the moment the element is genuinely streaming — where browsers reliably honor the seek:
+- if `position_seconds > 30` and `< duration * 0.95` → `seek(position)` (resume);
 - else → play from 0.
 
 `play(episode, { fromStart: true })` opts out of resume ("start over" affordance) and immediately persists `position_seconds = 0`.
 
-**Why**: 30s skips accidental replay-induced seeks; 95% treats near-complete episodes as finished (ad-heavy endings). Awaiting `loadedmetadata` avoids seeking before the element knows its duration. Because navigating back (step-2 dual previous) goes through the same `play()` path, this resume policy also applies when returning to a previously played episode — a fresh episode or one without a saved position starts at zero.
+**Why**: 30s skips accidental replay-induced seeks; 95% treats near-complete episodes as finished (ad-heavy endings). The seek is applied via a **resume retry loop**: playback starts and, while a resume is pending, the store re-issues `currentTime = target` on every `timeupdate` (plus a 500ms interval) until the playhead reaches the target or a 20s deadline passes. This is robust against browsers that, with a metadata-only `preload`, limit `seekable` to the buffered prefix and **silently clamp a single seek beyond it** (observed in both Firefox and Chrome: `seekable: "0-16.32"` while `duration` is correct); as playback continues the buffer — and thus `seekable` — grows until the seek lands, without forcing a full download (bandwidth-friendly). A target at or beyond 95% of the duration is treated as finished and playback restarts from zero. Because navigating back (step-2 dual previous) goes through the same `play()` path, this resume policy also applies when returning to a previously played episode — a fresh episode or one without a saved position starts at zero.
+
+Before deciding, the resume reads the per-id progress map. That map is seeded from the episode **list** payloads (the episode endpoints already serialize `position_seconds`/`listen`/`listened_at`), so the normally played episodes resume without any per-episode request. Only episodes unknown to the session (e.g. a restored-queue entry not present in any fetched list) are looked up individually with `GET /api/1.0/episodes/{yt_id}/progress/`. The same applies when a *restored* queue episode is played again through `togglePlay()` (e.g. right after a reload, where the localStorage copy predates the saved progress), and the resume is applied after playback starts in both paths. `fromStart` skips all of this.
 
 ### Decision 5: Completion marks listened
 

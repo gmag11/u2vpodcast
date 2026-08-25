@@ -5,7 +5,7 @@ Long episodes cannot realistically be finished in one sitting. Without a stored 
 ## What Changes
 
 - Episodes gain two persisted columns: `position_seconds` (last playback position) and `listened_at` (when the episode was completed); the existing `listen` boolean becomes the "played" mark.
-- New authenticated endpoint `PUT /api/1.0/episodes/{id}/progress/` accepting `{ position_seconds, listened }` updates both fields in one call.
+- New authenticated endpoint `PUT /api/1.0/episodes/{yt_id}/progress/` accepting `{ position_seconds, listened }` updates both fields in one call. The episode is addressed by its public id (`yt_id`, the same identity used by the media URLs), so progress is associated to the individual episode regardless of how it is played (single or from a playlist).
 - The player saves position throttled every ~10s while playing, and again on pause, on stop, and on `ended` / page unload.
 - Starting playback resumes automatically from the stored position when it is above 30s and below ~95% of the duration; an "start over" affordance clears the position and plays from zero.
 - On `ended` the episode is marked listened (`listen=true`, `listened_at=now`, position=duration).

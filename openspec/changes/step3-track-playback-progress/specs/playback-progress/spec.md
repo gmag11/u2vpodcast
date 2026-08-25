@@ -18,7 +18,7 @@ Every episode returned by the episode API SHALL include its persisted playback p
 
 ### Requirement: Playback progress is savable through the API
 
-The API SHALL expose an authenticated endpoint to update an episode's progress in one call: a position in seconds and an optional listened flag. A successful update SHALL persist both fields and return the updated episode.
+The API SHALL expose an authenticated endpoint to update an episode's progress in one call: a position in seconds and an optional listened flag. A successful update SHALL persist both fields and complete with a success status (`204 No Content`); the write is fire-and-forget, so no response body is required. An unknown episode SHALL be answered with a `404`. The episode is addressed by its public id (`yt_id`).
 
 #### Scenario: Saving a position
 - **WHEN** the player saves progress for an episode at 1300 seconds without completing it
@@ -38,11 +38,15 @@ The API SHALL expose an authenticated endpoint to update an episode's progress i
 
 ### Requirement: Player resumes from the stored position
 
-When playback starts on an episode whose stored position is above 30 seconds and below 95% of its duration, the player SHALL seek to that position automatically and continue from there. A "start over" affordance SHALL let the user play the episode from zero, clearing the stored position.
+When playback starts on an episode whose stored position is above 30 seconds and below 95% of its duration, the player SHALL seek to that position automatically and continue from there. Before deciding, the player SHALL query the server for the episode's stored progress (`GET /api/1.0/episodes/{yt_id}/progress/`), so a stale local copy never bypasses the resume. A "start over" affordance SHALL let the user play the episode from zero, clearing the stored position.
 
 #### Scenario: Automatic resume mid-episode
 - **WHEN** the user plays an episode previously left at 45 minutes of a 60-minute duration
 - **THEN** playback starts at 45 minutes instead of zero
+
+#### Scenario: Resume reads the server value, not the stale local copy
+- **WHEN** the user plays an episode whose local copy reports no position but the server stores a position above 30 seconds
+- **THEN** the player queries the stored progress and starts from the server position
 
 #### Scenario: Resume also applies when navigating back
 - **WHEN** the user navigates back (step-2 dual previous) to an episode whose stored position is above 30 seconds and below 95% of the duration
