@@ -42,7 +42,10 @@ use ytinfo::{
     YTInfo,
     cache_image,
 };
-pub use episode::Episode;
+pub use episode::{
+    Episode,
+    EpisodeProgress,
+};
 pub use appstate::AppState;
 pub use user::{
     User,

@@ -26,8 +26,21 @@ pub struct Episode {
     #[serde(default = "get_default_empty")]
     pub image: String,
     pub listen: bool,
+    pub position_seconds: i64,
+    pub listened_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Leaf payload with just the playback-progress fields, used by the dedicated
+/// progress endpoints so clients never receive the full episode row.
+#[derive(Debug, Clone, Serialize)]
+pub struct EpisodeProgress {
+    pub id: i64,
+    pub yt_id: String,
+    pub position_seconds: i64,
+    pub listen: bool,
+    pub listened_at: Option<DateTime<Utc>>,
 }
 
 fn get_default_empty() -> String {
@@ -50,6 +63,8 @@ impl Episode {
             duration: row.get("duration"),
             image: row.get("image"),
             listen: row.get("listen"),
+            position_seconds: row.get("position_seconds"),
+            listened_at: row.get("listened_at"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -70,6 +85,8 @@ impl Episode {
             duration: row.get("duration"),
             image: row.get("image"),
             listen: row.get("listen"),
+            position_seconds: row.get("position_seconds"),
+            listened_at: row.get("listened_at"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -95,6 +112,8 @@ impl Episode {
             duration: duration.to_string(),
             image: image.to_string(),
             listen,
+            position_seconds: 0,
+            listened_at: None,
             created_at,
             updated_at,
         };
@@ -107,8 +126,9 @@ impl Episode {
     ) -> Result<Episode, Error> {
         let sql = "INSERT INTO episodes (channel_id, title, description, yt_id,
                    webpage_url, published_at, duration, image, listen,
-                   created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7,
-                   $8, $9, $10, $11) RETURNING *;";
+                   position_seconds, listened_at, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                   $13) RETURNING *;";
         query(sql)
             .bind(episode.channel_id)
             .bind(&episode.title)
@@ -119,6 +139,8 @@ impl Episode {
             .bind(&episode.duration)
             .bind(&episode.image)
             .bind(episode.listen)
+            .bind(episode.position_seconds)
+            .bind(episode.listened_at)
             .bind(episode.created_at)
             .bind(episode.updated_at)
             .map(Self::from_row)
@@ -231,7 +253,8 @@ impl Episode {
         info!("update");
         let sql = "UPDATE episodes SET channel_id = $2, title = $3,
                    description = $4, yt_id = $5, published_at = $6,
-                   duration = $7, image = $8, listen = $9, updated_at = $10
+                   duration = $7, image = $8, listen = $9,
+                   position_seconds = $10, listened_at = $11, updated_at = $12
                    WHERE id = $1 RETURNING * ;";
         let updated_at = Utc::now();
         query(sql)
@@ -244,11 +267,88 @@ impl Episode {
             .bind(&episode.duration)
             .bind(&episode.image)
             .bind(episode.listen)
+            .bind(episode.position_seconds)
+            .bind(episode.listened_at)
             .bind(updated_at)
             .map(Self::from_row)
             .fetch_one(pool)
             .await
             .map_err(|e| e.into())
+    }
+
+    /// Persists a single playback-progress write: the position (always) plus
+    /// the listened mark when `listened` is true (clearing it when false).
+    /// Returns the refreshed episode row, or an error when no episode matches.
+    pub async fn update_progress(
+        pool: &SqlitePool,
+        id: i64,
+        position_seconds: i64,
+        listened: bool,
+    ) -> Result<Self, Error> {
+        info!("update_progress");
+        let listened_at = if listened { Some(Utc::now()) } else { None };
+        let updated_at = Utc::now();
+        let sql = "UPDATE episodes SET position_seconds = $2, listen = $3,
+                   listened_at = $4, updated_at = $5
+                   WHERE id = $1 RETURNING *;";
+        match query(sql)
+            .bind(id)
+            .bind(position_seconds)
+            .bind(listened)
+            .bind(listened_at)
+            .bind(updated_at)
+            .map(Self::from_row)
+            .fetch_optional(pool)
+            .await
+        {
+            Ok(Some(episode)) => Ok(episode),
+            Ok(None) => Err(Error::default("episode not found")),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Progress update keyed by the episode's public id (`yt_id`), the same
+    /// identity the media URLs use. Resolves the row first because the only
+    /// UNIQUE constraint is `(channel_id, yt_id)`; the write itself then goes
+    /// through `update_progress` on the resolved row id.
+    pub async fn update_progress_by_yt_id(
+        pool: &SqlitePool,
+        yt_id: &str,
+        position_seconds: i64,
+        listened: bool,
+    ) -> Result<Self, Error> {
+        info!("update_progress_by_yt_id");
+        let id = query("SELECT id FROM episodes WHERE yt_id = $1 ORDER BY id LIMIT 1")
+            .bind(yt_id)
+            .map(|row: SqliteRow| row.get::<i64, _>("id"))
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| Error::default("episode not found"))?;
+        Self::update_progress(pool, id, position_seconds, listened).await
+    }
+
+    /// Returns the stored playback-progress fields for an episode, keyed by its
+    /// public id. Used by the player when starting playback so the resume
+    /// decision uses the server's authoritative value instead of a stale copy.
+    pub async fn read_progress_by_yt_id(
+        pool: &SqlitePool,
+        yt_id: &str,
+    ) -> Result<EpisodeProgress, Error> {
+        info!("read_progress_by_yt_id");
+        let sql = "SELECT id, yt_id, position_seconds, listen, listened_at
+                   FROM episodes WHERE yt_id = $1 ORDER BY id LIMIT 1;";
+        query(sql)
+            .bind(yt_id)
+            .map(|row: SqliteRow| EpisodeProgress {
+                id: row.get("id"),
+                yt_id: row.get("yt_id"),
+                position_seconds: row.get("position_seconds"),
+                listen: row.get("listen"),
+                listened_at: row.get("listened_at"),
+            })
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| Error::default("episode not found"))
     }
 
     pub async fn remove(pool: &SqlitePool, id: i64) -> Result<Episode, Error> {
@@ -339,6 +439,8 @@ mod episode_update_tests {
             duration: "00:10:00".to_string(),
             image: String::new(),
             listen: false,
+            position_seconds: 0,
+            listened_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -394,6 +496,102 @@ mod episode_update_tests {
             saved.updated_at >= saved.created_at,
             "updated_at must be refreshed on update"
         );
+    }
+
+    #[tokio::test]
+    async fn progress_update_stores_position_without_marking_listened() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "ddd444");
+        let saved = Episode::create(&pool, &created).await.expect("create");
+        assert!(!saved.listen);
+        assert!(saved.listened_at.is_none());
+
+        let updated = Episode::update_progress_by_yt_id(&pool, "ddd444", 1300, false)
+            .await
+            .expect("progress update must succeed");
+
+        assert_eq!(updated.id, saved.id);
+        assert_eq!(updated.yt_id, "ddd444");
+        assert_eq!(updated.position_seconds, 1300);
+        assert!(!updated.listen, "position-only update must not mark listened");
+        assert!(
+            updated.listened_at.is_none(),
+            "position-only update must leave listened_at empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn progress_update_with_listened_marks_the_episode() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "eee555");
+        let _saved = Episode::create(&pool, &created).await.expect("create");
+
+        let updated = Episode::update_progress_by_yt_id(&pool, "eee555", 3000, true)
+            .await
+            .expect("progress update must succeed");
+
+        assert!(updated.listen, "listened flag must mark the episode played");
+        assert!(
+            updated.listened_at.is_some(),
+            "listened_at must be set on completion"
+        );
+        assert_eq!(updated.position_seconds, 3000);
+    }
+
+    #[tokio::test]
+    async fn progress_update_with_listened_false_clears_the_mark() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "fff666");
+        let _saved = Episode::create(&pool, &created).await.expect("create");
+
+        let marked = Episode::update_progress_by_yt_id(&pool, "fff666", 3000, true)
+            .await
+            .expect("mark must succeed");
+        assert!(marked.listen);
+
+        let cleared = Episode::update_progress_by_yt_id(&pool, "fff666", 0, false)
+            .await
+            .expect("unmark must succeed");
+        assert!(!cleared.listen, "listened=false must clear the mark");
+        assert!(
+            cleared.listened_at.is_none(),
+            "listened=false must clear listened_at"
+        );
+        assert_eq!(cleared.position_seconds, 0);
+    }
+
+    #[tokio::test]
+    async fn progress_update_for_unknown_yt_id_errors() {
+        let pool = memory_pool().await;
+        let result = Episode::update_progress_by_yt_id(&pool, "unknown_yt_id_zzz", 10, false)
+            .await;
+        assert!(result.is_err(), "unknown episode must produce an error");
+    }
+
+    #[tokio::test]
+    async fn read_progress_returns_stored_fields_by_yt_id() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "ggg777");
+        let _saved = Episode::create(&pool, &created).await.expect("create");
+
+        Episode::update_progress_by_yt_id(&pool, "ggg777", 899, true)
+            .await
+            .expect("mark must succeed");
+
+        let progress = Episode::read_progress_by_yt_id(&pool, "ggg777")
+            .await
+            .expect("read must succeed");
+        assert_eq!(progress.yt_id, "ggg777");
+        assert_eq!(progress.position_seconds, 899);
+        assert!(progress.listen);
+        assert!(progress.listened_at.is_some());
+
+        let missing = Episode::read_progress_by_yt_id(&pool, "missing_yt_zzz").await;
+        assert!(missing.is_err(), "unknown episode must produce an error");
     }
 }
 

@@ -1,12 +1,17 @@
 use actix_web::{
     Responder,
+    HttpResponse,
     get,
+    put,
+    http::StatusCode,
     web::{
         Path,
         Data,
+        Json,
     },
 };
 use actix_session::Session;
+use serde::Deserialize;
 use tracing::{
     info,
     error,
@@ -18,6 +23,7 @@ use super::{
     super::models::{
         Channel,
         Episode,
+        EpisodeProgress,
         CResponse,
     },
 };
@@ -62,6 +68,56 @@ async fn read_all(
         Err(e) => {
             error!("{e}");
             Err(e)
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ProgressBody {
+    pub position_seconds: i64,
+    pub listened: bool,
+}
+
+#[get("/episodes/{yt_id}/progress/")]
+async fn read_progress(
+    data: Data<AppState>,
+    session: Session,
+    yt_id: Path<String>,
+) -> actix_web::HttpResponse {
+    info!("read_progress");
+    match Episode::read_progress_by_yt_id(&data.pool, &yt_id.into_inner()).await{
+        Ok(progress) => {
+            let progress: EpisodeProgress = progress;
+            CResponse::ok(session, progress)
+        },
+        Err(e) => {
+            error!("Error reading progress: {e}");
+            CResponse::ko(StatusCode::NOT_FOUND, session)
+        }
+    }
+}
+
+#[put("/episodes/{yt_id}/progress/")]
+async fn update_progress(
+    data: Data<AppState>,
+    session: Session,
+    yt_id: Path<String>,
+    body: Json<ProgressBody>,
+) -> actix_web::HttpResponse {
+    info!("update_progress");
+    let body = body.into_inner();
+    match Episode::update_progress_by_yt_id(
+        &data.pool,
+        &yt_id.into_inner(),
+        body.position_seconds,
+        body.listened,
+    ).await{
+        // The request is fire-and-forget: the 204 status alone confirms the
+        // write; no response body is needed.
+        Ok(_) => HttpResponse::NoContent().finish(),
+        Err(e) => {
+            error!("Error updating progress: {e}");
+            CResponse::ko(StatusCode::NOT_FOUND, session)
         }
     }
 }
