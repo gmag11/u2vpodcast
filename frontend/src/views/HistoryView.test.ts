@@ -31,6 +31,8 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		duration: '00:10:00',
 		image: '',
 		listen: false,
+		position_seconds: 0,
+		listened_at: null,
 		created_at: now,
 		updated_at: now
 	};

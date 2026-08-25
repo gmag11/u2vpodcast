@@ -1,4 +1,4 @@
-import type { Channel, ConfigResponse, Episode, LoginRequestBody, Response, User } from '@/types';
+import type { Channel, ConfigResponse, Episode, EpisodeProgress, LoginRequestBody, Response, User } from '@/types';
 
 export const baseEndpoint: string = '';
 
@@ -103,6 +103,17 @@ export const api = {
 
 	async getAllEpisodes() {
 		return request<Array<Episode>>('/api/1.0/episodes/');
+	},
+
+	async getEpisodeProgress(ytId: string) {
+		return request<EpisodeProgress>(`/api/1.0/episodes/${ytId}/progress/`);
+	},
+
+	async updateEpisodeProgress(ytId: string, body: { position_seconds: number; listened: boolean }) {
+		return request<Episode>(`/api/1.0/episodes/${ytId}/progress/`, {
+			method: 'PUT',
+			body: JSON.stringify(body)
+		});
 	},
 
 	async getConfig() {

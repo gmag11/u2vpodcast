@@ -6,6 +6,17 @@ import { usePlayerStore } from '@/stores/player';
 import { testI18n } from '@/test/i18n';
 import type { Episode } from '@/types';
 
+vi.mock('@/lib/api/client', () => ({
+	api: {
+		updateEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		getEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: false, data: null, user: null, status: false })
+		)
+	}
+}));
+
 class MockAudioElement {
 	src = '';
 	currentTime = 0;
@@ -51,6 +62,8 @@ function episode(id: number, listen = false): Episode {
 		duration: '00:10:00',
 		image: '',
 		listen,
+		position_seconds: 0,
+		listened_at: null,
 		created_at: now,
 		updated_at: now
 	};

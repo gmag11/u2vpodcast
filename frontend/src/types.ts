@@ -36,8 +36,18 @@ export interface Episode {
 	duration: string;
 	image: string;
 	listen: boolean;
+	position_seconds: number;
+	listened_at: string | null;
 	created_at: Date;
 	updated_at: Date;
+}
+
+export interface EpisodeProgress {
+	id: number;
+	yt_id: string;
+	position_seconds: number;
+	listen: boolean;
+	listened_at: string | null;
 }
 
 export interface Response {

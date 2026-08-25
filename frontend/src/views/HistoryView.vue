@@ -4,6 +4,7 @@
 	import { PhArrowLeft, PhRss } from '@phosphor-icons/vue';
 	import { api, baseEndpoint } from '@/lib/api/client';
 	import { useAuthStore } from '@/stores/auth';
+	import { usePlayerStore } from '@/stores/player';
 	import { filterBySearchWords } from '@/lib/utils/list.filter';
 	import type { Episode } from '@/types';
 	import AppHeader from '@/components/AppHeader.vue';
@@ -13,6 +14,7 @@
 	const route = useRoute();
 	const router = useRouter();
 	const auth = useAuthStore();
+	const player = usePlayerStore();
 
 	const episodes = ref<Episode[]>([]);
 	const searchQuery = ref('');
@@ -37,6 +39,9 @@
 		auth.setUser(result.user);
 		if (result.data) {
 			episodes.value = result.data as Array<Episode>;
+			// The list payload carries each episode's playback progress; seed the
+			// player store so resume works without per-episode requests.
+			player.seedProgress(episodes.value);
 		}
 	}
 

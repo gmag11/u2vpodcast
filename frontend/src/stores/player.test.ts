@@ -1,7 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { usePlayerStore } from '@/stores/player';
 import type { Episode } from '@/types';
+import { api } from '@/lib/api/client';
+
+vi.mock('@/lib/api/client', () => ({
+	api: {
+		updateEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		getEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: false, data: null, user: null, status: false })
+		)
+	}
+}));
 
 /**
  * Minimal HTMLAudioElement stand-in. jsdom ships the class but does not
@@ -10,15 +22,28 @@ import type { Episode } from '@/types';
  */
 class MockAudioElement {
 	static instances: MockAudioElement[] = [];
+	static defaultClamp = 0;
 
 	src = '';
-	currentTime = 0;
+	_currentTime = 0;
+	// Simulates a browser that only allows seeking within its buffered prefix:
+	// while `seekClampEnd > 0`, currentTime is clamped to it (like `seekable`).
+	seekClampEnd = MockAudioElement.defaultClamp;
 	duration = 0;
 	volume = 1;
 	muted = false;
 	playbackRate = 1;
 	paused = true;
 	preload = 'metadata';
+
+	get currentTime() {
+		return this._currentTime;
+	}
+
+	set currentTime(v: number) {
+		this._currentTime =
+			this.seekClampEnd > 0 && v > this.seekClampEnd ? this.seekClampEnd : v;
+	}
 
 	private listeners: Record<string, Array<() => void>> = {};
 
@@ -28,13 +53,22 @@ class MockAudioElement {
 
 	play = vi.fn(async () => {
 		this.paused = false;
+		this.emit('play');
+		this.emit('playing');
 	});
 
 	pause = vi.fn(() => {
 		this.paused = true;
+		this.emit('pause');
 	});
 
-	load = vi.fn();
+	load = vi.fn(() => {
+		// a real media element resets the playhead and duration on load() and
+		// reports its metadata once parsed
+		this.currentTime = 0;
+		this.duration = 0;
+		this.emit('loadedmetadata');
+	});
 
 	addEventListener(event: string, listener: () => void) {
 		(this.listeners[event] ??= []).push(listener);
@@ -42,6 +76,10 @@ class MockAudioElement {
 
 	removeEventListener(event: string, listener: () => void) {
 		this.listeners[event] = (this.listeners[event] ?? []).filter((l) => l !== listener);
+	}
+
+	emit(event: string) {
+		(this.listeners[event] ?? []).forEach((listener) => listener());
 	}
 }
 
@@ -62,6 +100,8 @@ function episode(id: number, listen = false): Episode {
 		duration: '00:10:00',
 		image: '',
 		listen,
+		position_seconds: 0,
+		listened_at: null,
 		created_at: now,
 		updated_at: now
 	};
@@ -73,6 +113,7 @@ describe('player store queue', () => {
 		vi.stubGlobal('Audio', AudioClass);
 		MockAudioElement.instances.length = 0;
 		localStorage.clear();
+		vi.clearAllMocks();
 		setActivePinia(createPinia());
 	});
 
@@ -240,5 +281,503 @@ describe('player store queue', () => {
 		expect(el.load).toHaveBeenCalled();
 		expect(el.play).toHaveBeenCalled();
 		expect(player.stopped).toBe(false);
+	});
+});
+
+describe('player store playback progress', () => {
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
+		MockAudioElement.defaultClamp = 0;
+		localStorage.clear();
+		vi.clearAllMocks();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('saves the current position on pause', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.currentTime = 42;
+
+		await player.pause();
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 42,
+			listened: false
+		});
+	});
+
+	it('saves position at most once every 10 seconds', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		await player.play(episode(1));
+		const el = MockAudioElement.instances[0];
+
+		el.currentTime = 11;
+		el.emit('timeupdate');
+		expect(api.updateEpisodeProgress).toHaveBeenCalledTimes(1);
+
+		el.currentTime = 21;
+		el.emit('timeupdate');
+		expect(api.updateEpisodeProgress).toHaveBeenCalledTimes(1);
+
+		vi.advanceTimersByTime(10_000);
+		el.emit('timeupdate');
+		expect(api.updateEpisodeProgress).toHaveBeenCalledTimes(2);
+		expect(api.updateEpisodeProgress).toHaveBeenLastCalledWith('yt1', {
+			position_seconds: 21,
+			listened: false
+		});
+	});
+
+	it('resumes from the stored position between 30s and 95% of the duration', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		ep.position_seconds = 120;
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(120);
+	});
+
+	it('fetches the authoritative progress from the server before playing', async () => {
+		vi.mocked(api.getEpisodeProgress).mockResolvedValueOnce({
+			ok: true,
+			data: { id: 1, yt_id: 'yt1', position_seconds: 300, listen: false, listened_at: null },
+			user: null,
+			status: true
+		} as never);
+		const player = usePlayerStore();
+		// the local copy is stale (never played this session)
+		const ep = episode(1);
+		await player.play(ep);
+
+		expect(api.getEpisodeProgress).toHaveBeenCalledWith('yt1');
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(300);
+		expect(player.currentEpisode?.position_seconds).toBe(300);
+	});
+
+	it('uses the seeded list progress without a per-play request', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		player.seedProgress([{ ...ep, position_seconds: 300 }]);
+
+		await player.play(ep);
+		expect(api.getEpisodeProgress).not.toHaveBeenCalled();
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(300);
+	});
+
+	it('retries the resume seek while the browser clamps it', async () => {
+		MockAudioElement.defaultClamp = 100;
+		try {
+			const player = usePlayerStore();
+			const ep = episode(1);
+			ep.position_seconds = 300;
+			await player.play(ep);
+			const el = MockAudioElement.instances[0];
+			// the browser only allows seeking within its buffered prefix
+			expect(el.currentTime).toBe(100);
+
+			// the buffer grows until it covers the target, unclamping seeks
+			el.seekClampEnd = 600;
+			el.emit('timeupdate');
+			expect(el.currentTime).toBe(300);
+			expect(player.currentEpisode?.position_seconds).toBe(300);
+		} finally {
+			MockAudioElement.defaultClamp = 0;
+		}
+	});
+
+	it('starts from zero when the server progress is not meaningful', async () => {
+		vi.mocked(api.getEpisodeProgress).mockResolvedValueOnce({
+			ok: true,
+			data: { id: 1, yt_id: 'yt1', position_seconds: 20, listen: false, listened_at: null },
+			user: null,
+			status: true
+		} as never);
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('starts from zero when the stored position is not worth resuming', async () => {
+		const player = usePlayerStore();
+		const nearStart = episode(1);
+		nearStart.position_seconds = 20;
+		await player.play(nearStart);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('does not resume positions at or beyond 95% of the duration', async () => {
+		const player = usePlayerStore();
+		const nearEnd = episode(1);
+		nearEnd.position_seconds = 580;
+		await player.play(nearEnd);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('fromStart clears the stored position and skips resume', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		ep.position_seconds = 300;
+		await player.play(ep, undefined, { fromStart: true });
+		const el = MockAudioElement.instances[0];
+
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+
+		el.duration = 600;
+		el.emit('loadedmetadata');
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('marks the episode listened and stores its duration on completion', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+
+		el.emit('ended');
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 600,
+			listened: true
+		});
+		expect(player.currentEpisode?.listen).toBe(true);
+		expect(player.currentEpisode?.listened_at).not.toBeNull();
+		expect(player.currentEpisode?.position_seconds).toBe(600);
+	});
+
+	it('resumes a stopped episode from its last saved position', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		// stream to 420s: the throttled save keeps the in-memory episode in sync
+		el.currentTime = 420;
+		el.emit('timeupdate');
+		expect(player.currentEpisode?.position_seconds).toBe(420);
+
+		player.stop();
+		expect(el.currentTime).toBe(0);
+
+		await player.togglePlay();
+		expect(el.currentTime).toBe(420);
+	});
+
+	it('togglePlay resumes a restored episode from the server progress', async () => {
+		// a stale copy restored from the persisted queue (position 0 locally)
+		const stale = episode(9);
+		localStorage.setItem(
+			'u2vpodcast.up-next.v1',
+			JSON.stringify({ upNext: [], playStack: [], currentEpisode: stale })
+		);
+		vi.mocked(api.getEpisodeProgress).mockResolvedValueOnce({
+			ok: true,
+			data: { id: 9, yt_id: 'yt9', position_seconds: 300, listen: false, listened_at: null },
+			user: null,
+			status: true
+		} as never);
+
+		const player = usePlayerStore();
+		await player.togglePlay();
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.emit('loadedmetadata');
+
+		expect(api.getEpisodeProgress).toHaveBeenCalledWith('yt9');
+		expect(el.currentTime).toBe(300);
+	});
+
+	it('resumes the same episode through play() once the metadata is loaded', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 200;
+		el.emit('timeupdate');
+		player.stop();
+
+		// replaying the same episode re-uses the loaded element: no metadata
+		// event, but the resume applies immediately from the in-memory position
+		await player.play(ep);
+		expect(el.currentTime).toBe(200);
+	});
+
+	it('does not resume a stopped episode without a meaningful position', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 15;
+		el.emit('timeupdate');
+		expect(player.currentEpisode?.position_seconds).toBe(15);
+
+		player.stop();
+		await player.togglePlay();
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('flushes the departing episode position when switching to another episode', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		await player.play(a);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 300;
+		el.emit('timeupdate');
+		expect(player.currentEpisode?.position_seconds).toBe(300);
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		// move the playhead past the last throttled save, then switch sources
+		el.currentTime = 342;
+		await player.play(b);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 342,
+			listened: false
+		});
+	});
+
+	it('stops playing keeps the final position: switching after stop does not overwrite it', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		await player.play(a);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 400;
+		el.emit('timeupdate');
+		player.stop();
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		await player.play(b);
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+	});
+
+	it('does not overwrite the stored resume position with a premature save', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		b.position_seconds = 300;
+		await player.play(a);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 400;
+		el.emit('timeupdate');
+		await player.pause();
+		vi.advanceTimersByTime(15_000);
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		// switching to B arms a resume at 300s; its early `timeupdate` fires
+		// before `loadedmetadata` arrives and must not clobber the stored value
+		await player.play(b);
+		el.duration = 0;
+		el.currentTime = 0.5;
+		el.emit('timeupdate');
+
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt2', {
+			position_seconds: 0.5,
+			listened: false
+		});
+	});
+
+	it('stop sends the final position once and never a trailing zero', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		el.currentTime = 330;
+		el.emit('timeupdate'); // last throttled save
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		el.currentTime = 342;
+		player.stop();
+		// the async `pause` event delivered after the reset must write nothing
+		el.currentTime = 0;
+		el.emit('pause');
+
+		expect(api.updateEpisodeProgress).toHaveBeenCalledTimes(1);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 342,
+			listened: false
+		});
+	});
+
+	it('associates progress by episode id across stale copies', async () => {
+		const player = usePlayerStore();
+		const live = episode(1);
+		await player.play(live);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 300;
+		el.emit('timeupdate');
+		player.stop();
+
+		// a stale copy (never refreshed) still resumes from the recorded value
+		const stale = episode(1);
+		expect(stale.position_seconds).toBe(0);
+		await player.play(stale);
+		expect(player.currentEpisode?.position_seconds).toBe(300);
+		expect(MockAudioElement.instances[0].currentTime).toBe(300);
+	});
+
+	it('episodeWithProgress returns the recorded progress for any copy keyed by id', async () => {
+		const player = usePlayerStore();
+		const live = episode(1);
+		await player.play(live);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 120;
+		el.emit('timeupdate');
+		player.stop();
+
+		const staleCopy = episode(1);
+		const resolved = player.episodeWithProgress(staleCopy);
+		expect(resolved.position_seconds).toBe(120);
+		expect(resolved.listen).toBe(false);
+	});
+
+	it('does not regress the listened mark with a trailing pause after completion', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+		el.currentTime = 600;
+		el.emit('ended'); // completion -> markListened {600,true}, then stop()
+		el.currentTime = 0;
+		el.emit('pause'); // trailing async pause after the stop reset
+
+		// every write keeps the mark listened and never uses the zero playhead
+		const calls = vi.mocked(api.updateEpisodeProgress).mock.calls;
+		expect(calls.length).toBeGreaterThan(0);
+		expect(calls.every(([, body]) => body.listened === true)).toBe(true);
+		expect(calls.every(([, body]) => body.position_seconds === 600)).toBe(true);
+	});
+});
+
+describe('player store keyboard seek', () => {
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
+		MockAudioElement.defaultClamp = 0;
+		localStorage.clear();
+		vi.clearAllMocks();
+		vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	async function loadedEpisode(): Promise<MockAudioElement> {
+		const player = usePlayerStore();
+		await player.play(episode(1));
+		const el = MockAudioElement.instances[0];
+		el.duration = 100;
+		return el;
+	}
+
+	it('ArrowRight seeks 15s forward clamped to the duration', async () => {
+		const el = await loadedEpisode();
+		el.currentTime = 50;
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+		expect(el.currentTime).toBe(65);
+
+		el.currentTime = 95;
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+		expect(el.currentTime).toBe(100);
+	});
+
+	it('ArrowLeft seeks 15s backward clamped to zero', async () => {
+		const el = await loadedEpisode();
+		el.currentTime = 50;
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+		expect(el.currentTime).toBe(35);
+
+		el.currentTime = 5;
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+		expect(el.currentTime).toBe(0);
+	});
+
+	it('does nothing when no episode is loaded', () => {
+		usePlayerStore();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+		expect(MockAudioElement.instances).toHaveLength(0);
+	});
+
+	it('does nothing when the document is not focused', async () => {
+		vi.mocked(document.hasFocus).mockReturnValue(false);
+		const el = await loadedEpisode();
+		el.currentTime = 50;
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+		expect(el.currentTime).toBe(50);
+	});
+
+	it('does not seek when the focus is inside an input', async () => {
+		const el = await loadedEpisode();
+		el.currentTime = 50;
+		const input = document.createElement('input');
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+		expect(el.currentTime).toBe(50);
+	});
+
+	it('does not seek when the focus is inside a slider', async () => {
+		const el = await loadedEpisode();
+		el.currentTime = 50;
+		const slider = document.createElement('div');
+		slider.setAttribute('role', 'slider');
+		slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+		expect(el.currentTime).toBe(50);
 	});
 });

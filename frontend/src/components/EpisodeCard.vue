@@ -1,9 +1,10 @@
 <script setup lang="ts">
 	import { computed } from 'vue';
 	import { useI18n } from 'vue-i18n';
-	import { PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
+	import { PhCheckCircle, PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
 	import { usePlayerStore } from '@/stores/player';
 	import type { Episode } from '@/types';
+	import { toHHMMSS } from '@/lib/utils/formatter';
 
 	const props = withDefaults(
 		defineProps<{
@@ -25,6 +26,25 @@
 	const durationLabel = computed(() =>
 		isCurrent.value ? player.durationLabel : props.episode.duration
 	);
+
+	// Progress indicators reflect the shared player's per-id progress, so a
+	// card updates live without a reload no matter which copy of the episode
+	// is rendered (playback-progress).
+	const liveEpisode = computed(() =>
+		player.episodeWithProgress(
+			isCurrent.value && player.currentEpisode ? player.currentEpisode : props.episode
+		)
+	);
+	const hasPlayedMark = computed(() => liveEpisode.value.listen);
+	const resumeSeconds = computed(() =>
+		!liveEpisode.value.listen && liveEpisode.value.position_seconds > 30
+			? liveEpisode.value.position_seconds
+			: 0
+	);
+	const resumeLabel = computed(() =>
+		resumeSeconds.value > 0 ? toHHMMSS(resumeSeconds.value) : ''
+	);
+	const canStartOver = computed(() => isCurrent.value && resumeSeconds.value > 0);
 
 	function formatDate(value: Date | string) {
 		return d(new Date(value), 'short');
@@ -118,6 +138,29 @@
 				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>
+				<div
+					v-if="hasPlayedMark || resumeSeconds > 0"
+					class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1"
+				>
+					<span
+						v-if="hasPlayedMark"
+						class="inline-flex items-center gap-1 text-xs font-medium text-accent-500"
+					>
+						<PhCheckCircle class="h-4 w-4" weight="fill" />
+						{{ $t('card.listened') }}
+					</span>
+					<span v-else class="text-xs text-text-muted">
+						{{ $t('card.continueAt', { time: resumeLabel }) }}
+					</span>
+					<button
+						v-if="canStartOver"
+						type="button"
+						class="inline-flex items-center text-xs text-accent-500 transition-colors hover:underline"
+						@click="player.play(props.episode, props.list, { fromStart: true })"
+					>
+						{{ $t('card.startOver') }}
+					</button>
+				</div>
 				<div class="mt-1 flex w-full items-center justify-between gap-2">
 					<a
 						class="inline-flex w-max items-center gap-1.5 text-sm text-accent-500 hover:underline"

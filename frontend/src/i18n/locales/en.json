@@ -81,7 +81,10 @@
 		"delete": "Delete",
 		"deleteLabel": "Delete channel and audio files",
 		"syncTooltip": "Updated {age} ago. Status: {status}",
-		"lastEpisodeTooltip": "Last episode {age} ago"
+		"lastEpisodeTooltip": "Last episode {age} ago",
+		"listened": "Listened",
+		"continueAt": "Continue at {time}",
+		"startOver": "Start over"
 	},
 	"status": {
 		"ok": "Ok",
