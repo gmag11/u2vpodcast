@@ -460,6 +460,53 @@ describe('player store playback progress', () => {
 		expect(el.currentTime).toBe(0);
 	});
 
+	it('advance resumes the next queued episode from its saved position', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		b.position_seconds = 180;
+		await player.play(a, [a, b]);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		await player.advance();
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(el.currentTime).toBe(180);
+	});
+
+	it('skipNext resumes the next queued episode from its saved position', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		b.position_seconds = 200;
+		await player.play(a, [a, b]);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		await player.skipNext(false);
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(el.currentTime).toBe(200);
+	});
+
+	it('playPrevious resumes the history episode from its saved position', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		await player.play(a, [a, b]);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 240;
+		el.emit('timeupdate'); // record a's position at 240
+
+		// advancing pushes a onto the history and plays b
+		await player.skipNext(false);
+		expect(player.currentEpisode?.id).toBe(2);
+
+		await player.playPrevious();
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(el.currentTime).toBe(240);
+	});
+
 	it('marks the episode listened and stores its duration on completion', async () => {
 		const player = usePlayerStore();
 		const ep = episode(1);
@@ -536,6 +583,57 @@ describe('player store playback progress', () => {
 		// event, but the resume applies immediately from the in-memory position
 		await player.play(ep);
 		expect(el.currentTime).toBe(200);
+	});
+
+	it('start over resets the playhead of the already-loaded current episode', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 120;
+		el.emit('timeupdate');
+
+		await player.play(ep, undefined, { fromStart: true });
+		expect(el.currentTime).toBe(0);
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+	});
+
+	it('skipNext with markCurrent keeps the duration position despite the flush', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		await player.play(a, [a, b]);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 300;
+		el.emit('timeupdate');
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		await player.skipNext(true);
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.playStack[0].listen).toBe(true);
+		expect(player.playStack[0].position_seconds).toBe(600);
+		const aCalls = vi.mocked(api.updateEpisodeProgress).mock.calls.filter(([yt]) => yt === 'yt1');
+		expect(aCalls.at(-1)![1]).toEqual({ position_seconds: 600, listened: true });
+	});
+
+	it('does not keep saving the position while the audio is stopped', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 50;
+		el.emit('timeupdate');
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		player.stop();
+		// late timeupdate events after a stop must not persist anything
+		el.currentTime = 15;
+		el.emit('timeupdate');
+		el.emit('timeupdate');
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalled();
 	});
 
 	it('does not resume a stopped episode without a meaningful position', async () => {
@@ -623,6 +721,44 @@ describe('player store playback progress', () => {
 			position_seconds: 0.5,
 			listened: false
 		});
+	});
+
+	it('persists the resume target when pausing inside the retry window', async () => {
+		MockAudioElement.defaultClamp = 100;
+		try {
+			const player = usePlayerStore();
+			const ep = episode(1);
+			ep.position_seconds = 300;
+			await player.play(ep);
+			const el = MockAudioElement.instances[0];
+			el.duration = 600;
+			// the playhead is still clamped below the target (resume pending)
+			el.currentTime = 32;
+			el.emit('timeupdate');
+
+			await player.pause();
+			expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+				position_seconds: 300,
+				listened: false
+			});
+		} finally {
+			MockAudioElement.defaultClamp = 0;
+		}
+	});
+
+	it('marks a completed episode with the parsed duration when media duration is unavailable', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1); // duration '00:10:00'
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 0; // media never exposed a usable duration
+
+		el.emit('ended');
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 600,
+			listened: true
+		});
+		expect(player.currentEpisode?.position_seconds).toBe(600);
 	});
 
 	it('stop sends the final position once and never a trailing zero', async () => {

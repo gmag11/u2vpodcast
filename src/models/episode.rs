@@ -1,4 +1,5 @@
 use super::Error;
+use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -92,6 +93,7 @@ impl Episode {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(pool: &SqlitePool, channel_id: i64, title: &str,
             description: &str, yt_id: &str, webpage_url: &str,
             published_at: &DateTime<Utc>, duration: &str, image: &str,
@@ -278,7 +280,10 @@ impl Episode {
 
     /// Persists a single playback-progress write: the position (always) plus
     /// the listened mark when `listened` is true (clearing it when false).
-    /// Returns the refreshed episode row, or an error when no episode matches.
+    /// `listened_at` only changes on the false->true transition: re-saving an
+    /// already-listened episode keeps the original completion timestamp, so it
+    /// never drifts with routine position saves. Returns the refreshed episode
+    /// row, or an error when no episode matches.
     pub async fn update_progress(
         pool: &SqlitePool,
         id: i64,
@@ -289,7 +294,8 @@ impl Episode {
         let listened_at = if listened { Some(Utc::now()) } else { None };
         let updated_at = Utc::now();
         let sql = "UPDATE episodes SET position_seconds = $2, listen = $3,
-                   listened_at = $4, updated_at = $5
+                   listened_at = CASE WHEN $3 THEN COALESCE(listened_at, $4) ELSE NULL END,
+                   updated_at = $5
                    WHERE id = $1 RETURNING *;";
         match query(sql)
             .bind(id)
@@ -302,7 +308,10 @@ impl Episode {
             .await
         {
             Ok(Some(episode)) => Ok(episode),
-            Ok(None) => Err(Error::default("episode not found")),
+            Ok(None) => Err(Error::new_with_status_code(
+                "episode not found",
+                StatusCode::NOT_FOUND,
+            )),
             Err(e) => Err(e.into()),
         }
     }
@@ -323,7 +332,9 @@ impl Episode {
             .map(|row: SqliteRow| row.get::<i64, _>("id"))
             .fetch_optional(pool)
             .await?
-            .ok_or_else(|| Error::default("episode not found"))?;
+            .ok_or_else(|| {
+                Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND)
+            })?;
         Self::update_progress(pool, id, position_seconds, listened).await
     }
 
@@ -348,7 +359,9 @@ impl Episode {
             })
             .fetch_optional(pool)
             .await?
-            .ok_or_else(|| Error::default("episode not found"))
+            .ok_or_else(|| {
+                Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND)
+            })
     }
 
     pub async fn remove(pool: &SqlitePool, id: i64) -> Result<Episode, Error> {
@@ -568,7 +581,39 @@ mod episode_update_tests {
         let pool = memory_pool().await;
         let result = Episode::update_progress_by_yt_id(&pool, "unknown_yt_id_zzz", 10, false)
             .await;
-        assert!(result.is_err(), "unknown episode must produce an error");
+        let err = result.expect_err("unknown episode must produce an error");
+        assert_eq!(
+            err.status_code(),
+            StatusCode::NOT_FOUND,
+            "a missing episode must be a 404, not a masked 500"
+        );
+    }
+
+    #[tokio::test]
+    async fn listened_at_does_not_drift_on_repeated_marked_saves() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "hhh888");
+        let _saved = Episode::create(&pool, &created).await.expect("create");
+
+        let first = Episode::update_progress_by_yt_id(&pool, "hhh888", 100, true)
+            .await
+            .expect("mark must succeed");
+        let first_listened_at = first.listened_at;
+        assert!(first_listened_at.is_some(), "must record the completion time");
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        // A routine save of the same listened episode (frontend re-sends
+        // listened=true while replaying) must keep the original timestamp.
+        let again = Episode::update_progress_by_yt_id(&pool, "hhh888", 200, true)
+            .await
+            .expect("re-save must succeed");
+        assert_eq!(
+            again.listened_at.map(|t| t.timestamp()),
+            first_listened_at.map(|t| t.timestamp()),
+            "listened_at must not drift on re-saves of a listened episode"
+        );
     }
 
     #[tokio::test]

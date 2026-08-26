@@ -11,20 +11,31 @@ const PLAY_STACK_LIMIT = 50;
 // How often the position is persisted while playing (playback-progress).
 const SAVE_INTERVAL_MS = 10_000;
 // Resume threshold: below 30s the episode starts from the beginning.
-const RESUME_POSITION_S = 30;
+// Exported so the episode cards reuse the same resume gesture boundary.
+export const RESUME_POSITION_S = 30;
 // Positions within 95% of the duration count as finished (no resume).
 const RESUME_DURATION_RATIO = 0.95;
 // Keyboard seek step (playback-progress shortcuts).
 const KEYBOARD_SEEK_STEP = 15;
 
-// Flip to `false` to silence the playback-progress debug traces. Console:
-// DevTools > Console (F12), the `[player]` prefix filters them.
-const DEBUG_PLAYER = true;
+// Playback-progress debug traces only in development builds; production
+// carries no `[player]` console noise. Console: DevTools > Console (F12).
+const DEBUG_PLAYER = import.meta.env.DEV;
 
 function trace(...args: unknown[]) {
 	if (DEBUG_PLAYER) {
 		console.debug('[player]', ...args);
 	}
+}
+
+// Parses the stored duration string (`H:MM:SS`, `M:SS` or plain seconds) into
+// seconds. Used only as a fallback when the media element has no usable
+// duration, so a completed episode never records a zero position.
+function parseDurationSeconds(raw: string | null | undefined): number | null {
+	if (raw == null) return null;
+	const parts = raw.split(':').map((p) => Number(p));
+	if (parts.length === 0 || parts.some((p) => !isFinite(p) || p < 0)) return null;
+	return parts.reduce((acc, p) => acc * 60 + p, 0);
 }
 
 export const usePlayerStore = defineStore('player', () => {
@@ -177,6 +188,9 @@ export const usePlayerStore = defineStore('player', () => {
 	function onTimeUpdate() {
 		if (audio) currentTime.value = audio.currentTime;
 		tryResumeSeek();
+		// Periodic saves only make sense while actually playing: a stopped or
+		// paused element must not keep persisting positions every 10s.
+		if (!audio || audio.paused || stopped.value) return;
 		const now = Date.now();
 		if (now - lastSaveAt >= SAVE_INTERVAL_MS) {
 			lastSaveAt = now;
@@ -312,13 +326,21 @@ export const usePlayerStore = defineStore('player', () => {
 		// asynchronously delivered `pause`, pagehide after stop) must not
 		// overwrite the saved position with the reset zero playhead.
 		if (stopped.value) return;
-		// While a resume is pending for this episode its stored position is
-		// still authoritative: premature saves (e.g. the playhead before
-		// `loadedmetadata`) must not overwrite it.
-		if (resumePending && resumeEpisodeId === episode.id) return;
+		// While a resume is pending for this episode its stored position is the
+		// resume target and remains authoritative: premature saves (the playhead
+		// before the seek lands) must not overwrite it with the buffered prefix.
+		// Persisting the target itself keeps a pause/tab-close inside the retry
+		// window from losing the final position.
+		if (resumePending && resumeEpisodeId === episode.id) {
+			position = position ?? resumeTarget ?? el.currentTime;
+		}
 		const pos = Math.floor(position ?? el.currentTime);
 		const effective = effectiveProgress(episode);
 		const mark = listened ?? effective.listen;
+		// Never regress the position of a listened episode: a late flush (e.g.
+		// after `skipNext(markCurrent)` finalizes it at its duration) must not
+		// overwrite the completion position with the live playhead.
+		if (mark && pos < episode.position_seconds) return;
 		if (lastSavedEpisodeId === episode.id && pos === lastSavedPosition && !mark) return;
 		lastSavedPosition = pos;
 		lastSavedEpisodeId = episode.id;
@@ -346,7 +368,7 @@ export const usePlayerStore = defineStore('player', () => {
 		const position = Math.floor(
 			audio && isFinite(audio.duration) && audio.duration > 0
 				? audio.duration
-				: (Number(episode.duration) || 0)
+				: (parseDurationSeconds(episode.duration) ?? 0)
 		);
 		const listenedAt = new Date().toISOString();
 		episode.listen = true;
@@ -405,9 +427,44 @@ export const usePlayerStore = defineStore('player', () => {
 			const meta = waitForMetadata(el);
 			el.src = mediaUrl(episode);
 			el.load();
+			// A freshly loaded source starts at elapsed 0; clear the store
+			// playhead so consumers never see the previous episode's position.
+			currentTime.value = 0;
 			await meta;
 		}
 		await seekResumeOnPlay(el);
+	}
+
+	// Arms the resume decision for an incoming episode before its source loads:
+	// the per-id progress map when the session already knows the episode,
+	// otherwise a one-shot server lookup. `seekResumeOnPlay` (reached inside
+	// `loadEpisode`) consumes the pending flag. Shared by `play()`, the
+	// restored-queue restart (`togglePlay`) and queue navigation (`advance()`,
+	// `skipNext()`, `playPrevious()`) so that every way of landing on an
+	// episode respects its saved start time (playback-progress).
+	async function armResume(episode: Episode, label: string) {
+		const known = progressByEpisode.value[episode.id] != null;
+		if (!known) {
+			const result = await api.getEpisodeProgress(episode.yt_id).catch(() => null);
+			const fetched = result?.ok ? result.data : result;
+			trace(`${label}: server progress`, episode.yt_id, fetched);
+			if (result?.ok && result.data) {
+				recordProgress(episode, {
+					position_seconds: result.data.position_seconds,
+					listen: result.data.listen,
+					listened_at: result.data.listened_at ?? null
+				});
+			}
+		}
+		const stored = effectiveProgress(episode);
+		resumePending = stored.position_seconds > RESUME_POSITION_S;
+		resumeEpisodeId = resumePending ? episode.id : null;
+		trace(`${label}: resume decision`, {
+			yt_id: episode.yt_id,
+			source: known ? 'list' : 'server',
+			effective_position_seconds: stored.position_seconds,
+			resumePending
+		});
 	}
 
 	async function play(episode: Episode, list?: Episode[], opts?: { fromStart?: boolean }) {
@@ -420,38 +477,20 @@ export const usePlayerStore = defineStore('player', () => {
 		// single-episode play (e.g. replaying something already queued) does
 		// not wipe the up-next flow.
 		if (fromStart) {
-			// "start over": no resume, the stored position is cleared later.
-			resumePending = false;
-			resumeEpisodeId = null;
-		} else {
-			// The episode list already carries each episode's progress and seeds
-			// the store, so the resume uses those per-id values. Only episodes
-			// unknown to this session (e.g. a restored-queue entry not present in
-			// any fetched list) are looked up individually (playback-progress).
-			const known = progressByEpisode.value[episode.id] != null;
-			let fetched: unknown = undefined;
-			if (!known) {
-				const result = await api.getEpisodeProgress(episode.yt_id).catch(() => null);
-				fetched = result?.ok ? result.data : result;
-				trace('play: server progress', episode.yt_id, fetched);
-				if (result?.ok && result.data) {
-					const p = result.data;
-					recordProgress(episode, {
-						position_seconds: p.position_seconds,
-						listen: p.listen,
-						listened_at: p.listened_at ?? null
-					});
-				}
+			// "start over": no resume. finishResume also stops the retry loop if
+			// a previous resume was still pending; the live playhead is reset so
+			// replaying the already-loaded current episode really restarts.
+			finishResume();
+			if (audio) {
+				audio.currentTime = 0;
+				currentTime.value = 0;
 			}
-			const stored = effectiveProgress(episode);
-			resumePending = stored.position_seconds > RESUME_POSITION_S;
-			resumeEpisodeId = resumePending ? episode.id : null;
-			trace('play: resume decision', {
-				yt_id: episode.yt_id,
-				source: known ? 'list' : fetched,
-				effective_position_seconds: stored.position_seconds,
-				resumePending
-			});
+		} else {
+			// The episode list already seeded the per-id progress; the resume
+			// decision is shared with every other navigation path (also covers
+			// episodes unknown to this session via a one-shot lookup, e.g. a
+			// restored-queue entry not present in any fetched list).
+			await armResume(episode, 'play');
 		}
 		await loadEpisode(episode);
 		if (fromStart) {
@@ -466,6 +505,9 @@ export const usePlayerStore = defineStore('player', () => {
 		const next = upNext.value.shift();
 		if (next) {
 			if (finished) pushToPlayStack(finished);
+			// The next queued episode resumes from its saved position when it
+			// has one, just like a fresh `play()` (playback-progress).
+			await armResume(next, 'advance');
 			await loadEpisode(next);
 			persistQueue();
 		} else {
@@ -485,6 +527,7 @@ export const usePlayerStore = defineStore('player', () => {
 		const next = upNext.value.shift();
 		if (next) {
 			if (finished) pushToPlayStack(finished);
+			await armResume(next, 'skipNext');
 			await loadEpisode(next);
 			persistQueue();
 		} else {
@@ -504,6 +547,9 @@ export const usePlayerStore = defineStore('player', () => {
 		const previous = playStack.value.pop();
 		if (previous) {
 			persistQueue();
+			// Returning to a previously played episode resumes it, matching the
+			// design promise for the dual previous control (playback-progress).
+			await armResume(previous, 'playPrevious');
 			await loadEpisode(previous);
 		}
 	}
@@ -537,33 +583,10 @@ export const usePlayerStore = defineStore('player', () => {
 			}
 			if (wasStopped) {
 				// Replaying a stopped episode follows the same resume policy as
-				// a fresh `play()`. Normally the episode list seeded the progress;
-				// only unknown episodes (restored-queue entries) are looked up
-				// individually (playback-progress).
+				// a fresh `play()` (playback-progress).
 				const episode = currentEpisode.value;
 				if (episode) {
-					const known = progressByEpisode.value[episode.id] != null;
-					let fetched: unknown = undefined;
-					if (!known) {
-						const result = await api.getEpisodeProgress(episode.yt_id).catch(() => null);
-						fetched = result?.ok ? result.data : result;
-						trace('togglePlay: server progress', episode.yt_id, fetched);
-						if (result?.ok && result.data) {
-							recordProgress(episode, {
-								position_seconds: result.data.position_seconds,
-								listen: result.data.listen,
-								listened_at: result.data.listened_at ?? null
-							});
-						}
-					}
-					resumePending = effectiveProgress(episode).position_seconds > RESUME_POSITION_S;
-					resumeEpisodeId = resumePending ? episode.id : null;
-					trace('togglePlay: resume decision', {
-						yt_id: episode.yt_id,
-						source: known ? 'list' : fetched,
-						effective_position_seconds: effectiveProgress(episode).position_seconds,
-						resumePending
-					});
+					await armResume(episode, 'togglePlay');
 				}
 			}
 			// Play and, when a resume is pending, retry the seek as the buffer

@@ -110,7 +110,8 @@ export const api = {
 	},
 
 	async updateEpisodeProgress(ytId: string, body: { position_seconds: number; listened: boolean }) {
-		return request<Episode>(`/api/1.0/episodes/${ytId}/progress/`, {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/episodes/${ytId}/progress/`, {
 			method: 'PUT',
 			body: JSON.stringify(body)
 		});

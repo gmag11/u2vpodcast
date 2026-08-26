@@ -3,7 +3,6 @@ use actix_web::{
     HttpResponse,
     get,
     put,
-    http::StatusCode,
     web::{
         Path,
         Data,
@@ -91,8 +90,10 @@ async fn read_progress(
             CResponse::ok(session, progress)
         },
         Err(e) => {
+            // A missing episode is 404; any other failure (e.g. a real
+            // database error) surfaces its own status instead of being masked.
             error!("Error reading progress: {e}");
-            CResponse::ko(StatusCode::NOT_FOUND, session)
+            CResponse::ko(e.status_code(), session)
         }
     }
 }
@@ -106,10 +107,12 @@ async fn update_progress(
 ) -> actix_web::HttpResponse {
     info!("update_progress");
     let body = body.into_inner();
+    // A position can never be negative: clamp rather than storing junk.
+    let position_seconds = body.position_seconds.max(0);
     match Episode::update_progress_by_yt_id(
         &data.pool,
         &yt_id.into_inner(),
-        body.position_seconds,
+        position_seconds,
         body.listened,
     ).await{
         // The request is fire-and-forget: the 204 status alone confirms the
@@ -117,7 +120,7 @@ async fn update_progress(
         Ok(_) => HttpResponse::NoContent().finish(),
         Err(e) => {
             error!("Error updating progress: {e}");
-            CResponse::ko(StatusCode::NOT_FOUND, session)
+            CResponse::ko(e.status_code(), session)
         }
     }
 }

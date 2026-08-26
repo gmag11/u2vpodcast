@@ -2,7 +2,7 @@
 	import { computed } from 'vue';
 	import { useI18n } from 'vue-i18n';
 	import { PhCheckCircle, PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
-	import { usePlayerStore } from '@/stores/player';
+	import { usePlayerStore, RESUME_POSITION_S } from '@/stores/player';
 	import type { Episode } from '@/types';
 	import { toHHMMSS } from '@/lib/utils/formatter';
 
@@ -37,7 +37,7 @@
 	);
 	const hasPlayedMark = computed(() => liveEpisode.value.listen);
 	const resumeSeconds = computed(() =>
-		!liveEpisode.value.listen && liveEpisode.value.position_seconds > 30
+		!liveEpisode.value.listen && liveEpisode.value.position_seconds > RESUME_POSITION_S
 			? liveEpisode.value.position_seconds
 			: 0
 	);
