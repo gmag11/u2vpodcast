@@ -59,7 +59,7 @@
 ## 11. Verification
 
 - [x] 11.1 `cargo test`, `pnpm test`, `pnpm build` all pass.
-- [ ] 11.2 Manual: add episodes from cards; reorder with up/down; play the playlist and confirm auto-advance walks it while each finished episode leaves the playlist; long-press next removes + marks; short-press keeps it; unmark re-appends at the end; empty state renders.
+- [x] 11.2 Manual: add episodes from cards; reorder with up/down; play the playlist and confirm auto-advance walks it while each finished episode leaves the playlist; long-press next removes + marks; short-press keeps it; unmark re-appends at the end; empty state renders.
 
 ## 12. Rollback note
 
