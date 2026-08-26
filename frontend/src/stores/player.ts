@@ -29,9 +29,9 @@ function trace(...args: unknown[]) {
 }
 
 // Parses the stored duration string (`H:MM:SS`, `M:SS` or plain seconds) into
-// seconds. Used only as a fallback when the media element has no usable
-// duration, so a completed episode never records a zero position.
-function parseDurationSeconds(raw: string | null | undefined): number | null {
+// seconds. Used as a fallback when the media element has no usable duration
+// and by the episode cards to size their read-only progress bar.
+export function parseDurationSeconds(raw: string | null | undefined): number | null {
 	if (raw == null) return null;
 	const parts = raw.split(':').map((p) => Number(p));
 	if (parts.length === 0 || parts.some((p) => !isFinite(p) || p < 0)) return null;
@@ -74,6 +74,11 @@ export const usePlayerStore = defineStore('player', () => {
 	let resumeTarget: number | null = null;
 	let resumeDeadline = 0;
 	let resumeTimer: ReturnType<typeof setInterval> | null = null;
+	// Id of the episode just finalized at its duration (completion / long-press
+	// skip). While set, a departing-episode flush must not regress that
+	// completion position; it is cleared as soon as playback restarts on any
+	// episode, so live re-listens save normally again.
+	let finalizedEpisodeId: number | null = null;
 
 	function recordProgress(episode: Episode, progress: { position_seconds: number; listen: boolean; listened_at: string | null }) {
 		episode.position_seconds = progress.position_seconds;
@@ -337,10 +342,12 @@ export const usePlayerStore = defineStore('player', () => {
 		const pos = Math.floor(position ?? el.currentTime);
 		const effective = effectiveProgress(episode);
 		const mark = listened ?? effective.listen;
-		// Never regress the position of a listened episode: a late flush (e.g.
-		// after `skipNext(markCurrent)` finalizes it at its duration) must not
-		// overwrite the completion position with the live playhead.
-		if (mark && pos < episode.position_seconds) return;
+		// Never regress the position of a *just-finalized* listened episode: a late
+		// flush (e.g. after `skipNext(markCurrent)` finalizes it at its
+		// duration) must not overwrite the completion position with the live
+		// playhead. Once playback restarts on the episode the marker is cleared
+		// and live re-listens persist normally again.
+		if (mark && pos < episode.position_seconds && finalizedEpisodeId === episode.id) return;
 		if (lastSavedEpisodeId === episode.id && pos === lastSavedPosition && !mark) return;
 		lastSavedPosition = pos;
 		lastSavedEpisodeId = episode.id;
@@ -374,6 +381,9 @@ export const usePlayerStore = defineStore('player', () => {
 		episode.listen = true;
 		episode.listened_at = listenedAt;
 		episode.position_seconds = position;
+		// Finalize: until the user plays this episode again, no stale flush is
+		// allowed to regress the completion position.
+		finalizedEpisodeId = episode.id;
 		currentEpisode.value = { ...episode };
 		lastSavedPosition = position;
 		lastSavedEpisodeId = episode.id;
@@ -420,6 +430,9 @@ export const usePlayerStore = defineStore('player', () => {
 		}
 		currentEpisode.value = episode;
 		stopped.value = false;
+		// Playback is (re)starting on this episode: any previous finalize no
+		// longer protects its completion position from live saves.
+		finalizedEpisodeId = null;
 		const reloading = !isSame || el.src === '';
 		if (reloading) {
 			// Wait for the metadata before playback starts so the resume has the
@@ -511,7 +524,9 @@ export const usePlayerStore = defineStore('player', () => {
 			await loadEpisode(next);
 			persistQueue();
 		} else {
-			stop();
+			// End of the queue: halt and keep this episode (it was just
+			// completed), without the public stop's reset behavior.
+			haltPlayback();
 			upNext.value = [];
 			persistQueue();
 		}
@@ -570,6 +585,9 @@ export const usePlayerStore = defineStore('player', () => {
 		if (el.paused) {
 			const wasStopped = stopped.value;
 			stopped.value = false;
+			// Playback is restarting: a previous finalize no longer protects
+			// the episode's completion position from live saves.
+			finalizedEpisodeId = null;
 			// After a reload/restore the shared element may have been created
 			// with an empty source: (re)load the current episode before playing.
 			const reloading = !el.src || el.src === '';
@@ -601,7 +619,9 @@ export const usePlayerStore = defineStore('player', () => {
 		if (audio) audio.pause();
 	}
 
-	function stop() {
+	// Halts playback and keeps the saved position (no reset). Used by the
+	// internal end-of-queue stop and the session-teardown stop.
+	function haltPlayback() {
 		// Flush the final position before the element is reset to zero.
 		persistProgress();
 		finishResume();
@@ -612,6 +632,60 @@ export const usePlayerStore = defineStore('player', () => {
 			audio.pause();
 			audio.currentTime = 0;
 		}
+	}
+
+	// Resets the saved start point of an episode to 0, keeping its listened
+	// mark unchanged. A user gesture: bypasses the "never regress a listened
+	// position" rule and always writes.
+	function resetPosition(episode: Episode) {
+		const recorded = effectiveProgress(episode);
+		if (recorded.position_seconds === 0) return; // already at the start
+		finalizedEpisodeId = null;
+		lastSavedPosition = 0;
+		lastSavedEpisodeId = episode.id;
+		recordProgress(episode, {
+			position_seconds: 0,
+			listen: recorded.listen,
+			listened_at: recorded.listened_at ?? null
+		});
+		trace('reset position to zero', episode.yt_id);
+		api
+			.updateEpisodeProgress(episode.yt_id, {
+				position_seconds: 0,
+				listened: recorded.listen
+			})
+			.catch((err) => {
+				console.error('Failed to reset playback progress', err);
+			});
+	}
+
+	// Public stop control. Callers pass the episode the button belongs to:
+	// - an episode that is NOT the current one is not reproducing, so Stop
+	//   resets its saved position directly (any stopped episode, not just the
+	//   last played one);
+	// - the current episode: if it is reproducing, halt and keep its position;
+	//   otherwise (already stopped, or paused) reset its saved start point to 0.
+	function stop(target?: Episode) {
+		const targetEpisode = target ?? currentEpisode.value;
+		if (!targetEpisode) return;
+		if (target && currentEpisode.value?.id !== targetEpisode.id) {
+			resetPosition(targetEpisode);
+			return;
+		}
+		const el = audio;
+		const reproducing = !stopped.value && el != null && !el.paused;
+		if (reproducing) {
+			haltPlayback();
+			return;
+		}
+		stopped.value = true;
+		playing.value = false;
+		currentTime.value = 0;
+		if (el) {
+			el.pause();
+			el.currentTime = 0;
+		}
+		resetPosition(targetEpisode);
 	}
 
 	function seek(seconds: number) {
@@ -730,6 +804,7 @@ export const usePlayerStore = defineStore('player', () => {
 		togglePlay,
 		pause,
 		stop,
+		halt: haltPlayback,
 		seek,
 		seekRelative,
 		episodeWithProgress,

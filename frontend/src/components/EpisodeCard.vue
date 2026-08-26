@@ -1,8 +1,8 @@
 <script setup lang="ts">
 	import { computed } from 'vue';
 	import { useI18n } from 'vue-i18n';
-	import { PhCheckCircle, PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
-	import { usePlayerStore, RESUME_POSITION_S } from '@/stores/player';
+	import { PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
+	import { usePlayerStore, RESUME_POSITION_S, parseDurationSeconds } from '@/stores/player';
 	import type { Episode } from '@/types';
 	import { toHHMMSS } from '@/lib/utils/formatter';
 
@@ -46,6 +46,20 @@
 	);
 	const canStartOver = computed(() => isCurrent.value && resumeSeconds.value > 0);
 
+	// Fraction (0-100) of the saved playback position against the published
+	// duration, used by the read-only progress strip. The current episode's
+	// strip tracks the live playhead instead, so it evolves during playback
+	// (playback-progress).
+	const savedProgress = computed(() => {
+		const total = parseDurationSeconds(props.episode.duration);
+		if (!total || total <= 0) return 0;
+		const pos = liveEpisode.value.position_seconds;
+		return Math.min(Math.max((pos / total) * 100, 0), 100);
+	});
+	const progressRatio = computed(() =>
+		isCurrent.value && !player.stopped ? player.progress : savedProgress.value
+	);
+
 	function formatDate(value: Date | string) {
 		return d(new Date(value), 'short');
 	}
@@ -53,9 +67,21 @@
 
 <template>
 	<article
-		class="flex flex-col gap-4 rounded-xl border border-outline bg-surface-card shadow-card"
+		class="relative flex flex-col gap-4 overflow-hidden rounded-xl border border-outline bg-surface-card shadow-card"
 		:class="[isCurrent ? 'border-accent-500/60' : '', compact ? 'p-4' : 'p-5']"
 	>
+		<!-- Played mark: the card's top-right corner is tinted green -->
+		<span
+			v-if="hasPlayedMark"
+			class="absolute right-0 top-0"
+			data-testid="listened-mark"
+			role="img"
+			:aria-label="$t('card.listened')"
+		>
+			<svg class="h-7 w-7 text-success" viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M0 0 L24 0 L24 24 Z" fill="currentColor" />
+			</svg>
+		</span>
 		<div class="flex flex-1 flex-col gap-5 sm:flex-row sm:items-start">
 			<div class="flex items-start gap-3 sm:flex-col sm:gap-3">
 				<div
@@ -86,9 +112,9 @@
 						<button
 							type="button"
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-							aria-label="$t('player.stop')"
-							:disabled="!isCurrent"
-							@click="player.stop()"
+							:aria-label="$t('player.stop')"
+							:disabled="isCurrent && player.loading"
+							@click="player.stop(props.episode)"
 						>
 							<PhStop class="h-4 w-4" weight="fill" />
 						</button>
@@ -111,9 +137,9 @@
 					<button
 						type="button"
 						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-						aria-label="$t('player.stop')"
-						:disabled="!isCurrent"
-						@click="player.stop()"
+						:aria-label="$t('player.stop')"
+						:disabled="isCurrent && player.loading"
+						@click="player.stop(props.episode)"
 					>
 						<PhStop class="h-4 w-4" weight="fill" />
 					</button>
@@ -139,17 +165,10 @@
 					{{ props.episode.description }}
 				</p>
 				<div
-					v-if="hasPlayedMark || resumeSeconds > 0"
+					v-if="resumeSeconds > 0"
 					class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1"
 				>
-					<span
-						v-if="hasPlayedMark"
-						class="inline-flex items-center gap-1 text-xs font-medium text-accent-500"
-					>
-						<PhCheckCircle class="h-4 w-4" weight="fill" />
-						{{ $t('card.listened') }}
-					</span>
-					<span v-else class="text-xs text-text-muted">
+					<span class="text-xs text-text-muted">
 						{{ $t('card.continueAt', { time: resumeLabel }) }}
 					</span>
 					<button
@@ -176,6 +195,17 @@
 					</time>
 				</div>
 			</div>
+		</div>
+
+		<!-- Read-only progress strip: reflects the saved playback point (or the
+		     live playhead for the current episode). Never interactive. -->
+		<div
+			v-if="progressRatio > 0"
+			class="absolute inset-x-0 bottom-0 h-1 bg-surface-input"
+			aria-hidden="true"
+			data-testid="episode-progress"
+		>
+			<div class="h-full bg-success" :style="{ width: `${progressRatio}%` }"></div>
 		</div>
 	</article>
 </template>

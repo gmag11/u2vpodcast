@@ -14,7 +14,7 @@
 	watch(
 		() => auth.isAuthenticated,
 		(isAuthenticated) => {
-			if (!isAuthenticated) player.stop();
+			if (!isAuthenticated) player.halt();
 		}
 	);
 </script>

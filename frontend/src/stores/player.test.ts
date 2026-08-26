@@ -819,6 +819,121 @@ describe('player store playback progress', () => {
 		expect(resolved.listen).toBe(false);
 	});
 
+	it('a second stop press resets the saved position to zero', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 240;
+		el.emit('timeupdate'); // recorded at 240
+
+		player.stop(); // first press: stop playback, keep the position
+		expect(player.stopped).toBe(true);
+		expect(player.currentEpisode?.position_seconds).toBe(240);
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		player.stop(); // second press while already stopped: reset to 0
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+	});
+
+	it('a second stop press resets a listened episode to zero keeping the mark', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+		el.emit('ended'); // completion marks listened (600,true), then stops
+		expect(player.stopped).toBe(true);
+
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+		player.stop(); // already stopped → reset to 0, mark untouched
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+		expect(player.currentEpisode?.listen).toBe(true);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: true
+		});
+	});
+
+	it('stop does not reset when the stopped episode is already at the start', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		player.stop(); // first press
+		expect(player.stopped).toBe(true);
+
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+		player.stop(); // already stopped and at 0 → no write
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalled();
+	});
+
+	it('stop on a non-current stopped episode resets its saved position', async () => {
+		const player = usePlayerStore();
+		const a = episode(1);
+		const b = episode(2);
+		await player.play(a, [a, b]);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 240;
+		el.emit('timeupdate'); // record a at 240
+		await player.skipNext(false); // b becomes the current episode
+		el.currentTime = 120;
+		await player.pause(); // record b at 120
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		// a is stopped but not the current episode: stop resets just a
+		player.stop(a);
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.episodeWithProgress(episode(1)).position_seconds).toBe(0);
+		const resetCalls = vi.mocked(api.updateEpisodeProgress).mock.calls.filter(([yt]) => yt === 'yt1');
+		expect(resetCalls.at(-1)![1]).toEqual({ position_seconds: 0, listened: false });
+	});
+
+	it('stopping a paused episode resets its saved position to zero', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 240;
+		el.emit('timeupdate'); // recorded at 240
+
+		await player.pause(); // paused, not stopped
+		player.stop(); // not reproducing → reset to 0
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+	});
+
+	it('a mid-replay stop of a listened episode saves the live position', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1, true);
+		ep.position_seconds = 300;
+		await player.play(ep); // listened episode resumes to 300
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 299;
+		el.emit('timeupdate'); // resume lands at target
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+
+		el.currentTime = 240; // actively re-listened below the saved point
+		player.stop(); // halt while reproducing — the live position must persist
+		expect(player.stopped).toBe(true);
+		expect(player.currentEpisode?.position_seconds).toBe(240);
+		expect(player.currentEpisode?.listen).toBe(true);
+		expect(vi.mocked(api.updateEpisodeProgress).mock.calls.some(
+			([yt, body]) => yt === 'yt1' && body.position_seconds === 240 && body.listened === true
+		)).toBe(true);
+	});
+
 	it('does not regress the listened mark with a trailing pause after completion', async () => {
 		const player = usePlayerStore();
 		const ep = episode(1);
