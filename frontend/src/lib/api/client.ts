@@ -117,6 +117,28 @@ export const api = {
 		});
 	},
 
+	async getPlaylist() {
+		return request<Array<Episode>>('/api/1.0/playlist/');
+	},
+
+	async addEpisodeToPlaylist(episodeId: number) {
+		return request<Episode>('/api/1.0/playlist/', {
+			method: 'POST',
+			body: JSON.stringify({ episode_id: episodeId })
+		});
+	},
+
+	async removeEpisodeFromPlaylist(episodeId: number) {
+		return request<null>(`/api/1.0/playlist/${episodeId}/`, { method: 'DELETE' });
+	},
+
+	async reorderPlaylist(episodeIds: number[]) {
+		return request<null>('/api/1.0/playlist/reorder/', {
+			method: 'PUT',
+			body: JSON.stringify({ episode_ids: episodeIds })
+		});
+	},
+
 	async getConfig() {
 		return request<ConfigResponse>('/api/1.0/config/');
 	}

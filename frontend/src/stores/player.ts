@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import type { Episode, EpisodeProgress } from '@/types';
 import { loadQueue, saveQueue } from '@/lib/utils/queue.storage';
 import { api } from '@/lib/api/client';
+import { usePlaylistStore } from '@/stores/playlists';
 
 // Upper bound for the playback history so long sessions cannot grow it
 // without limit (its only purpose is the previous control).
@@ -50,6 +51,11 @@ export const usePlayerStore = defineStore('player', () => {
 	const stopped = ref(true);
 	const upNext = ref<Episode[]>([]);
 	const playStack = ref<Episode[]>([]);
+	// Origin of the current queue seed: 'playlist' when play() was called from
+	// the playlist view, 'list' otherwise. Consumed on completion / long-press
+	// skip to decide whether the finished episode also leaves the playlist
+	// (playlist-capability). Re-seeded on every play(); not persisted.
+	const queueSource = ref<'playlist' | 'list'>('list');
 
 	// Playback progress keyed by episode id. The same episode exists as several
 	// object copies (list item, playlist/queue item, restored queue), so the
@@ -112,6 +118,16 @@ export const usePlayerStore = defineStore('player', () => {
 	// (e.g. cards) always reflect the latest saved values without a refetch.
 	function episodeWithProgress(episode: Episode): Episode {
 		return { ...episode, ...effectiveProgress(episode) };
+	}
+
+	// Public progress recorder: lets cards immediately reflect a server-confirmed
+	// progress change (e.g. unmarking a listened episode) through the shared
+	// per-id map instead of waiting for a refetch.
+	function applyProgress(
+		episode: Episode,
+		progress: { position_seconds: number; listen: boolean; listened_at: string | null }
+	) {
+		recordProgress(episode, progress);
 	}
 
 	// Records the progress already carried by a freshly fetched episode list
@@ -398,6 +414,14 @@ export const usePlayerStore = defineStore('player', () => {
 		}).catch((err) => {
 			console.error('Failed to save listened mark', err);
 		});
+		// Playlist lifecycle: an episode finished from the playlist source leaves
+		// the playlist too. Fire-and-forget; a 404 (already removed by a racing
+		// completion) is ignored and the next playlist read reconciles.
+		if (queueSource.value === 'playlist') {
+			usePlaylistStore()
+				.remove(episode.id)
+				.catch((err) => console.error('Failed to remove from playlist', err));
+		}
 	}
 
 	function mediaUrl(episode: Episode) {
@@ -480,8 +504,11 @@ export const usePlayerStore = defineStore('player', () => {
 		});
 	}
 
-	async function play(episode: Episode, list?: Episode[], opts?: { fromStart?: boolean }) {
+	async function play(episode: Episode, list?: Episode[], opts?: { fromStart?: boolean; queueSource?: 'playlist' | 'list' }) {
 		const fromStart = opts?.fromStart ?? false;
+		// Re-seeded on every play: the queue source decides whether a finished
+		// episode also leaves the playlist (playlist-capability).
+		queueSource.value = opts?.queueSource ?? 'list';
 		if (list) {
 			const index = list.findIndex((e) => e.id === episode.id);
 			upNext.value = index < 0 ? [] : list.slice(index + 1);
@@ -792,6 +819,7 @@ export const usePlayerStore = defineStore('player', () => {
 		stopped,
 		upNext,
 		playStack,
+		queueSource,
 		progress,
 		currentLabel,
 		durationLabel,
@@ -809,6 +837,7 @@ export const usePlayerStore = defineStore('player', () => {
 		seekRelative,
 		episodeWithProgress,
 		seedProgress,
+		applyProgress,
 		setVolume,
 		toggleMute,
 		setSpeed,

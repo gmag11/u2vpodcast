@@ -12,6 +12,7 @@ const router = createRouter({
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
 		{ path: '/history', name: 'history', component: HistoryView },
+		{ path: '/playlist', name: 'playlist', component: { template: '<div />' } },
 		{ path: '/:channelId(\\d+)', name: 'episodes', component: { template: '<div />' } }
 	]
 });

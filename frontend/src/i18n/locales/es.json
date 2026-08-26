@@ -70,6 +70,22 @@
 		"emptyTitle": "Aún no hay episodios",
 		"emptyBody": "Los episodios de tus canales aparecerán aquí a medida que se descarguen."
 	},
+	"playlist": {
+		"title": "Playlist",
+		"emptyTitle": "No hay episodios pendientes",
+		"emptyBody": "Los episodios que añadas aquí se reproducirán en orden y saldrán de la playlist al terminar.",
+		"add": "Añadir a la playlist",
+		"added": "Añadido a la playlist",
+		"addFailed": "No se pudo añadir a la playlist",
+		"remove": "Quitar de la playlist",
+		"removed": "Quitado de la playlist",
+		"removeFailed": "No se pudo quitar de la playlist",
+		"unmark": "Marcar como no escuchado",
+		"unmarkFailed": "No se pudo eliminar la marca de escuchado",
+		"moveUp": "Subir",
+		"moveDown": "Bajar",
+		"playAll": "Reproducir todo"
+	},
 	"card": {
 		"openOnYouTube": "Abrir en YouTube",
 		"rssFeed": "Obtener feed RSS",

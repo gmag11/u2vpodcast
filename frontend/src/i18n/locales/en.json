@@ -70,6 +70,22 @@
 		"emptyTitle": "No episodes yet",
 		"emptyBody": "Episodes from your channels will appear here as they are downloaded."
 	},
+	"playlist": {
+		"title": "Playlist",
+		"emptyTitle": "No pending episodes",
+		"emptyBody": "Episodes you add here play in order and leave the playlist when finished.",
+		"add": "Add to playlist",
+		"added": "Added to playlist",
+		"addFailed": "Could not add to playlist",
+		"remove": "Remove from playlist",
+		"removed": "Removed from playlist",
+		"removeFailed": "Could not remove from playlist",
+		"unmark": "Mark as not listened",
+		"unmarkFailed": "Could not clear the listened state",
+		"moveUp": "Move up",
+		"moveDown": "Move down",
+		"playAll": "Play all"
+	},
 	"card": {
 		"openOnYouTube": "Open on YouTube",
 		"rssFeed": "Get RSS feed",

@@ -1,8 +1,19 @@
 <script setup lang="ts">
-	import { computed } from 'vue';
+	import { computed, ref } from 'vue';
 	import { useI18n } from 'vue-i18n';
-	import { PhLinkSimple, PhPause, PhPlay, PhStop } from '@phosphor-icons/vue';
+	import {
+		PhArrowCounterClockwise,
+		PhLinkSimple,
+		PhListPlus,
+		PhPause,
+		PhPlay,
+		PhPlaylist,
+		PhStop
+	} from '@phosphor-icons/vue';
 	import { usePlayerStore, RESUME_POSITION_S, parseDurationSeconds } from '@/stores/player';
+	import { usePlaylistStore } from '@/stores/playlists';
+	import { useNotificationStore } from '@/stores/notification';
+	import { api } from '@/lib/api/client';
 	import type { Episode } from '@/types';
 	import { toHHMMSS } from '@/lib/utils/formatter';
 
@@ -11,21 +22,26 @@
 			episode: Episode;
 			compact?: boolean;
 			list?: Episode[];
+			queueSource?: 'playlist' | 'list';
 		}>(),
 		{
 			compact: false,
-			list: undefined
+			list: undefined,
+			queueSource: 'list'
 		}
 	);
 
 	const player = usePlayerStore();
-	const { d } = useI18n();
+	const playlists = usePlaylistStore();
+	const notification = useNotificationStore();
+	const { d, t } = useI18n();
 
 	const isCurrent = computed(() => player.isCurrent(props.episode));
 	const isPlaying = computed(() => isCurrent.value && player.playing);
 	const durationLabel = computed(() =>
 		isCurrent.value ? player.durationLabel : props.episode.duration
 	);
+	const inPlaylist = computed(() => playlists.episodeIdSet.has(props.episode.id));
 
 	// Progress indicators reflect the shared player's per-id progress, so a
 	// card updates live without a reload no matter which copy of the episode
@@ -62,6 +78,61 @@
 
 	function formatDate(value: Date | string) {
 		return d(new Date(value), 'short');
+	}
+
+	// Playlist toggle: add when absent, remove when present, notifying on both
+	// outcomes (playlist-capability). The id set drives the button state, so the
+	// card never needs a playlist refetch.
+	async function togglePlaylist() {
+		const id = props.episode.id;
+		if (inPlaylist.value) {
+			const result = await playlists.remove(id);
+			notification.show(
+				result.ok ? t('playlist.removed') : t('playlist.removeFailed'),
+				result.ok ? 'success' : 'error'
+			);
+		} else {
+			const result = await playlists.add(id);
+			notification.show(
+				result.ok ? t('playlist.added') : t('playlist.addFailed'),
+				result.ok ? 'success' : 'error'
+			);
+		}
+	}
+
+	// "Mark as not listened": clears the listened state (position reset to 0),
+	// swaps the card back from the played mark immediately, and re-appends the
+	// episode at the end of the playlist. If the playlist add fails, the cleared
+	// mark is kept and the error surfaced (playlist-capability).
+	const unmarking = ref(false);
+	async function unmark() {
+		if (unmarking.value) return;
+		unmarking.value = true;
+		try {
+			const progress = await api.updateEpisodeProgress(props.episode.yt_id, {
+				position_seconds: 0,
+				listened: false
+			});
+			if (!progress.ok) {
+				notification.show(t('playlist.unmarkFailed'), 'error');
+				return;
+			}
+			player.applyProgress(props.episode, {
+				position_seconds: 0,
+				listen: false,
+				listened_at: null
+			});
+			const result = await playlists.add(props.episode.id);
+			notification.show(
+				result.ok ? t('playlist.added') : t('playlist.addFailed'),
+				result.ok ? 'success' : 'error'
+			);
+		} catch (err) {
+			console.error(err);
+			notification.show(t('playlist.unmarkFailed'), 'error');
+		} finally {
+			unmarking.value = false;
+		}
 	}
 </script>
 
@@ -103,7 +174,7 @@
 							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 							:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 							:disabled="isCurrent && player.loading"
-							@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list)"
+							@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list, { queueSource: props.queueSource })"
 						>
 							<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 							<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
@@ -128,7 +199,7 @@
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 						:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 						:disabled="isCurrent && player.loading"
-						@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list)"
+						@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list, { queueSource: props.queueSource })"
 					>
 						<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 						<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
@@ -175,7 +246,7 @@
 						v-if="canStartOver"
 						type="button"
 						class="inline-flex items-center text-xs text-accent-500 transition-colors hover:underline"
-						@click="player.play(props.episode, props.list, { fromStart: true })"
+						@click="player.play(props.episode, props.list, { fromStart: true, queueSource: props.queueSource })"
 					>
 						{{ $t('card.startOver') }}
 					</button>
@@ -190,9 +261,32 @@
 						<PhLinkSimple class="h-4 w-4" weight="regular" />
 						{{ $t('common.youtube') }}
 					</a>
-					<time class="shrink-0 text-sm text-text-muted">
-						{{ formatDate(props.episode.published_at) }}
-					</time>
+					<div class="flex shrink-0 items-center gap-1.5">
+						<button
+							v-if="hasPlayedMark"
+							type="button"
+							class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:opacity-50"
+							:disabled="unmarking"
+							:aria-label="$t('playlist.unmark')"
+							:title="$t('playlist.unmark')"
+							@click="unmark"
+						>
+							<PhArrowCounterClockwise class="h-4 w-4" weight="regular" />
+						</button>
+						<button
+							type="button"
+							class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-accent-500 transition-colors hover:text-accent-400"
+							:aria-label="inPlaylist ? $t('playlist.remove') : $t('playlist.add')"
+							:title="inPlaylist ? $t('playlist.remove') : $t('playlist.add')"
+							@click="togglePlaylist"
+						>
+							<PhPlaylist v-if="inPlaylist" class="h-4 w-4" weight="fill" />
+							<PhListPlus v-else class="h-4 w-4" weight="regular" />
+						</button>
+						<time class="shrink-0 text-sm text-text-muted">
+							{{ formatDate(props.episode.published_at) }}
+						</time>
+					</div>
 				</div>
 			</div>
 		</div>

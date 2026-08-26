@@ -11,6 +11,18 @@ vi.mock('@/lib/api/client', () => ({
 		),
 		getEpisodeProgress: vi.fn(() =>
 			Promise.resolve({ ok: false, data: null, user: null, status: false })
+		),
+		getPlaylist: vi.fn(() =>
+			Promise.resolve({ ok: true, data: [], user: null, status: true })
+		),
+		addEpisodeToPlaylist: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		removeEpisodeFromPlaylist: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		reorderPlaylist: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		)
 	}
 }));
@@ -281,6 +293,58 @@ describe('player store queue', () => {
 		expect(el.load).toHaveBeenCalled();
 		expect(el.play).toHaveBeenCalled();
 		expect(player.stopped).toBe(false);
+	});
+
+	it('seeds the queue with the playlist tail and sets the source to playlist', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3)];
+		// playing a middle episode schedules only the remaining tail
+		await player.play(episodes[1], episodes, { queueSource: 'playlist' });
+		expect(player.queueSource).toBe('playlist');
+		expect(player.upNext.map((e) => e.id)).toEqual([3]);
+	});
+
+	it('defaults the queue source to list for plain plays', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes);
+		expect(player.queueSource).toBe('list');
+	});
+
+	it('removes a completed playlist-sourced episode from the playlist', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes, { queueSource: 'playlist' });
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+		vi.mocked(api.removeEpisodeFromPlaylist).mockClear();
+		el.emit('ended');
+		expect(api.removeEpisodeFromPlaylist).toHaveBeenCalledWith(1);
+	});
+
+	it('leaves a list-sourced completed episode in the playlist untouched', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+		vi.mocked(api.removeEpisodeFromPlaylist).mockClear();
+		el.emit('ended');
+		expect(api.removeEpisodeFromPlaylist).not.toHaveBeenCalled();
+	});
+
+	it('long-press skip on a playlist episode removes it and marks it listened', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes, { queueSource: 'playlist' });
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		vi.mocked(api.removeEpisodeFromPlaylist).mockClear();
+		await player.skipNext(true);
+		expect(player.playStack[0].listen).toBe(true);
+		expect(api.removeEpisodeFromPlaylist).toHaveBeenCalledWith(1);
 	});
 });
 
