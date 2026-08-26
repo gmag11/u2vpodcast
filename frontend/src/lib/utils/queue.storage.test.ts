@@ -30,12 +30,34 @@ describe('queue.storage', () => {
 	});
 
 	it('round-trips upNext, playStack and currentEpisode', () => {
-		saveQueue({ upNext: [episode(1), episode(2)], playStack: [episode(3)], currentEpisode: episode(9) });
+		saveQueue({
+			upNext: [episode(1), episode(2)],
+			playStack: [episode(3)],
+			currentEpisode: episode(9)
+		});
 		const loaded = loadQueue();
 		expect(loaded).not.toBeNull();
 		expect(loaded!.upNext.map((e) => e.id)).toEqual([1, 2]);
 		expect(loaded!.playStack.map((e) => e.id)).toEqual([3]);
 		expect(loaded!.currentEpisode?.id).toBe(9);
+	});
+
+	it('round-trips playback modes and the authored seed order', () => {
+		saveQueue({
+			upNext: [episode(2), episode(1)],
+			playStack: [],
+			currentEpisode: null,
+			// the queue is shuffled, the seed keeps the authored order
+			seedOrder: [episode(1), episode(2)],
+			shuffle: true,
+			repeat: 'all'
+		});
+		const loaded = loadQueue();
+		expect(loaded!).not.toBeNull();
+		expect(loaded!.shuffle).toBe(true);
+		expect(loaded!.repeat).toBe('all');
+		expect(loaded!.seedOrder!.map((e) => e.id)).toEqual([1, 2]);
+		expect(loaded!.upNext.map((e) => e.id)).toEqual([2, 1]);
 	});
 
 	it('returns null when nothing is stored', () => {
@@ -71,5 +93,17 @@ describe('queue.storage', () => {
 		expect(loaded).not.toBeNull();
 		expect(loaded!.upNext.map((e) => e.id)).toEqual([1]);
 		expect(loaded!.currentEpisode).toBeNull();
+	});
+
+	it('defaults modes and seed order for legacy payloads', () => {
+		localStorage.setItem(
+			'u2vpodcast.up-next.v1',
+			JSON.stringify({ upNext: [episode(1), episode(2)], playStack: [], currentEpisode: null })
+		);
+		const loaded = loadQueue();
+		expect(loaded!.shuffle).toBe(false);
+		expect(loaded!.repeat).toBe('none');
+		// without a stored seed, the queue itself becomes the source
+		expect(loaded!.seedOrder!.map((e) => e.id)).toEqual([1, 2]);
 	});
 });

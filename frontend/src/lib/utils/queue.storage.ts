@@ -1,9 +1,25 @@
 import type { Episode } from '@/types';
 
+export type RepeatMode = 'none' | 'all' | 'one';
+
 export interface QueuePayload {
 	upNext: Episode[];
 	playStack: Episode[];
 	currentEpisode: Episode | null;
+	// Playback modes (playback-modes): the authored seed used to (re)build the
+	// shuffled/repeat-all consumption order, plus the mode flags. Optional so
+	// payloads written by earlier versions still load; loadQueue() normalizes
+	// the defaults.
+	seedOrder?: Episode[];
+	shuffle?: boolean;
+	repeat?: RepeatMode;
+}
+
+/** `QueuePayload` as normalized by `loadQueue()`: defaults are resolved. */
+export interface ResolvedQueuePayload extends QueuePayload {
+	seedOrder: Episode[];
+	shuffle: boolean;
+	repeat: RepeatMode;
 }
 
 const STORAGE_KEY = 'u2vpodcast.up-next.v1';
@@ -23,10 +39,11 @@ export function saveQueue(payload: QueuePayload): void {
 /**
  * Loads a previously persisted queue, returning `null` when nothing is stored
  * or the payload is unreadable/malformed so callers can fall back to empty.
- * Payloads written by earlier versions (without `currentEpisode`) still load;
- * the missing field is normalized to `null`.
+ * Payloads written by earlier versions (without `currentEpisode`, `seedOrder`
+ * or the playback modes) still load; missing fields are normalized to their
+ * defaults.
  */
-export function loadQueue(): QueuePayload | null {
+export function loadQueue(): ResolvedQueuePayload | null {
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return null;
@@ -40,7 +57,17 @@ export function loadQueue(): QueuePayload | null {
 			return null;
 		}
 		const payload = parsed as QueuePayload;
-		return { upNext: payload.upNext, playStack: payload.playStack, currentEpisode: payload.currentEpisode ?? null };
+		return {
+			upNext: payload.upNext,
+			playStack: payload.playStack,
+			currentEpisode: payload.currentEpisode ?? null,
+			// The authored seed for shuffle/repeat-all. Legacy payloads written
+			// before playback-modes lack it; the stored queue is then the best
+			// available source.
+			seedOrder: Array.isArray(payload.seedOrder) ? payload.seedOrder : [...payload.upNext],
+			shuffle: payload.shuffle ?? false,
+			repeat: payload.repeat === 'all' || payload.repeat === 'one' ? payload.repeat : 'none'
+		};
 	} catch {
 		return null;
 	}

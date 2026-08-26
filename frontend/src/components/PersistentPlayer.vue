@@ -5,6 +5,9 @@
 		PhList,
 		PhPause,
 		PhPlay,
+		PhRepeat,
+		PhRepeatOnce,
+		PhShuffle,
 		PhSkipBack,
 		PhSkipForward,
 		PhSpeakerHigh,
@@ -40,7 +43,8 @@
 	}
 
 	watch(
-		() => [player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
+		() =>
+			[player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
 		([playing, stopped, episodeId, queueLength]) => {
 			if (episodeId == null && queueLength === 0) {
 				visible.value = false;
@@ -279,6 +283,47 @@
 					</div>
 				</div>
 
+				<div class="flex shrink-0 items-center gap-1">
+					<button
+						type="button"
+						class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+						:class="player.shuffle ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'"
+						:aria-label="$t('player.shuffle')"
+						:aria-pressed="player.shuffle"
+						:title="$t('player.shuffle')"
+						@click="player.toggleShuffle()"
+					>
+						<PhShuffle class="h-5 w-5" weight="regular" />
+					</button>
+					<button
+						type="button"
+						class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+						:class="
+							player.repeat !== 'none'
+								? 'bg-accent-600 text-white'
+								: 'text-text-muted hover:text-text'
+						"
+						:aria-label="
+							player.repeat === 'none'
+								? $t('player.repeatOff')
+								: player.repeat === 'all'
+									? $t('player.repeatAll')
+									: $t('player.repeatOne')
+						"
+						:title="
+							player.repeat === 'none'
+								? $t('player.repeatOff')
+								: player.repeat === 'all'
+									? $t('player.repeatAll')
+									: $t('player.repeatOne')
+						"
+						@click="player.cycleRepeat()"
+					>
+						<PhRepeat v-if="player.repeat !== 'one'" class="h-5 w-5" weight="regular" />
+						<PhRepeatOnce v-else class="h-5 w-5" weight="regular" />
+					</button>
+				</div>
+
 				<div class="hidden shrink-0 items-center gap-2 sm:flex">
 					<button
 						type="button"
@@ -333,7 +378,9 @@
 								:key="ep.id"
 								class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-input"
 							>
-								<span class="w-4 shrink-0 text-center text-xs text-text-muted">{{ index + 1 }}</span>
+								<span class="w-4 shrink-0 text-center text-xs text-text-muted">{{
+									index + 1
+								}}</span>
 								<img
 									v-if="ep.image"
 									:src="ep.image"

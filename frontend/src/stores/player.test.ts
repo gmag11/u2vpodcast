@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { usePlayerStore } from '@/stores/player';
+import { usePlayerStore, setRandomSource } from '@/stores/player';
 import type { Episode } from '@/types';
 import { api } from '@/lib/api/client';
 
@@ -12,9 +12,7 @@ vi.mock('@/lib/api/client', () => ({
 		getEpisodeProgress: vi.fn(() =>
 			Promise.resolve({ ok: false, data: null, user: null, status: false })
 		),
-		getPlaylist: vi.fn(() =>
-			Promise.resolve({ ok: true, data: [], user: null, status: true })
-		),
+		getPlaylist: vi.fn(() => Promise.resolve({ ok: true, data: [], user: null, status: true })),
 		addEpisodeToPlaylist: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		),
@@ -53,8 +51,7 @@ class MockAudioElement {
 	}
 
 	set currentTime(v: number) {
-		this._currentTime =
-			this.seekClampEnd > 0 && v > this.seekClampEnd ? this.seekClampEnd : v;
+		this._currentTime = this.seekClampEnd > 0 && v > this.seekClampEnd ? this.seekClampEnd : v;
 	}
 
 	private listeners: Record<string, Array<() => void>> = {};
@@ -955,7 +952,9 @@ describe('player store playback progress', () => {
 		player.stop(a);
 		expect(player.currentEpisode?.id).toBe(2);
 		expect(player.episodeWithProgress(episode(1)).position_seconds).toBe(0);
-		const resetCalls = vi.mocked(api.updateEpisodeProgress).mock.calls.filter(([yt]) => yt === 'yt1');
+		const resetCalls = vi
+			.mocked(api.updateEpisodeProgress)
+			.mock.calls.filter(([yt]) => yt === 'yt1');
 		expect(resetCalls.at(-1)![1]).toEqual({ position_seconds: 0, listened: false });
 	});
 
@@ -993,9 +992,13 @@ describe('player store playback progress', () => {
 		expect(player.stopped).toBe(true);
 		expect(player.currentEpisode?.position_seconds).toBe(240);
 		expect(player.currentEpisode?.listen).toBe(true);
-		expect(vi.mocked(api.updateEpisodeProgress).mock.calls.some(
-			([yt, body]) => yt === 'yt1' && body.position_seconds === 240 && body.listened === true
-		)).toBe(true);
+		expect(
+			vi
+				.mocked(api.updateEpisodeProgress)
+				.mock.calls.some(
+					([yt, body]) => yt === 'yt1' && body.position_seconds === 240 && body.listened === true
+				)
+		).toBe(true);
 	});
 
 	it('does not regress the listened mark with a trailing pause after completion', async () => {
@@ -1094,5 +1097,170 @@ describe('player store keyboard seek', () => {
 		slider.setAttribute('role', 'slider');
 		slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 		expect(el.currentTime).toBe(50);
+	});
+});
+
+describe('player store playback modes', () => {
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
+		MockAudioElement.defaultClamp = 0;
+		localStorage.clear();
+		vi.clearAllMocks();
+		setActivePinia(createPinia());
+		// Mulberry32 with a fixed seed: every shuffle is deterministic, so the
+		// mode tests can assert exact permutations and per-cycle re-shuffles
+		// (playback-modes).
+		let state = 0x9e3779b9;
+		setRandomSource(() => {
+			state += 0x6d2b79f5;
+			let t = state;
+			t = Math.imul(t ^ (t >>> 15), t | 1);
+			t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		});
+	});
+
+	afterEach(() => {
+		setRandomSource(Math.random);
+	});
+
+	it('cycleRepeat cycles none → all → one → none', () => {
+		const player = usePlayerStore();
+		expect(player.repeat).toBe('none');
+		expect(player.cycleRepeat()).toBe('all');
+		expect(player.cycleRepeat()).toBe('one');
+		expect(player.cycleRepeat()).toBe('none');
+	});
+
+	it('shuffle permutes the queue without losing or duplicating items', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4), episode(5)];
+		await player.play(episodes[0], episodes);
+		expect(player.upNext.map((e) => e.id)).toEqual([2, 3, 4, 5]);
+
+		player.toggleShuffle();
+		expect(player.shuffle).toBe(true);
+		const shuffled = player.upNext.map((e) => e.id);
+		expect(shuffled).toHaveLength(4);
+		// exactly the queued set: no duplication and nothing left behind
+		expect(new Set(shuffled).size).toBe(4);
+		expect([...shuffled].sort()).toEqual([2, 3, 4, 5]);
+	});
+
+	it('disabling shuffle restores the authored order of the remaining episodes', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4)];
+		await player.play(episodes[0], episodes);
+		player.toggleShuffle();
+		const shuffledFirst = player.upNext.map((e) => e.id);
+
+		// consume one episode in the shuffled order
+		await player.advance();
+		expect(player.currentEpisode?.id).toBe(shuffledFirst[0]);
+
+		player.toggleShuffle();
+		expect(player.shuffle).toBe(false);
+		// the remaining episodes are back in their authored order
+		expect(player.upNext.map((e) => e.id)).toEqual(
+			[2, 3, 4].filter((id) => id !== shuffledFirst[0])
+		);
+	});
+
+	it('repeat-one replays the finished episode from the start without consuming the queue', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes);
+		player.cycleRepeat(); // → all
+		player.cycleRepeat(); // → one
+		expect(player.repeat).toBe('one');
+
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+		el.emit('ended');
+
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.upNext.map((e) => e.id)).toEqual([2]);
+		expect(player.playStack.map((e) => e.id)).toEqual([]);
+		expect(el.currentTime).toBe(0);
+		expect(player.playing).toBe(true);
+	});
+
+	it('repeat-all rebuilds and re-shuffles the queue from the seed after the last item', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4)];
+		await player.play(episodes[0], episodes);
+		player.toggleShuffle();
+		player.cycleRepeat(); // → all
+		const firstPass = player.upNext.map((e) => e.id);
+		expect(firstPass).toHaveLength(3);
+
+		// drain the initial shuffled queue; the fourth advance hits exhaustion
+		for (let i = 0; i < 4; i++) await player.advance();
+
+		// the queue was rebuilt from the seed (re-shuffled) and playback continued
+		expect(player.currentEpisode).not.toBeNull();
+		const rebuilt = [...player.upNext.map((e) => e.id), player.currentEpisode!.id];
+		expect([...rebuilt].sort()).toEqual([2, 3, 4]);
+		// a fresh randomization per cycle: the rebuilt order differs
+		expect(player.upNext.map((e) => e.id)).not.toEqual(firstPass);
+	});
+
+	it('repeat-none stops and clears the queue at the end', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2)];
+		await player.play(episodes[0], episodes);
+		expect(player.repeat).toBe('none');
+
+		await player.advance(); // consumes episode 2
+		await player.advance(); // queue empty → stop and clear
+		expect(player.playing).toBe(false);
+		expect(player.stopped).toBe(true);
+		expect(player.currentTime).toBe(0);
+		expect(player.upNext).toEqual([]);
+	});
+
+	it('persists shuffle and repeat modes and restores them on a reload', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3)];
+		await player.play(episodes[0], episodes);
+		player.toggleShuffle();
+		player.cycleRepeat(); // → all
+
+		const stored = JSON.parse(localStorage.getItem('u2vpodcast.up-next.v1') ?? '{}');
+		expect(stored.shuffle).toBe(true);
+		expect(stored.repeat).toBe('all');
+
+		// a reload boots a fresh store from the same payload (queue.storage)
+		const reloaded = usePlayerStore(createPinia());
+		expect(reloaded.shuffle).toBe(true);
+		expect(reloaded.repeat).toBe('all');
+	});
+
+	it('restores the queue in its shuffled order after a reload', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4)];
+		await player.play(episodes[0], episodes);
+		player.toggleShuffle();
+		const shuffled = player.upNext.map((e) => e.id);
+
+		const reloaded = usePlayerStore(createPinia());
+		expect(reloaded.upNext.map((e) => e.id)).toEqual(shuffled);
+	});
+
+	it('loads a legacy payload without modes as disabled defaults', () => {
+		localStorage.setItem(
+			'u2vpodcast.up-next.v1',
+			JSON.stringify({
+				upNext: [episode(7)],
+				playStack: [episode(3)],
+				currentEpisode: episode(5)
+			})
+		);
+		const player = usePlayerStore();
+		expect(player.shuffle).toBe(false);
+		expect(player.repeat).toBe('none');
 	});
 });

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Episode, EpisodeProgress } from '@/types';
-import { loadQueue, saveQueue } from '@/lib/utils/queue.storage';
+import { loadQueue, saveQueue, type RepeatMode } from '@/lib/utils/queue.storage';
 import { api } from '@/lib/api/client';
 import { usePlaylistStore } from '@/stores/playlists';
 
@@ -29,6 +29,30 @@ function trace(...args: unknown[]) {
 	}
 }
 
+// Injectable source of randomness for the shuffle (playback-modes). Tests
+// replace it with a seeded PRNG so shuffled orders are deterministic;
+// production uses Math.random.
+let randomSource: () => number = Math.random;
+
+/**
+ * Replaces the store's shuffle randomness source (test hook). Pass a seeded
+ * PRNG to make `toggleShuffle()` / repeat-all rebuilds deterministic.
+ */
+export function setRandomSource(source: () => number): void {
+	randomSource = source;
+}
+
+// Fisher–Yates shuffle over a copy; never mutates the input array. Returns a
+// fresh, uniformly random permutation carrying the same episode references.
+function shuffledCopy(episodes: Episode[]): Episode[] {
+	const copy = [...episodes];
+	for (let i = copy.length - 1; i > 0; i--) {
+		const j = Math.floor(randomSource() * (i + 1));
+		[copy[i], copy[j]] = [copy[j], copy[i]];
+	}
+	return copy;
+}
+
 // Parses the stored duration string (`H:MM:SS`, `M:SS` or plain seconds) into
 // seconds. Used as a fallback when the media element has no usable duration
 // and by the episode cards to size their read-only progress bar.
@@ -51,6 +75,16 @@ export const usePlayerStore = defineStore('player', () => {
 	const stopped = ref(true);
 	const upNext = ref<Episode[]>([]);
 	const playStack = ref<Episode[]>([]);
+	// Authored order of the last seeded queue (playback-modes). This is the
+	// "source" for shuffle and repeat-all: shuffle reorders the consumption
+	// order (`upNext`) but never this array, disabling shuffle restores it, and
+	// repeat-all rebuilds from it when the queue drains. Re-seeded by play(),
+	// cleared by clearQueue(); user removals leave it too. Not shown in the
+	// queue panel — that renders `upNext`.
+	const seedOrder = ref<Episode[]>([]);
+	// Playback modes (playback-modes). `repeat` cycles none → all → one.
+	const shuffle = ref(false);
+	const repeat = ref<RepeatMode>('none');
 	// Origin of the current queue seed: 'playlist' when play() was called from
 	// the playlist view, 'list' otherwise. Consumed on completion / long-press
 	// skip to decide whether the finished episode also leaves the playlist
@@ -86,7 +120,10 @@ export const usePlayerStore = defineStore('player', () => {
 	// episode, so live re-listens save normally again.
 	let finalizedEpisodeId: number | null = null;
 
-	function recordProgress(episode: Episode, progress: { position_seconds: number; listen: boolean; listened_at: string | null }) {
+	function recordProgress(
+		episode: Episode,
+		progress: { position_seconds: number; listen: boolean; listened_at: string | null }
+	) {
 		episode.position_seconds = progress.position_seconds;
 		episode.listen = progress.listen;
 		episode.listened_at = progress.listened_at;
@@ -155,7 +192,10 @@ export const usePlayerStore = defineStore('player', () => {
 		saveQueue({
 			upNext: upNext.value,
 			playStack: playStack.value,
-			currentEpisode: currentEpisode.value
+			currentEpisode: currentEpisode.value,
+			seedOrder: seedOrder.value,
+			shuffle: shuffle.value,
+			repeat: repeat.value
 		});
 	}
 
@@ -172,8 +212,11 @@ export const usePlayerStore = defineStore('player', () => {
 		const stored = loadQueue();
 		if (stored) {
 			upNext.value = stored.upNext;
+			seedOrder.value = stored.seedOrder;
 			playStack.value = stored.playStack;
 			currentEpisode.value = stored.currentEpisode;
+			shuffle.value = stored.shuffle;
+			repeat.value = stored.repeat;
 		}
 	}
 
@@ -274,7 +317,11 @@ export const usePlayerStore = defineStore('player', () => {
 			finishResume();
 			return;
 		}
-		if (isFinite(el.duration) && el.duration > 0 && resumeTarget >= el.duration * RESUME_DURATION_RATIO) {
+		if (
+			isFinite(el.duration) &&
+			el.duration > 0 &&
+			resumeTarget >= el.duration * RESUME_DURATION_RATIO
+		) {
 			// Near the end: treat as finished, start from zero.
 			trace('resume: playing from zero (near end)');
 			el.currentTime = 0;
@@ -295,8 +342,7 @@ export const usePlayerStore = defineStore('player', () => {
 	// Starts playback, arming the resume retry loop when one is pending.
 	async function seekResumeOnPlay(el: HTMLAudioElement): Promise<void> {
 		const current = currentEpisode.value;
-		const pending =
-			resumePending && current != null && current.id === resumeEpisodeId;
+		const pending = resumePending && current != null && current.id === resumeEpisodeId;
 		if (!pending) {
 			await el.play().catch(() => {});
 			return;
@@ -408,12 +454,14 @@ export const usePlayerStore = defineStore('player', () => {
 			listen: true,
 			listened_at: listenedAt
 		});
-		api.updateEpisodeProgress(episode.yt_id, {
-			position_seconds: position,
-			listened: true
-		}).catch((err) => {
-			console.error('Failed to save listened mark', err);
-		});
+		api
+			.updateEpisodeProgress(episode.yt_id, {
+				position_seconds: position,
+				listened: true
+			})
+			.catch((err) => {
+				console.error('Failed to save listened mark', err);
+			});
 		// Playlist lifecycle: an episode finished from the playlist source leaves
 		// the playlist too. Fire-and-forget; a 404 (already removed by a racing
 		// completion) is ignored and the next playlist read reconciles.
@@ -504,7 +552,11 @@ export const usePlayerStore = defineStore('player', () => {
 		});
 	}
 
-	async function play(episode: Episode, list?: Episode[], opts?: { fromStart?: boolean; queueSource?: 'playlist' | 'list' }) {
+	async function play(
+		episode: Episode,
+		list?: Episode[],
+		opts?: { fromStart?: boolean; queueSource?: 'playlist' | 'list' }
+	) {
 		const fromStart = opts?.fromStart ?? false;
 		// Re-seeded on every play: the queue source decides whether a finished
 		// episode also leaves the playlist (playlist-capability).
@@ -512,6 +564,13 @@ export const usePlayerStore = defineStore('player', () => {
 		if (list) {
 			const index = list.findIndex((e) => e.id === episode.id);
 			upNext.value = index < 0 ? [] : list.slice(index + 1);
+			// The authored seed for shuffle/repeat-all: the queue as authored,
+			// independent of the consumption order. An active shuffle applies
+			// to the freshly seeded queue (playback-modes).
+			seedOrder.value = [...upNext.value];
+			if (shuffle.value) {
+				upNext.value = shuffledCopy(upNext.value);
+			}
 		}
 		// Without a context list the existing queue is kept untouched, so a
 		// single-episode play (e.g. replaying something already queued) does
@@ -540,8 +599,40 @@ export const usePlayerStore = defineStore('player', () => {
 		persistQueue();
 	}
 
+	// Toggles shuffle (playback-modes). Enabling builds a shuffled copy of the
+	// current consumption order; disabling restores the authored order of the
+	// remaining episodes from the seed. `upNext` is always replaced with a
+	// fresh array, never reordered in place, so the authored seed stays intact.
+	function toggleShuffle() {
+		if (shuffle.value) {
+			shuffle.value = false;
+			upNext.value = seedOrder.value.filter((e) =>
+				upNext.value.some((remaining) => remaining.id === e.id)
+			);
+		} else {
+			shuffle.value = true;
+			upNext.value = shuffledCopy(upNext.value);
+		}
+		persistQueue();
+	}
+
+	// Repeat control: none → all → one → none (playback-modes). Returns the
+	// new mode so the persistent bar can reflect it.
+	function cycleRepeat(): RepeatMode {
+		repeat.value = repeat.value === 'none' ? 'all' : repeat.value === 'all' ? 'one' : 'none';
+		persistQueue();
+		return repeat.value;
+	}
+
 	async function advance() {
 		const finished = currentEpisode.value;
+		if (repeat.value === 'one' && finished) {
+			// Repeat-one: replay the finished episode from the start; the queue
+			// is not consumed and the episode does not enter history
+			// (playback-modes).
+			await play(finished, undefined, { fromStart: true });
+			return;
+		}
 		const next = upNext.value.shift();
 		if (next) {
 			if (finished) pushToPlayStack(finished);
@@ -550,13 +641,29 @@ export const usePlayerStore = defineStore('player', () => {
 			await armResume(next, 'advance');
 			await loadEpisode(next);
 			persistQueue();
-		} else {
-			// End of the queue: halt and keep this episode (it was just
-			// completed), without the public stop's reset behavior.
-			haltPlayback();
-			upNext.value = [];
-			persistQueue();
+			return;
 		}
+		if (repeat.value === 'all' && seedOrder.value.length > 0) {
+			// Repeat-all: rebuild the queue from the seeded source — re-shuffled
+			// on every cycle when shuffle is active — and start the new cycle
+			// (playback-modes).
+			upNext.value = shuffle.value ? shuffledCopy(seedOrder.value) : [...seedOrder.value];
+			const replayed = upNext.value.shift();
+			if (replayed) {
+				if (finished) pushToPlayStack(finished);
+				await armResume(replayed, 'advance');
+				await loadEpisode(replayed);
+				persistQueue();
+				return;
+			}
+		}
+		// End of the queue with no mode wanting a replay: halt and keep this
+		// episode (it was just completed), without the public stop's reset
+		// behavior. The seeded source is gone with the queue.
+		haltPlayback();
+		upNext.value = [];
+		seedOrder.value = [];
+		persistQueue();
 	}
 
 	async function skipNext(markCurrent: boolean = false) {
@@ -598,11 +705,15 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function removeFromQueue(episodeId: number) {
 		upNext.value = upNext.value.filter((e) => e.id !== episodeId);
+		// A user removal also leaves the authored seed so nothing (shuffle
+		// restore or repeat-all rebuild) can resurrect it.
+		seedOrder.value = seedOrder.value.filter((e) => e.id !== episodeId);
 		persistQueue();
 	}
 
 	function clearQueue() {
 		upNext.value = [];
+		seedOrder.value = [];
 		persistQueue();
 	}
 
@@ -820,6 +931,8 @@ export const usePlayerStore = defineStore('player', () => {
 		upNext,
 		playStack,
 		queueSource,
+		shuffle,
+		repeat,
 		progress,
 		currentLabel,
 		durationLabel,
@@ -827,6 +940,8 @@ export const usePlayerStore = defineStore('player', () => {
 		advance,
 		skipNext,
 		playPrevious,
+		toggleShuffle,
+		cycleRepeat,
 		removeFromQueue,
 		clearQueue,
 		togglePlay,
