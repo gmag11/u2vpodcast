@@ -5,6 +5,7 @@ mod user;
 mod error;
 mod role;
 mod episode;
+mod playlist;
 mod ytdlp;
 pub mod channel;
 pub mod response;
@@ -46,6 +47,7 @@ pub use episode::{
     Episode,
     EpisodeProgress,
 };
+pub use playlist::PlaylistItem;
 pub use appstate::AppState;
 pub use user::{
     User,

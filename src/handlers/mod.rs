@@ -3,6 +3,7 @@ mod logout;
 mod status;
 mod channels;
 mod episodes;
+mod playlists;
 mod users;
 mod options;
 mod feed;
@@ -55,6 +56,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .wrap(RequireSession)
                                     .configure(users::api_users)
                                     .configure(options::api_options)
+                                    .configure(playlists::api_playlists)
                                     .service(channels::read)
                                     .service(channels::read_with_pagination)
                                     .service(episodes::read_with_pagination)

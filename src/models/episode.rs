@@ -71,7 +71,7 @@ impl Episode {
         }
     }
 
-    fn from_row_with_channel(row: SqliteRow) -> Self {
+    pub(crate) fn from_row_with_channel(row: SqliteRow) -> Self {
         info!("from_row_with_channel");
         Self {
             id: row.get("id"),
@@ -149,6 +149,17 @@ impl Episode {
             .fetch_one(pool)
             .await
             .map_err(|e| e.into())
+    }
+
+    pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
+        info!("read");
+        let sql = "SELECT * FROM episodes WHERE id = $1";
+        query(sql)
+            .bind(id)
+            .map(Self::from_row)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
     }
 
     pub async fn read_episodes_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Self>, Error>{
