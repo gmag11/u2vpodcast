@@ -26,7 +26,11 @@ The API SHALL expose an authenticated endpoint to update an episode's progress i
 
 #### Scenario: Marking an episode listened on completion
 - **WHEN** the player saves progress for an episode with the listened flag set
-- **THEN** `listen` becomes true, `listened_at` is set to the current server time, and `position_seconds` stores the final position
+- **THEN** `listen` becomes true on the false→true transition, `listened_at` is set to the current server time, and `position_seconds` stores the final position
+
+#### Scenario: Repeated saves of a listened episode keep its timestamp
+- **WHEN** the player keeps saving position on an episode that is already marked listened (e.g. while replaying it)
+- **THEN** `listened_at` stays the original completion time and only `position_seconds` is updated
 
 #### Scenario: Marking listened via long-press skip
 - **WHEN** the user long-presses next (step-2 dual next control) on the current episode
@@ -48,8 +52,8 @@ When playback starts on an episode whose stored position is above 30 seconds and
 - **WHEN** the user plays an episode whose local copy reports no position but the server stores a position above 30 seconds
 - **THEN** the player queries the stored progress and starts from the server position
 
-#### Scenario: Resume also applies when navigating back
-- **WHEN** the user navigates back (step-2 dual previous) to an episode whose stored position is above 30 seconds and below 95% of the duration
+#### Scenario: Resume also applies when navigating back, next, and auto-advance
+- **WHEN** the user navigates back (step-2 dual previous), skips to the next episode, or the player auto-advances through the queue, arriving at an episode whose stored position is above 30 seconds and below 95% of the duration
 - **THEN** playback resumes from the stored position, identical to a fresh play of that episode
 
 #### Scenario: No resume for near-start or near-end positions
@@ -96,17 +100,53 @@ While an episode is playing, the player SHALL persist its current position at le
 - **WHEN** the user pauses an episode or closes/reloads the tab mid-episode
 - **THEN** the latest position is persisted before the episode stops being observed
 
-### Requirement: Episode card shows played mark and resume hint
+#### Scenario: Re-listening updates the saved point
+- **WHEN** a listened episode is replayed and the user stops mid-way
+- **THEN** the live position is persisted (the mark stays listened) and the next play resumes there instead of restarting from the beginning
 
-The episode card SHALL display a visible played mark (check indicator with "listened" label) when the episode's `listen` is true. For a partially played episode (`listen` false with a position above the 30-second threshold) the card SHALL show a progress hint with the stored position. Both indicators SHALL reflect the shared player's in-memory episode so they update without a reload.
+### Requirement: Stop halts playback, or resets the position when not reproducing
+
+The player's stop control SHALL halt playback when the episode is reproducing, flushing its current position. When the episode is NOT reproducing (already stopped or paused), the stop control SHALL reset its saved position to 0 while keeping the listened mark unchanged. The internal stops that are not user gestures (end of queue after completion, session teardown) SHALL always keep the position.
+
+#### Scenario: Stop halts a reproducing episode
+- **WHEN** the user presses stop while an episode is playing
+- **THEN** playback halts and the current position remains saved for a later resume
+
+#### Scenario: Stop resets a stopped or paused episode
+- **WHEN** the user presses stop on an episode that is not reproducing (already stopped, or paused) and has a saved position above 0
+- **THEN** the saved position is reset to 0 and the listened mark is kept
+
+#### Scenario: Any stopped episode resets, not just the last played
+- **WHEN** the user presses stop on a stopped episode's card while another episode is current
+- **THEN** that episode's saved position is reset to 0 (the current episode's playback is untouched)
+
+#### Scenario: Repeated stop at the start is a no-op
+- **WHEN** the user presses stop on a non-reproducing episode whose saved position is already 0
+- **THEN** nothing changes
+
+#### Scenario: Completion keeps the position
+- **WHEN** an episode completes and the queue ends, or the session is torn down
+- **THEN** the episode halts and its position is kept (no reset)
+
+### Requirement: Episode card shows played mark, resume hint, and progress strip
+
+The episode card SHALL display a played mark in its top-right corner — the corner itself tinted green, no icon or label — when the episode's `listen` is true. For a partially played episode (`listen` false with a position above the 30-second threshold) the card SHALL show a progress hint with the stored position. The card SHALL also render a read-only progress strip sized to the saved position, which for the current episode tracks the live playhead and never responds to pointer interaction. Both indicators SHALL reflect the shared player's in-memory episode so they update without a reload.
 
 #### Scenario: Played mark on completed episodes
 - **WHEN** an episode has been completed (listen true)
-- **THEN** its card shows a check mark and a "listened" label
+- **THEN** its card's top-right corner is tinted green, with no icon or label text
 
 #### Scenario: Resume hint on partial episodes
 - **WHEN** an episode has a position above 30 seconds and is not marked listened
 - **THEN** its card shows a hint indicating it can be continued (for example "Continue at MM:SS")
+
+#### Scenario: Progress strip reflects the saved point
+- **WHEN** an episode has a saved position
+- **THEN** its card shows a bottom progress strip whose width is proportional to the saved position over the episode duration
+
+#### Scenario: Progress strip is read-only
+- **WHEN** the user clicks or drags on the card's progress strip
+- **THEN** playback is unaffected (the strip has no interaction handlers)
 
 #### Scenario: Completed episode hint disappears
 - **WHEN** the user finishes an episode that previously showed a resume hint

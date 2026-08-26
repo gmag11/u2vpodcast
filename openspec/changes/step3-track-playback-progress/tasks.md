@@ -58,3 +58,12 @@
 ## 10. Rollback note
 
 - [x] 10.1 Verify `down.sql` restores a working `episodes` table before merging (SQLite column drop requires table recreation).
+
+## 11. Card corner mark, progress strip, and stop reset (pre-archive polish)
+
+- [x] 11.1 Move the played mark to the card's top-right corner: a green corner tint (`text-success`, SVG triangle at `right-0 top-0`) instead of the "Escuchado"/"Listened" text row or a check icon; accessible via `aria-label`, card is `relative`+`overflow-hidden`.
+- [x] 11.2 Add a read-only progress strip at the card's bottom edge sized to `position_seconds / duration` (parsed via `parseDurationSeconds`, exported from the player store); for the current non-stopped episode it tracks `player.progress` instead so it evolves live. No interaction handlers (`aria-hidden`).
+- [x] 11.3 Stop in `player.ts` is state-split: reproducing → halt and keep; not reproducing (stopped or paused) → reset the saved position to 0 (keeping the listened mark) via a direct `updateEpisodeProgress` write. `stop(target?)` accepts an episode, so a stopped non-current episode resets its own position from its card while another episode plays. Internal stops (end of queue after completion, session teardown) route through `haltPlayback()` and never reset.
+- [x] 11.4 Tests: `EpisodeCard.test.ts` asserts the corner tint (via `data-testid`/`aria-label`), the progress strip widths (50%, 100%, hidden at 0), and the untouched case; `player.test.ts` asserts stop halts a reproducing episode keeping the position, resets a stopped/paused one (plain and listened), and is a no-op when already at 0.
+- [x] 11.5 Update `design.md` (Decision 6 card UI, Decision 8 stop reset) and the `playback-progress`/`episode-cards` delta specs; verify `pnpm test`/`pnpm build`/eslint.
+- [x] 11.6 Fix replay regression: the no-regress guard is scoped to the *just-finalized* episode (cleared when playback restarts via `loadEpisode`/`togglePlay`), so stopping mid-replay of a listened episode persists the live position again instead of leaving it at the duration.

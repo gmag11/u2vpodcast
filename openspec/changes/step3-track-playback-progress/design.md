@@ -63,18 +63,19 @@ Before deciding, the resume reads the per-id progress map. That map is seeded fr
 
 In `onEnded` (before advancing per step 1): save `{ position_seconds: duration, listened: true }`, and optimistically update the in-memory episode + the card should it be visible.
 
-The same mark path is reached from the step-2 long-press next control (`skipNext({ markCurrent: true })`), which stores `position_seconds` as the episode's duration exactly like completion. All marking goes through one shared `markListened()` helper in the store. A saved write never *regresses* a listened episode's position below its recorded value, so the departing-episode flush right after a long-press skip cannot overwrite the completion position with the live playhead. `markListened` falls back to the parsed `duration` string (`H:MM:SS`) when the media element has no usable duration, so a completed episode never records a zero position. Server-side, `listened_at` is only set on the false→true transition and otherwise kept (`UPDATE ... CASE WHEN listened THEN COALESCE(listened_at, $now) ELSE NULL`): re-saving an already-listened episode while replaying it never drifts the completion timestamp. The endpoint accepts `listened: false` as well — clearing the mark and `listened_at` — which the step-4 unmark flow uses with `position_seconds: 0`.
+The same mark path is reached from the step-2 long-press next control (`skipNext({ markCurrent: true })`), which stores `position_seconds` as the episode's duration exactly like completion. All marking goes through one shared `markListened()` helper in the store. A saved write never *regresses* the position of a **just-finalized** listened episode (from completion or long-press skip) below its recorded value, so the departing-episode flush right after the mark cannot overwrite the completion position with the live playhead. The guard is scoped per episode and cleared as soon as playback restarts on it (`loadEpisode`/`togglePlay`), so a re-listen of the episode persists its live position normally again — stopping mid-replay updates the saved point instead of leaving it stuck at the duration. `markListened` falls back to the parsed `duration` string (`H:MM:SS`) when the media element has no usable duration, so a completed episode never records a zero position. Server-side, `listened_at` is only set on the false→true transition and otherwise kept (`UPDATE ... CASE WHEN listened THEN COALESCE(listened_at, $now) ELSE NULL`): re-saving an already-listened episode while replaying it never drifts the completion timestamp. The endpoint accepts `listened: false` as well — clearing the mark and `listened_at` — which the step-4 unmark flow uses with `position_seconds: 0`.
 
 **Why**: completion is the agreed definition of "reproducido" (≥95% also counts via the resume threshold).
 
 ### Decision 6: Episode serialization and card UI
 
 `Episode` (both `from_row` and `from_row_with_channel`) gains `position_seconds: i64` and `listened_at: Option<DateTime<Utc>>`; GET episode responses carry them automatically. `EpisodeCard` renders:
-- played mark: check badge + "Escuchado" label when `listen` is true;
+- played mark: the card's top-right corner is tinted green (`text-success`) when `listen` is true — a compact visual cue that occupies no row space and no icon slot;
 - resume hint: "Continuar en MM:SS" (formatted from `position_seconds`) when `listen` is false and position is above the 30s threshold;
-- a "Start over" affordance when the card's episode is currently loaded with an active resume position.
+- a "Start over" affordance when the card's episode is currently loaded with an active resume position;
+- a read-only progress strip pinned to the card's bottom edge (`h-1`, green fill) sized to `position_seconds / duration`; for the currently playing (non-stopped) episode it tracks the live playhead instead, so it evolves during playback. The strip is purely presentational (`aria-hidden`, no handlers); the interactive scrubber stays in the player bar.
 
-**Why**: cards are the shared surface across both views; the History screen list itself stays untouched.
+**Why**: cards are the shared surface across both views; the History screen list itself stays untouched. Moving the played mark to the corner and shrinking progress to a strip keeps the card's content rows for text.
 
 ### Decision 7: Keyboard seek ±15 seconds
 
@@ -95,6 +96,16 @@ onKeydown(e):
 **Why**: ±15s is the standard web-player convention. The `document.hasFocus()` gate implements "only when the frontend is in focus", and the editable/slider guards prevent breaking text navigation in the search inputs and the scrubber.
 
 **Alternative considered**: handling keys only when focus is inside the player bar or a card. Rejected by the "frontend in focus" requirement: the keys should work anywhere on the page without requiring a specific focus target.
+
+### Decision 8: Stop state split — reproduce → halt, otherwise → reset
+
+The player's Stop control is a single gesture whose effect depends on the episode's current state:
+- when the episode is **reproducing** (the element is playing), Stop halts playback and keeps the saved position — a later play resumes there;
+- when the episode is **not reproducing** (already stopped, or paused) Stop resets its saved start point to 0, persisting `{ position_seconds: 0 }` with the current `listen` mark untouched (a listened episode stays listened).
+
+The reset applies to **any** episode, not just the last one played: the episode cards pass their episode as the stop target (`player.stop(episode)`), so a stopped episode resets its own saved point even while another episode is current — a non-current target is never reproducing by definition, so its stop always resets. The card stop control is therefore enabled on every card (only disabled while the *current* episode is loading). The reset is an explicit user gesture, so it bypasses the "never regress a listened position" rule and always writes. An episode already at 0 resets nothing. Two former `stop()` call sites are not user gestures and always keep the position: the internal end-of-queue stop after completion, and the logout/session-teardown stop — both route through a shared `haltPlayback()` helper instead of the public `stop()`. The persistent bar's stop keeps targeting the current episode.
+
+**Why**: pressing stop on something that is not playing has no other meaning in this player (there is no "screen off" state), so making it clear the resume point gives a one-gesture way to start an episode fresh from anywhere, without reaching for the "start over" affordance.
 
 ## Risks / Trade-offs
 
