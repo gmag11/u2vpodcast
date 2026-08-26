@@ -104,7 +104,7 @@ impl Ytdlp {
         let status = child.wait().await?;
         let stdout_bytes = stdout_task
             .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let _ = stderr_task.await;
         Ok((status, stdout_bytes))
     }

@@ -436,7 +436,6 @@ mod cors_tests {
 mod error_serialization_tests {
     use crate::models::Error;
     use actix_web::http::StatusCode;
-    use serde_json;
 
     #[test]
     fn error_without_status_serializes_as_500() {

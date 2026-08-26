@@ -48,7 +48,12 @@ fn resolve_media(relative: &str) -> Option<PathBuf> {
 }
 
 fn mime_for(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
         "mp3" => "audio/mpeg",
         "ogg" | "oga" | "opus" => "audio/ogg",
         "m4a" => "audio/mp4",
@@ -147,9 +152,8 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
         debug!("media 404 {} {}", req.method(), relative);
         return HttpResponse::NotFound().finish();
     }
-    let std_meta = std::fs::metadata(&full).unwrap_or(meta);
-    let (etag, last_modified) = validators(&std_meta);
-    let total = std_meta.len();
+    let (etag, last_modified) = validators(&meta);
+    let total = meta.len();
     let mime = mime_for(&full);
     let is_head = req.method() == Method::HEAD;
 
