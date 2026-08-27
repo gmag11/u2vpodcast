@@ -9,4 +9,4 @@
 
 - [x] 2.1 Confirm existing playlist dedupe coverage still holds (`add_rejects_duplicates_with_conflict` in `src/models/playlist.rs`) and add/extend a test asserting a second add of the same episode leaves a single entry unchanged
 - [x] 2.2 Run `cargo build` (or `cargo check`) and `cargo clippy` cleanly
-- [ ] 2.3 Manual smoke test: run a channel sync, then `GET /playlist/` and verify each newly downloaded episode appears at the end in download order; reorder one episode and remove another, then resync and verify the reordered episode keeps its position and the removed episode is not re-appended
+- [x] 2.3 Manual smoke test: run a channel sync, then `GET /playlist/` and verify each newly downloaded episode appears at the end in download order; reorder one episode and remove another, then resync and verify the reordered episode keeps its position and the removed episode is not re-appended
