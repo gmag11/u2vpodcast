@@ -6,6 +6,7 @@ Downloaded chapters sit in the library but never reach the playlist, so the user
 
 - When a chapter/episode download completes successfully in the background worker, the episode is automatically appended to the end of the playlist.
 - The append reuses the existing playlist "add" semantics: duplicates are rejected (an episode already in the playlist is not added twice), and episodes below the retention/publish floor that get discarded are never appended.
+- User playlist changes are respected: reordering an episode keeps it at its chosen position, and removing an episode prevents it from being automatically added again on a later channel sync.
 - No UI change: the feature is server-side and always on.
 
 ## Capabilities

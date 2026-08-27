@@ -11,7 +11,7 @@ Channel syncs run in the background (`src/utils/worker.rs`): episodes are downlo
 
 **Non-Goals:**
 - No UI or endpoint changes; no user-facing toggle.
-- No re-append of already-playlisted episodes during resyncs (idempotency comes from the `UNIQUE(episode_id)` reject).
+- No re-append of already-playlisted episodes during resyncs: an existing playlist item, including one the user reordered, remains untouched at its current position. If an append path is reached, the `UNIQUE(episode_id)` constraint still rejects a duplicate. A user-removed episode is not re-appended because `episode_exists` prevents the worker from re-entering the download path, and removing a playlist item does not remove the episode from the library.
 - No changes to playlist completion/removal flow (`playlist` spec is untouched).
 - No version bump or release-specific work in this change.
 
@@ -34,6 +34,6 @@ The feature is always-on and server-side. A toggle would add config surface the 
 
 ## Risks / Trade-offs
 
-- [Playlist grows with every sync, including re-downloads of edited/re-published episodes] → Dedupe handles same-episode repeats; if growth becomes a problem, a future opt-in flag (D4 alternative) bounds it.
+- [Playlist grows with every sync, including re-downloads of edited/re-published episodes] → Dedupe handles same-episode repeats, while user removals are respected by the existing episode-existence guard; if growth becomes a problem, a future opt-in flag (D4 alternative) bounds it.
 - [Append DB error mid-sync silently "misses" an episode] → Logged at error level; playlist read still reflects previous state; a later sync of the same episode re-attempts via the same dedupe-safe path.
 - [`add` returning `Err` on duplicates must not be confused with real failures] → Worker maps only the unique-violation error to no-op; all other errors are logged (covered by a task-level checklist).
