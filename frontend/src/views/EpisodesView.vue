@@ -165,7 +165,12 @@
 		</div>
 
 		<div v-else class="flex w-full max-w-3xl flex-col gap-5">
-			<EpisodeCard v-for="episode in filteredEpisodes" :key="episode.id" :episode="episode" :list="filteredEpisodes" />
+			<EpisodeCard
+				v-for="episode in filteredEpisodes"
+				:key="episode.id"
+				:episode="episode"
+				:list="filteredEpisodes"
+			/>
 		</div>
 	</main>
 </template>

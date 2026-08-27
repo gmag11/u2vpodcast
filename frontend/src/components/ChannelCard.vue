@@ -42,9 +42,7 @@
 			status: props.channel.last_sync_ok ? t('status.ok') : t('status.error')
 		})
 	);
-	const episodeAgeTooltip = computed(() =>
-		t('card.lastEpisodeTooltip', { age: ageLabel.value })
-	);
+	const episodeAgeTooltip = computed(() => t('card.lastEpisodeTooltip', { age: ageLabel.value }));
 </script>
 
 <template>
@@ -91,10 +89,7 @@
 			</div>
 		</div>
 		<div class="mt-auto flex items-center justify-between gap-4 border-t border-outline pt-4">
-			<div
-				v-if="hasSyncStatus || syncAgeLabel"
-				class="group relative flex items-center gap-1.5"
-			>
+			<div v-if="hasSyncStatus || syncAgeLabel" class="group relative flex items-center gap-1.5">
 				<span
 					v-if="hasSyncStatus"
 					class="h-2.5 w-2.5 rounded-full shadow"

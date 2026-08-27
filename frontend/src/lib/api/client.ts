@@ -1,4 +1,12 @@
-import type { Channel, ConfigResponse, Episode, EpisodeProgress, LoginRequestBody, Response, User } from '@/types';
+import type {
+	Channel,
+	ConfigResponse,
+	Episode,
+	EpisodeProgress,
+	LoginRequestBody,
+	Response,
+	User
+} from '@/types';
 
 export const baseEndpoint: string = '';
 

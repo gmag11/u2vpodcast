@@ -174,7 +174,11 @@
 							class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 							:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 							:disabled="isCurrent && player.loading"
-							@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list, { queueSource: props.queueSource })"
+							@click="
+								isCurrent
+									? player.togglePlay()
+									: player.play(props.episode, props.list, { queueSource: props.queueSource })
+							"
 						>
 							<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 							<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
@@ -199,7 +203,11 @@
 						class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
 						:aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
 						:disabled="isCurrent && player.loading"
-						@click="isCurrent ? player.togglePlay() : player.play(props.episode, props.list, { queueSource: props.queueSource })"
+						@click="
+							isCurrent
+								? player.togglePlay()
+								: player.play(props.episode, props.list, { queueSource: props.queueSource })
+						"
 					>
 						<PhPause v-if="isPlaying" class="h-4 w-4 text-white" weight="fill" />
 						<PhPlay v-else class="ml-0.5 h-4 w-4 text-white" weight="fill" />
@@ -235,10 +243,7 @@
 				<p class="mt-1 line-clamp-2 text-sm text-text-muted">
 					{{ props.episode.description }}
 				</p>
-				<div
-					v-if="resumeSeconds > 0"
-					class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1"
-				>
+				<div v-if="resumeSeconds > 0" class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
 					<span class="text-xs text-text-muted">
 						{{ $t('card.continueAt', { time: resumeLabel }) }}
 					</span>
@@ -246,7 +251,12 @@
 						v-if="canStartOver"
 						type="button"
 						class="inline-flex items-center text-xs text-accent-500 transition-colors hover:underline"
-						@click="player.play(props.episode, props.list, { fromStart: true, queueSource: props.queueSource })"
+						@click="
+							player.play(props.episode, props.list, {
+								fromStart: true,
+								queueSource: props.queueSource
+							})
+						"
 					>
 						{{ $t('card.startOver') }}
 					</button>

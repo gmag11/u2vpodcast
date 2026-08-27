@@ -17,9 +17,7 @@ vi.mock('@/lib/api/client', () => ({
 		getEpisodeProgress: vi.fn(() =>
 			Promise.resolve({ ok: false, data: null, user: null, status: false })
 		),
-		getPlaylist: vi.fn(() =>
-			Promise.resolve({ ok: true, data: [], user: null, status: true })
-		),
+		getPlaylist: vi.fn(() => Promise.resolve({ ok: true, data: [], user: null, status: true })),
 		addEpisodeToPlaylist: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		),
