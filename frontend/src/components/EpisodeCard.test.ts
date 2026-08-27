@@ -111,6 +111,9 @@ describe('EpisodeCard playback indicators', () => {
 			global: { plugins: [pinia, testI18n], stubs: { RouterLink: true } }
 		});
 
+		// A non-current card's stop stays enabled: it is the "rewind this
+		// episode" affordance and resets that episode's saved position via the
+		// store (fix-stop-reset-scope).
 		const stopBtn = wrapper.find('[aria-label="Stop"]');
 		expect((stopBtn.element as HTMLButtonElement).disabled).toBe(false);
 		await stopBtn.trigger('click');

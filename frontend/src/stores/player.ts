@@ -786,6 +786,12 @@ export const usePlayerStore = defineStore('player', () => {
 			listen: recorded.listen,
 			listened_at: recorded.listened_at ?? null
 		});
+		// Keep the shared current-episode view in sync when the reset targets
+		// the current episode (card stop on the current, non-reproducing
+		// episode), so the bar/card reflect the cleared position immediately.
+		if (currentEpisode.value?.id === episode.id) {
+			currentEpisode.value = { ...currentEpisode.value, position_seconds: 0 };
+		}
 		trace('reset position to zero', episode.yt_id);
 		api
 			.updateEpisodeProgress(episode.yt_id, {
@@ -798,24 +804,28 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	// Public stop control. Callers pass the episode the button belongs to:
-	// - an episode that is NOT the current one is not reproducing, so Stop
-	//   resets its saved position directly (any stopped episode, not just the
-	//   last played one);
-	// - the current episode: if it is reproducing, halt and keep its position;
-	//   otherwise (already stopped, or paused) reset its saved start point to 0.
+	// - the persistent bar calls stop() with no target: a pure stop that halts
+	//   playback when reproducing and never touches any saved position;
+	// - the cards call stop(episode): when that episode is reproducing (it is
+	//   the current one and playing) it halts keeping the position; otherwise
+	//   (a non-current card, or the current episode stopped or paused) it
+	//   resets the episode's saved position to 0 (fix-stop-reset-scope).
 	function stop(target?: Episode) {
 		const targetEpisode = target ?? currentEpisode.value;
 		if (!targetEpisode) return;
-		if (target && currentEpisode.value?.id !== targetEpisode.id) {
-			resetPosition(targetEpisode);
-			return;
-		}
+		const isCurrentTarget = target == null || targetEpisode.id === currentEpisode.value?.id;
 		const el = audio;
-		const reproducing = !stopped.value && el != null && !el.paused;
+		const reproducing = isCurrentTarget && !stopped.value && el != null && !el.paused;
 		if (reproducing) {
 			haltPlayback();
 			return;
 		}
+		if (target != null) {
+			resetPosition(targetEpisode);
+			return;
+		}
+		// Persistent-bar stop: converge to the stopped state without touching
+		// any saved position.
 		stopped.value = true;
 		playing.value = false;
 		currentTime.value = 0;
@@ -823,7 +833,6 @@ export const usePlayerStore = defineStore('player', () => {
 			el.pause();
 			el.currentTime = 0;
 		}
-		resetPosition(targetEpisode);
 	}
 
 	function seek(seconds: number) {

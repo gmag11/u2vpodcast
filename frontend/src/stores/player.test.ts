@@ -606,6 +606,29 @@ describe('player store playback progress', () => {
 		expect(el.currentTime).toBe(420);
 	});
 
+	it('stop on a paused episode keeps the saved position', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+
+		// stream to 420s, then pause so the episode is NOT reproducing
+		el.currentTime = 420;
+		el.emit('timeupdate');
+		await player.togglePlay();
+		expect(player.currentEpisode?.position_seconds).toBe(420);
+
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+		player.stop();
+		// stop converges to the stopped state but never writes a 0 position
+		expect(player.currentEpisode?.position_seconds).toBe(420);
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+	});
+
 	it('togglePlay resumes a restored episode from the server progress', async () => {
 		// a stale copy restored from the persisted queue (position 0 locally)
 		const stale = episode(9);
@@ -881,7 +904,7 @@ describe('player store playback progress', () => {
 		expect(resolved.listen).toBe(false);
 	});
 
-	it('a second stop press resets the saved position to zero', async () => {
+	it('a second stop press keeps the saved position', async () => {
 		const player = usePlayerStore();
 		const ep = episode(1);
 		await player.play(ep);
@@ -895,15 +918,15 @@ describe('player store playback progress', () => {
 		expect(player.currentEpisode?.position_seconds).toBe(240);
 		vi.mocked(api.updateEpisodeProgress).mockClear();
 
-		player.stop(); // second press while already stopped: reset to 0
-		expect(player.currentEpisode?.position_seconds).toBe(0);
-		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+		player.stop(); // second press while already stopped: still keeps it
+		expect(player.currentEpisode?.position_seconds).toBe(240);
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt1', {
 			position_seconds: 0,
 			listened: false
 		});
 	});
 
-	it('a second stop press resets a listened episode to zero keeping the mark', async () => {
+	it('a second stop press keeps the position and the mark on a listened episode', async () => {
 		const player = usePlayerStore();
 		const ep = episode(1);
 		await player.play(ep);
@@ -914,7 +937,45 @@ describe('player store playback progress', () => {
 		expect(player.stopped).toBe(true);
 
 		vi.mocked(api.updateEpisodeProgress).mockClear();
-		player.stop(); // already stopped → reset to 0, mark untouched
+		player.stop(); // persistent-bar stop on the stopped episode → nothing changes
+		expect(player.currentEpisode?.position_seconds).toBe(600);
+		expect(player.currentEpisode?.listen).toBe(true);
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: true
+		});
+	});
+
+	it('card stop on a paused current episode resets its saved position', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 240;
+		el.emit('timeupdate'); // recorded at 240
+
+		await player.pause(); // paused, not stopped
+		player.stop(ep); // card stop while not reproducing → reset to 0
+		expect(player.currentEpisode?.position_seconds).toBe(0);
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+			position_seconds: 0,
+			listened: false
+		});
+	});
+
+	it('card stop on a listened non-reproducing episode resets to zero keeping the mark', async () => {
+		const player = usePlayerStore();
+		const ep = episode(1);
+		await player.play(ep);
+		const el = MockAudioElement.instances[0];
+		el.duration = 600;
+		el.currentTime = 600;
+		el.emit('ended'); // completion marks listened (600,true), then stops
+		expect(player.stopped).toBe(true);
+
+		vi.mocked(api.updateEpisodeProgress).mockClear();
+		player.stop(ep); // card stop on the stopped current episode → reset, mark kept
 		expect(player.currentEpisode?.position_seconds).toBe(0);
 		expect(player.currentEpisode?.listen).toBe(true);
 		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
@@ -935,7 +996,7 @@ describe('player store playback progress', () => {
 		expect(api.updateEpisodeProgress).not.toHaveBeenCalled();
 	});
 
-	it('stop on a non-current stopped episode resets its saved position', async () => {
+	it('card stop on a non-current stopped episode resets its saved position', async () => {
 		const player = usePlayerStore();
 		const a = episode(1);
 		const b = episode(2);
@@ -949,7 +1010,8 @@ describe('player store playback progress', () => {
 		await player.pause(); // record b at 120
 		vi.mocked(api.updateEpisodeProgress).mockClear();
 
-		// a is stopped but not the current episode: stop resets just a
+		// a is stopped but not the current episode: the card's stop resets
+		// just a (fix-stop-reset-scope); the current playback is untouched
 		player.stop(a);
 		expect(player.currentEpisode?.id).toBe(2);
 		expect(player.episodeWithProgress(episode(1)).position_seconds).toBe(0);
@@ -959,7 +1021,7 @@ describe('player store playback progress', () => {
 		expect(resetCalls.at(-1)![1]).toEqual({ position_seconds: 0, listened: false });
 	});
 
-	it('stopping a paused episode resets its saved position to zero', async () => {
+	it('stopping a paused episode keeps its saved position', async () => {
 		const player = usePlayerStore();
 		const ep = episode(1);
 		await player.play(ep);
@@ -969,9 +1031,9 @@ describe('player store playback progress', () => {
 		el.emit('timeupdate'); // recorded at 240
 
 		await player.pause(); // paused, not stopped
-		player.stop(); // not reproducing → reset to 0
-		expect(player.currentEpisode?.position_seconds).toBe(0);
-		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt1', {
+		player.stop(); // not reproducing → converge to stopped, keep position
+		expect(player.currentEpisode?.position_seconds).toBe(240);
+		expect(api.updateEpisodeProgress).not.toHaveBeenCalledWith('yt1', {
 			position_seconds: 0,
 			listened: false
 		});
