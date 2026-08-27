@@ -13,12 +13,17 @@
 
 	// The player is only meant to be used after logging in: hide it on the
 	// login screen and stop any playback the moment the session disappears.
+	// `immediate` also covers the reload case: the session is restored in
+	// main.ts *before* this component mounts, so without it the playlist would
+	// never load on a fresh page load and the card icons would stay unmarked
+	// until the playlist page is visited.
 	watch(
 		() => auth.isAuthenticated,
 		(isAuthenticated) => {
 			if (!isAuthenticated) player.halt();
 			else playlists.load();
-		}
+		},
+		{ immediate: true }
 	);
 </script>
 

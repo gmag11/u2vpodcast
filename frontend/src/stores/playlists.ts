@@ -14,7 +14,16 @@ export const usePlaylistStore = defineStore('playlists', () => {
 	const episodeIdSet = computed(() => new Set(items.value.map((episode) => episode.id)));
 
 	async function load() {
-		const result = await api.getPlaylist();
+		let result: ApiResult<Array<Episode>>;
+		try {
+			result = await api.getPlaylist();
+		} catch {
+			// A failed fetch (offline, session dropped) must never leave the
+			// store half-initialised nor reject through App-level callers on
+			// boot; the cards simply stay in their "not in playlist" state
+			// until a later successful load.
+			return { ok: false, data: null, user: null, status: false };
+		}
 		if (result.ok && result.data) {
 			items.value = result.data as Array<Episode>;
 			loaded.value = true;
