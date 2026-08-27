@@ -1,4 +1,5 @@
 use sqlx::SqlitePool;
+use actix_web::http::StatusCode;
 use tracing::{
     info,
     debug,
@@ -21,6 +22,7 @@ use super::super::models::{
     Error,
     Channel,
     Episode,
+    PlaylistItem,
     Ytdlp,
     YtVideo,
     audios_dir,
@@ -271,7 +273,7 @@ async fn process_episode(
             published_at.timestamp(), 0)
     );
     let listen = false;
-    let _ = Episode::new(
+    let episode = Episode::new(
         pool,
         channel.id,
         title,
@@ -283,6 +285,20 @@ async fn process_episode(
         image,
         listen
     ).await?;
+    // Auto-append freshly downloaded episodes to the end of the playlist
+    // (auto-playlist-append): reuses the playlist API's "add" semantics
+    // (append at end, dedupe via UNIQUE(episode_id)). The append is
+    // best-effort: an already-playlisted episode (e.g. a re-downloaded or
+    // re-published one) surfaces as a CONFLICT from `add` and is the expected
+    // no-op here, and any other failure is logged without aborting the sync
+    // run or affecting subsequent downloads.
+    match PlaylistItem::add(pool, episode.id).await {
+        Ok(_) => info!("Appended {} to the playlist", episode.yt_id),
+        Err(e) if e.status_code() == StatusCode::CONFLICT => {
+            debug!("Episode {} already in playlist; skipping append", episode.yt_id);
+        }
+        Err(e) => error!("Cant append episode {} to playlist: {}", episode.yt_id, e),
+    }
     Ok(())
 }
 

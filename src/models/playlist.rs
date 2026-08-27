@@ -114,7 +114,7 @@ impl PlaylistItem {
             .ok_or_else(|| {
                 Error::new_with_status_code("episode not in playlist", StatusCode::NOT_FOUND)
             })?;
-        Self::reindex(&mut *tx).await?;
+        Self::reindex(&mut tx).await?;
         tx.commit().await?;
         Ok(item)
     }
@@ -300,6 +300,8 @@ mod playlist_tests {
         assert_eq!(err.status_code(), StatusCode::CONFLICT);
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
         assert_eq!(items.len(), 1, "duplicate add must leave the playlist unchanged");
+        assert_eq!(items[0].episode_id, ep, "the remaining entry must be the original episode");
+        assert_eq!(items[0].position, 0, "the remaining entry must keep its original position");
     }
 
     #[tokio::test]
