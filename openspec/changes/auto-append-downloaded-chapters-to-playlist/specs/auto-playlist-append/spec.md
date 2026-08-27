@@ -9,8 +9,15 @@ When the background download worker successfully stores a new episode (a chapter
 - **THEN** the new episode is appended as the third item at the end of the playlist
 
 #### Scenario: Already-playlisted episode is not duplicated
-- **WHEN** a download completes for an episode that is already in the playlist
+- **GIVEN** the user has reordered an episode to a chosen position in the playlist
+- **WHEN** the channel is synced again and encounters that episode
 - **THEN** the episode remains in the playlist exactly once at its existing position
+
+#### Scenario: User-removed episode is not re-appended on resync
+- **GIVEN** an episode was downloaded and auto-appended to the playlist, and the user subsequently removed it from the playlist
+- **WHEN** the channel is synced again
+- **THEN** the episode is not re-appended to the playlist
+- **NOTE** This guarantee is provided by the existing `episode_exists` guard in the worker; removing a playlist item does not remove the episode from the library
 
 #### Scenario: Discarded episode is not appended
 - **WHEN** a downloaded episode is discarded because it is published before the retention floor
