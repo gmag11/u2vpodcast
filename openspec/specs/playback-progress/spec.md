@@ -104,30 +104,33 @@ While an episode is playing, the player SHALL persist its current position at le
 - **WHEN** a listened episode is replayed and the user stops mid-way
 - **THEN** the live position is persisted (the mark stays listened) and the next play resumes there instead of restarting from the beginning
 
-### Requirement: Stop halts playback, or resets the position when not reproducing
+### Requirement: Stop halts playback; only the card's stop resets a non-reproducing episode
 
-The player's stop control SHALL halt playback when the episode is reproducing, flushing its current position. When the episode is NOT reproducing (already stopped or paused), the stop control SHALL reset its saved position to 0 while keeping the listened mark unchanged. The internal stops that are not user gestures (end of queue after completion, session teardown) SHALL always keep the position.
+The player's stop control SHALL halt playback when the current episode is reproducing, flushing its current position so a later resume starts there, and SHALL NEVER reset a saved position when there is no target (persistent-bar stop): on a stopped or paused current episode it SHALL only converge to the stopped state, leaving the saved position untouched. The card's stop control (which passes its episode as target) SHALL: halt a reproducing current episode keeping its position; and reset to 0, keeping the listened mark unchanged, the saved position of the episode it belongs to when that episode is not reproducing — either a non-current card or the current episode when stopped or paused. Internal stops that are not user gestures (end of queue after completion, session teardown) SHALL keep the position as before. From the player itself, the only way to clear a saved position SHALL be the explicit "start over" flow.
 
-#### Scenario: Stop halts a reproducing episode
-- **WHEN** the user presses stop while an episode is playing
-- **THEN** playback halts and the current position remains saved for a later resume
+#### Scenario: Player-bar stop halts a reproducing episode and keeps its position
+- **WHEN** the user presses the persistent bar's stop while an episode is playing at 45 minutes
+- **THEN** playback halts and the saved position stays 45 minutes, so the next play resumes there
 
-#### Scenario: Stop resets a stopped or paused episode
-- **WHEN** the user presses stop on an episode that is not reproducing (already stopped, or paused) and has a saved position above 0
-- **THEN** the saved position is reset to 0 and the listened mark is kept
+#### Scenario: Player-bar stop on a stopped or paused episode keeps the position
+- **WHEN** the user presses the persistent bar's stop on the current episode that is not reproducing (already stopped, or paused) and has a saved position above 0
+- **THEN** the player converges to the stopped state and the saved position is left unchanged
 
-#### Scenario: Any stopped episode resets, not just the last played
-- **WHEN** the user presses stop on a stopped episode's card while another episode is current
-- **THEN** that episode's saved position is reset to 0 (the current episode's playback is untouched)
+#### Scenario: Card stop on a non-current episode resets that episode
+- **WHEN** the user presses a card's stop while another episode is current and the card's episode is not reproducing
+- **THEN** that episode's saved position is reset to 0 (listened mark kept) and the current episode's playback is untouched
 
-#### Scenario: Repeated stop at the start is a no-op
-- **WHEN** the user presses stop on a non-reproducing episode whose saved position is already 0
-- **THEN** nothing changes
+#### Scenario: Card stop on the current episode when not reproducing resets it
+- **WHEN** the user presses the current card's stop while the current episode is stopped or paused
+- **THEN** the current episode's saved position is reset to 0, keeping the listened mark
+
+#### Scenario: Card stop on a reproducing current episode halts and keeps the position
+- **WHEN** the user presses the current card's stop while the current episode is playing
+- **THEN** playback halts and the saved position is kept for a later resume
 
 #### Scenario: Completion keeps the position
 - **WHEN** an episode completes and the queue ends, or the session is torn down
 - **THEN** the episode halts and its position is kept (no reset)
-
 ### Requirement: Episode card shows played mark, resume hint, and progress strip
 
 The episode card SHALL display a played mark in its top-right corner — the corner itself tinted green, no icon or label — when the episode's `listen` is true. For a partially played episode (`listen` false with a position above the 30-second threshold) the card SHALL show a progress hint with the stored position. The card SHALL also render a read-only progress strip sized to the saved position, which for the current episode tracks the live playhead and never responds to pointer interaction. Both indicators SHALL reflect the shared player's in-memory episode so they update without a reload.

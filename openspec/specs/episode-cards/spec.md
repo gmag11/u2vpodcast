@@ -34,7 +34,7 @@ The episode card SHALL display the episode's total duration. When the card's epi
 
 ### Requirement: Play/pause and stop bound to the shared player
 
-The card's play/pause and stop controls SHALL bind to the global audio player store. Pressing play on an episode SHALL start the shared player for that episode; toggling pause SHALL pause the shared element; pressing stop SHALL reset and stop the shared element. The controls SHALL reflect the shared playing state and disable stop when the episode is not the current one.
+The card's play/pause and stop controls SHALL bind to the global audio player store. Pressing play on an episode SHALL start the shared player for that episode; toggling pause SHALL pause the shared element. Pressing stop on a card SHALL halt a reproducing current episode without touching its saved position, and SHALL reset the saved position to 0 (keeping the listened mark) when the card's episode is not reproducing — including on a non-current card, which is the episode-card "rewind this episode" affordance. The persistent player bar's stop SHALL only halt the shared element and SHALL never reset a saved position. The controls SHALL reflect the shared playing state.
 
 #### Scenario: Play starts the shared player
 - **WHEN** the user presses play in an episode card
@@ -44,10 +44,17 @@ The card's play/pause and stop controls SHALL bind to the global audio player st
 - **WHEN** the card's episode is playing and the user presses the card's pause button
 - **THEN** the shared element pauses and both the card and the persistent bar show the paused state
 
-#### Scenario: Stop clears playback
-- **WHEN** the user presses the card's stop button
-- **THEN** the shared player stops, resets its position to zero, and begins the persistent bar's auto-hide
+#### Scenario: Card stop on a reproducing current episode halts and keeps the position
+- **WHEN** the user presses the card's stop button while that episode is the current one and is playing
+- **THEN** the shared player halts, the episode's saved position is unchanged, and the persistent bar begins its auto-hide
 
+#### Scenario: Card stop on a non-reproducing episode resets its saved position
+- **WHEN** the user presses the card's stop button on an episode that is not reproducing (a non-current card, or the current episode stopped or paused)
+- **THEN** the episode's saved position is reset to 0, its listened mark is kept, and no other episode's playback is affected
+
+#### Scenario: Persistent bar stop never resets a saved position
+- **WHEN** the user presses the persistent bar's stop button
+- **THEN** the shared element halts (or converges to the stopped state) and no saved position is changed
 ### Requirement: Play/stop placement by breakpoint
 
 On desktop (`sm` and up) the play/pause and stop buttons SHALL be positioned below the episode thumbnail. On mobile the buttons SHALL be positioned to the right of the thumbnail. Exactly one placement SHALL be visible at any viewport width.
@@ -115,3 +122,28 @@ For an episode marked listened, the card SHALL expose a control that clears the 
 #### Scenario: Unmarking an episode already pending
 - **WHEN** the intended episode is already in the playlist
 - **THEN** the listened state still clears and the episode remains in the playlist exactly once
+
+
+### Requirement: Favorite toggle on episode cards
+
+Each episode card SHALL expose a favorite toggle rendered as a star icon reflecting the episode's stored favorite flag: a hollow (outline) star SHALL indicate a non-favorite and a filled star SHALL indicate a favorite. Activating the toggle on a non-favorite marks the episode as favorite; activating it on a favorite unmarks it, with a notification on each action. The toggle's state SHALL come from the episode's `favorite` field and SHALL update immediately when changed, without a list refetch.
+
+#### Scenario: Non-favorite episodes show a hollow star
+- **WHEN** an episode's `favorite` is false and the card is rendered
+- **THEN** the card shows the favorite toggle as a hollow (outline) star icon
+
+#### Scenario: Favorite episodes show a filled star
+- **WHEN** an episode's `favorite` is true and the card is rendered
+- **THEN** the card shows the favorite toggle as a filled star icon
+
+#### Scenario: Marking an episode as favorite from the card
+- **WHEN** the episode's `favorite` is false and the user activates the card's favorite toggle
+- **THEN** the backend stores favorite true, the card's star becomes filled, and a success notification is shown
+
+#### Scenario: Unmarking a favorite from the card
+- **WHEN** the episode's `favorite` is true and the user activates the card's favorite toggle
+- **THEN** the backend stores favorite false, the card's star becomes hollow, and a notification is shown
+
+#### Scenario: Toggle stays in sync with the shared state
+- **WHEN** the same episode is rendered in more than one card (e.g. channel view and episodes view)
+- **THEN** toggling in one place updates the star state everywhere the episode is rendered

@@ -27,3 +27,12 @@ Each episode returned by the all-episodes endpoint SHALL include a `channel_slug
 #### Scenario: Channel title is absent
 - **WHEN** an episode's owning channel cannot be resolved to a title
 - **THEN** the episode object still serializes with an empty (not missing) `channel_title` field
+
+
+### Requirement: All-episodes payloads include the favorite flag
+
+Each episode returned by the all-episodes endpoint SHALL include a boolean `favorite` field reflecting the stored favorite flag, so cross-channel views can render the favorite state per card without extra requests.
+
+#### Scenario: Favorite flag present on each episode
+- **WHEN** an authenticated user requests `GET /api/1.0/episodes/`
+- **THEN** every returned episode object includes `favorite` with the value stored for that episode

@@ -51,5 +51,5 @@
 
 - [x] 9.1 Run backend tests (`cargo test`) including the new prune tests
 - [x] 9.2 Run frontend tests and build (`npm test`, `npm run build` in `frontend/`)
-- [ ] 9.3 Manual end-to-end check: mark a favorite, publish/refresh past `max`, confirm the favorite survives and non-favorite eviction still works
-- [ ] 9.4 Manual UI check: favorites-only filter in the episodes view and the history screen hides non-favorites, combines with search, and restores the full list when deactivated
+- [x] 9.3 Manual end-to-end check: mark a favorite, publish/refresh past `max`, confirm the favorite survives and non-favorite eviction still works
+- [x] 9.4 Manual UI check: favorites-only filter in the episodes view and the history screen hides non-favorites, combines with search, and restores the full list when deactivated
