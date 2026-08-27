@@ -147,5 +147,15 @@
 	"languages": {
 		"en": "English",
 		"es": "Español"
+	},
+	"favorites": {
+		"add": "Add to favorites",
+		"remove": "Remove from favorites",
+		"added": "Added to favorites",
+		"removed": "Removed from favorites",
+		"failed": "Could not update favorites",
+		"filterLabel": "Favorites only",
+		"emptyTitle": "No favorites yet",
+		"emptyBody": "Episodes you mark with the star will appear here."
 	}
 }

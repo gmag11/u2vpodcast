@@ -77,6 +77,11 @@ pub struct ProgressBody {
     pub listened: bool,
 }
 
+#[derive(Deserialize)]
+pub struct FavoriteBody {
+    pub favorite: bool,
+}
+
 #[get("/episodes/{yt_id}/progress/")]
 async fn read_progress(
     data: Data<AppState>,
@@ -120,6 +125,29 @@ async fn update_progress(
         Ok(_) => HttpResponse::NoContent().finish(),
         Err(e) => {
             error!("Error updating progress: {e}");
+            CResponse::ko(e.status_code(), session)
+        }
+    }
+}
+
+#[put("/episodes/{yt_id}/favorite/")]
+async fn update_favorite(
+    data: Data<AppState>,
+    session: Session,
+    yt_id: Path<String>,
+    body: Json<FavoriteBody>,
+) -> actix_web::HttpResponse {
+    info!("update_favorite");
+    match Episode::set_favorite_by_yt_id(
+        &data.pool,
+        &yt_id.into_inner(),
+        body.into_inner().favorite,
+    ).await{
+        // Fire-and-forget like the progress write: the 204 alone confirms the
+        // write; a missing episode surfaces its 404 through the error status.
+        Ok(_) => HttpResponse::NoContent().finish(),
+        Err(e) => {
+            error!("Error updating favorite: {e}");
             CResponse::ko(e.status_code(), session)
         }
     }

@@ -129,6 +129,14 @@ export const api = {
 		return request<Array<Episode>>('/api/1.0/playlist/');
 	},
 
+	async setEpisodeFavorite(ytId: string, favorite: boolean) {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/episodes/${ytId}/favorite/`, {
+			method: 'PUT',
+			body: JSON.stringify({ favorite })
+		});
+	},
+
 	async addEpisodeToPlaylist(episodeId: number) {
 		return request<Episode>('/api/1.0/playlist/', {
 			method: 'POST',

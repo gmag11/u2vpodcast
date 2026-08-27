@@ -38,6 +38,7 @@ export interface Episode {
 	listen: boolean;
 	position_seconds: number;
 	listened_at: string | null;
+	favorite: boolean;
 	created_at: Date;
 	updated_at: Date;
 }

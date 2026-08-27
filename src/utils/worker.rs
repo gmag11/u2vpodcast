@@ -140,6 +140,27 @@ async fn clean_orphan_files(pool: &SqlitePool, channel: &Channel, folder: &str) 
     }
 }
 
+// Pure eviction rule over the channel's episodes ordered newest-first (as
+// `read_episodes_for_channel` returns them): favorites are skipped entirely
+// (never counted, never evicted) and a non-favorite is evicted only once the
+// running count of non-favorites exceeds `max` (episode-favorites /
+// channel-retention-limit). Because the input is newest-first, the evicted
+// rows are exactly the oldest non-favorites.
+fn evict_ids(episodes: &[Episode], max: usize) -> Vec<&Episode> {
+    let mut evict = Vec::new();
+    let mut kept = 0usize;
+    for episode in episodes {
+        if episode.favorite {
+            continue;
+        }
+        kept += 1;
+        if kept > max {
+            evict.push(episode);
+        }
+    }
+    evict
+}
+
 async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error>{
     // Defense in depth: a stored `max` below 1 (e.g. the historical -1 default)
     // must never trigger mass deletion and must not fail the sync. We keep all
@@ -155,23 +176,21 @@ async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Re
         }
     };
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
-    for (index, episode) in episodes.iter().enumerate(){
-        if index >= max { // remove
-            let filename = format!("{}/{}/{}.mp3", folder, channel.slug, episode.yt_id);
-            info!("Deleting file {filename}");
-            let exists = tokio::fs::metadata(&filename)
-                .await
-                .map(|f| f.is_file())
-                .unwrap_or(false);
-            let removed = tokio::fs::remove_file(&filename)
-                .await
-                .map(|_| true)
-                .unwrap_or(false);
-            if !exists || removed {
-                match Episode::remove(pool, episode.id).await{
-                    Ok(_) => info!("Removed {}", &filename),
-                    Err(e) => error!("Cant remove {}. {}", &filename, e),
-                }
+    for episode in evict_ids(&episodes, max) { // remove
+        let filename = format!("{}/{}/{}.mp3", folder, channel.slug, episode.yt_id);
+        info!("Deleting file {filename}");
+        let exists = tokio::fs::metadata(&filename)
+            .await
+            .map(|f| f.is_file())
+            .unwrap_or(false);
+        let removed = tokio::fs::remove_file(&filename)
+            .await
+            .map(|_| true)
+            .unwrap_or(false);
+        if !exists || removed {
+            match Episode::remove(pool, episode.id).await{
+                Ok(_) => info!("Removed {}", &filename),
+                Err(e) => error!("Cant remove {}. {}", &filename, e),
             }
         }
     }
@@ -545,3 +564,179 @@ mod orphan_tests {
     }
 }
 
+
+#[cfg(test)]
+mod eviction_tests {
+    use super::*;
+    use crate::models::Episode;
+    use sqlx::{
+        query,
+        migrate::Migrator,
+        sqlite::{SqlitePoolOptions, SqliteRow},
+        Row,
+    };
+    use std::path::Path;
+
+    async fn memory_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        Migrator::new(migrations)
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_channel(pool: &SqlitePool) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind("https://example.com/evict")
+        .bind("Eviction Test Channel")
+        .bind("evict_test_channel")
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(now)
+        .bind(5i64)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert channel")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_episode(
+        pool: &SqlitePool,
+        channel_id: i64,
+        yt_id: &str,
+        published_at: DateTime<Utc>,
+        favorite: bool,
+    ) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO episodes (channel_id, title, description, yt_id, webpage_url, \
+             published_at, duration, image, listen, position_seconds, listened_at, \
+             favorite, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id",
+        )
+        .bind(channel_id)
+        .bind(format!("episode {yt_id}"))
+        .bind("")
+        .bind(yt_id)
+        .bind(format!("https://youtu.be/{yt_id}"))
+        .bind(published_at)
+        .bind("00:10:00")
+        .bind("")
+        .bind(false)
+        .bind(0i64)
+        .bind(Option::<DateTime<Utc>>::None)
+        .bind(favorite)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert episode")
+    }
+
+    // Loads the channel's episodes exactly like `clean_channel` does.
+    async fn for_channel(pool: &SqlitePool, channel_id: i64) -> Vec<Episode> {
+        Episode::read_episodes_for_channel(pool, channel_id)
+            .await
+            .expect("read episodes")
+    }
+
+    fn base_time() -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::days(30)
+    }
+
+    #[tokio::test]
+    async fn favorites_do_not_count_toward_the_limit() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let t0 = base_time();
+        // 5 non-favorites (newest 5) + 1 favorite that is the OLDEST stored.
+        for i in 0..5 {
+            insert_episode(&pool, channel, &format!("nf0{i}"), t0 + chrono::Duration::days(i), false).await;
+        }
+        insert_episode(&pool, channel, "favold", t0 - chrono::Duration::days(1), true).await;
+
+        let episodes = for_channel(&pool, channel).await;
+        let evict = evict_ids(&episodes, 5);
+        assert!(evict.is_empty(), "non-favorites sit at max; nothing may be deleted");
+    }
+
+    #[tokio::test]
+    async fn oldest_favorite_is_never_evicted() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let t0 = base_time();
+        // 4 non-favorites + a favorite older than all of them; then a new
+        // episode arrives → 5 non-favorites at max: nothing deleted.
+        insert_episode(&pool, channel, "favold", t0 - chrono::Duration::days(1), true).await;
+        for i in 0..4 {
+            insert_episode(&pool, channel, &format!("nf{i}"), t0 + chrono::Duration::days(i), false).await;
+        }
+        insert_episode(&pool, channel, "nfnew", t0 + chrono::Duration::days(10), false).await;
+
+        let episodes = for_channel(&pool, channel).await;
+        let evict = evict_ids(&episodes, 5);
+        assert!(evict.is_empty(), "the very old favorite must survive new arrivals");
+    }
+
+    #[tokio::test]
+    async fn excess_non_favorites_are_evicted_oldest_first() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let t0 = base_time();
+        // 6 non-favorites + 1 favorite: only the oldest non-favorite goes.
+        let mut oldest = String::new();
+        for i in 0..6 {
+            let yt_id = format!("nf{i}");
+            insert_episode(&pool, channel, &yt_id, t0 + chrono::Duration::days(i), false).await;
+            if i == 0 {
+                oldest = yt_id;
+            }
+        }
+        insert_episode(&pool, channel, "favx", t0 + chrono::Duration::days(10), true).await;
+
+        let episodes = for_channel(&pool, channel).await;
+        let evict = evict_ids(&episodes, 5);
+        let ids: Vec<String> = evict.iter().map(|e| e.yt_id.clone()).collect();
+        assert_eq!(ids, vec![oldest], "only the oldest non-favorite must be evicted");
+    }
+
+    #[tokio::test]
+    async fn favorites_survive_repeated_eviction() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let t0 = base_time();
+        // max 2: 3 non-favorites + 1 favorite → 1 non-favorite evicted, favorite
+        // never in the eviction list.
+        insert_episode(&pool, channel, "favkeep", t0 + chrono::Duration::days(5), true).await;
+        for i in 0..3 {
+            insert_episode(&pool, channel, &format!("nf{i}"), t0 + chrono::Duration::days(i), false).await;
+        }
+
+        let episodes = for_channel(&pool, channel).await;
+        let evict = evict_ids(&episodes, 2);
+        assert_eq!(evict.len(), 1, "exactly the oldest non-favorite must go");
+        assert!(
+            evict.iter().all(|e| !e.favorite),
+            "favorites must never be evicted"
+        );
+        assert_eq!(evict[0].yt_id, "nf0");
+    }
+}

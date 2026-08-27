@@ -2,12 +2,13 @@
 	import { computed, onMounted, ref } from 'vue';
 	import { useI18n } from 'vue-i18n';
 	import { useRoute, useRouter } from 'vue-router';
-	import { PhArrowLeft, PhArrowsClockwise } from '@phosphor-icons/vue';
+	import { PhArrowLeft, PhArrowsClockwise, PhStar } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
 	import { useAuthStore } from '@/stores/auth';
 	import { usePlayerStore } from '@/stores/player';
 	import { useNotificationStore } from '@/stores/notification';
-	import { filterBySearchWords } from '@/lib/utils/list.filter';
+	import { useFavoritesStore } from '@/stores/favorites';
+	import { filterBySearchWords, filterByFavorites } from '@/lib/utils/list.filter';
 	import type { Channel, Episode } from '@/types';
 	import AppButton from '@/components/AppButton.vue';
 	import AppHeader from '@/components/AppHeader.vue';
@@ -19,6 +20,7 @@
 	const auth = useAuthStore();
 	const player = usePlayerStore();
 	const notification = useNotificationStore();
+	const favorites = useFavoritesStore();
 	const { t } = useI18n();
 
 	const episodes = ref<Episode[]>([]);
@@ -26,17 +28,26 @@
 	const channelTitle = ref('');
 	const channelDescription = ref('');
 	const searchQuery = ref('');
+	const favoritesOnly = ref(false);
 	const refreshing = ref(false);
 
-	const filteredEpisodes = computed(() =>
-		filterBySearchWords(episodes.value, searchQuery.value, (e) =>
+	// Search first, then the favorites-only filter (episode-favorites): an
+	// episode stays visible only when it matches the words AND is favorited
+	// while the filter is on. The store's id set drives the predicate so a
+	// toggle in any card is reflected immediately.
+	const filteredEpisodes = computed(() => {
+		const searched = filterBySearchWords(episodes.value, searchQuery.value, (e) =>
 			[e.title, e.description, e.yt_id].join(' ')
-		)
-	);
+		);
+		if (!favoritesOnly.value) return searched;
+		return filterByFavorites(searched, (id) => favorites.favoriteIdSet.has(id));
+	});
 
 	const noSearchResults = computed(
 		() => searchQuery.value.trim() !== '' && filteredEpisodes.value.length === 0
 	);
+
+	const favoritesEmpty = computed(() => favoritesOnly.value && filteredEpisodes.value.length === 0);
 
 	const channelSlug = computed(() => {
 		if (episodes.value.length > 0) return episodes.value[0].channel_slug;
@@ -60,6 +71,9 @@
 			// The list payload carries each episode's playback progress; seed the
 			// player store so resume works without per-episode requests.
 			player.seedProgress(episodes.value);
+			// Merge the stored favorite flags so the filter is correct before the
+			// cards mount (episode-favorites).
+			for (const episode of episodes.value) favorites.sync(episode);
 		}
 		if (channelsResult.ok && channelsResult.data) {
 			channels.value = channelsResult.data as Array<Channel>;
@@ -151,11 +165,36 @@
 			{{ channelDescription }}
 		</p>
 
-		<div class="mb-10 w-full max-w-3xl">
-			<SearchInput v-model="searchQuery" :placeholder="$t('episodes.searchPlaceholder')" />
+		<div class="mb-10 flex w-full max-w-3xl items-center justify-between gap-3">
+			<div class="flex-1">
+				<SearchInput v-model="searchQuery" :placeholder="$t('episodes.searchPlaceholder')" />
+			</div>
+			<button
+				type="button"
+				class="flex h-11 shrink-0 items-center gap-2 rounded-full border border-outline px-4 text-sm font-medium transition-colors"
+				:class="
+					favoritesOnly
+						? 'border-accent-500 bg-accent-500/10 text-accent-500'
+						: 'bg-surface-input text-text-muted hover:text-text'
+				"
+				:aria-pressed="favoritesOnly"
+				:title="$t('favorites.filterLabel')"
+				@click="favoritesOnly = !favoritesOnly"
+			>
+				<PhStar class="h-4 w-4" :weight="favoritesOnly ? 'fill' : 'regular'" />
+				<span class="hidden sm:inline">{{ $t('favorites.filterLabel') }}</span>
+			</button>
 		</div>
 
-		<p v-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
+		<p v-if="favoritesEmpty" class="mt-4 text-center text-text-muted">
+			<span class="font-display text-xl font-semibold text-text">{{
+				$t('favorites.emptyTitle')
+			}}</span>
+			<br />
+			<span class="text-sm">{{ $t('favorites.emptyBody') }}</span>
+		</p>
+
+		<p v-else-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
 
 		<div v-else-if="filteredEpisodes.length === 0" class="mt-10 text-center">
 			<p class="font-display text-xl font-semibold text-text">{{ $t('episodes.emptyTitle') }}</p>

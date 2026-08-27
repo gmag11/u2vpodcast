@@ -64,6 +64,7 @@ function episode(id: number, listen = false): Episode {
 		listen,
 		position_seconds: 0,
 		listened_at: null,
+		favorite: false,
 		created_at: now,
 		updated_at: now
 	};

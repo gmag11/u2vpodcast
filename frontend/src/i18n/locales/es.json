@@ -147,5 +147,15 @@
 	"languages": {
 		"en": "English",
 		"es": "Español"
+	},
+	"favorites": {
+		"add": "Añadir a favoritos",
+		"remove": "Quitar de favoritos",
+		"added": "Añadido a favoritos",
+		"removed": "Quitado de favoritos",
+		"failed": "No se pudo actualizar favoritos",
+		"filterLabel": "Solo favoritos",
+		"emptyTitle": "Aún no hay favoritos",
+		"emptyBody": "Los episodios que marques con la estrella aparecerán aquí."
 	}
 }

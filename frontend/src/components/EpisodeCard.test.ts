@@ -5,6 +5,7 @@ import EpisodeCard from '@/components/EpisodeCard.vue';
 import { testI18n } from '@/test/i18n';
 import { usePlayerStore } from '@/stores/player';
 import { usePlaylistStore } from '@/stores/playlists';
+import { useFavoritesStore } from '@/stores/favorites';
 import { useNotificationStore } from '@/stores/notification';
 import { api } from '@/lib/api/client';
 import type { Episode } from '@/types';
@@ -25,6 +26,9 @@ vi.mock('@/lib/api/client', () => ({
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		),
 		reorderPlaylist: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		setEpisodeFavorite: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		)
 	}
@@ -47,6 +51,7 @@ function episode(overrides: Partial<Episode> = {}): Episode {
 		listen: false,
 		position_seconds: 0,
 		listened_at: null,
+		favorite: false,
 		created_at: now,
 		updated_at: now,
 		...overrides
@@ -201,5 +206,76 @@ describe('EpisodeCard playlist toggle', () => {
 		expect(wrapper.find('[data-testid="listened-mark"]').exists()).toBe(false);
 		const notification = useNotificationStore();
 		expect(notification.current?.message).toBe('Could not add to playlist');
+	});
+});
+
+describe('EpisodeCard favorite toggle', () => {
+	function mountCardWith(ep: Episode, seedFavorites: Episode[]) {
+		const pinia = createPinia();
+		const favorites = useFavoritesStore(pinia);
+		for (const e of seedFavorites) favorites.sync(e);
+		useNotificationStore(pinia);
+		const wrapper = mount(EpisodeCard, {
+			props: { episode: ep },
+			global: { plugins: [pinia, testI18n], stubs: { RouterLink: true } }
+		});
+		return wrapper;
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		vi.clearAllMocks();
+	});
+
+	it('renders a filled star when the episode is favorited', () => {
+		const wrapper = mountCardWith(episode({ id: 7, favorite: true }), [
+			episode({ id: 7, favorite: true })
+		]);
+		expect(wrapper.find('[aria-label="Remove from favorites"]').exists()).toBe(true);
+		expect(wrapper.find('[aria-label="Add to favorites"]').exists()).toBe(false);
+	});
+
+	it('renders a hollow star when the episode is not favorited', () => {
+		const wrapper = mountCardWith(episode({ id: 1, favorite: false }), [
+			episode({ id: 7, favorite: true })
+		]);
+		expect(wrapper.find('[aria-label="Add to favorites"]').exists()).toBe(true);
+		expect(wrapper.find('[aria-label="Remove from favorites"]').exists()).toBe(false);
+	});
+
+	it('marking calls the api, flips the star and notifies', async () => {
+		const wrapper = mountCardWith(episode({ id: 1, favorite: false }), []);
+		await wrapper.find('[aria-label="Add to favorites"]').trigger('click');
+		await flushPromises();
+		expect(api.setEpisodeFavorite).toHaveBeenCalledWith('yt1', true);
+		expect(wrapper.find('[aria-label="Remove from favorites"]').exists()).toBe(true);
+		const notification = useNotificationStore();
+		expect(notification.current?.message).toBe('Added to favorites');
+	});
+
+	it('unmarking calls the api, flips the star back and notifies', async () => {
+		const target = episode({ id: 7, yt_id: 'yt7', favorite: true });
+		const wrapper = mountCardWith(target, [target]);
+		await wrapper.find('[aria-label="Remove from favorites"]').trigger('click');
+		await flushPromises();
+		expect(api.setEpisodeFavorite).toHaveBeenCalledWith('yt7', false);
+		expect(wrapper.find('[aria-label="Add to favorites"]').exists()).toBe(true);
+		const notification = useNotificationStore();
+		expect(notification.current?.message).toBe('Removed from favorites');
+	});
+
+	it('keeps the star state and surfaces the error when the api fails', async () => {
+		vi.mocked(api.setEpisodeFavorite).mockResolvedValue({
+			ok: false,
+			data: null,
+			user: null,
+			status: false
+		} as never);
+		const wrapper = mountCardWith(episode({ id: 1, favorite: false }), []);
+		await wrapper.find('[aria-label="Add to favorites"]').trigger('click');
+		await flushPromises();
+		expect(wrapper.find('[aria-label="Add to favorites"]').exists()).toBe(true);
+		const notification = useNotificationStore();
+		expect(notification.current?.message).toBe('Could not update favorites');
 	});
 });

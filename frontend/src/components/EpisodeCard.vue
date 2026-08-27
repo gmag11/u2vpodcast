@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { computed, ref } from 'vue';
+	import { computed, ref, watch } from 'vue';
 	import { useI18n } from 'vue-i18n';
 	import {
 		PhArrowCounterClockwise,
@@ -8,10 +8,12 @@
 		PhPause,
 		PhPlay,
 		PhPlaylist,
+		PhStar,
 		PhStop
 	} from '@phosphor-icons/vue';
 	import { usePlayerStore, RESUME_POSITION_S, parseDurationSeconds } from '@/stores/player';
 	import { usePlaylistStore } from '@/stores/playlists';
+	import { useFavoritesStore } from '@/stores/favorites';
 	import { useNotificationStore } from '@/stores/notification';
 	import { api } from '@/lib/api/client';
 	import type { Episode } from '@/types';
@@ -33,8 +35,18 @@
 
 	const player = usePlayerStore();
 	const playlists = usePlaylistStore();
+	const favorites = useFavoritesStore();
 	const notification = useNotificationStore();
 	const { d, t } = useI18n();
+
+	// Every time the card receives an episode, merge its stored flag into the
+	// shared favorites store so the star agrees with the server and with any
+	// other copy of the same episode rendered elsewhere (episode-favorites).
+	watch(
+		() => props.episode,
+		(episode) => favorites.sync(episode),
+		{ immediate: true }
+	);
 
 	const isCurrent = computed(() => player.isCurrent(props.episode));
 	const isPlaying = computed(() => isCurrent.value && player.playing);
@@ -42,6 +54,7 @@
 		isCurrent.value ? player.durationLabel : props.episode.duration
 	);
 	const inPlaylist = computed(() => playlists.episodeIdSet.has(props.episode.id));
+	const isFavorite = computed(() => favorites.favoriteIdSet.has(props.episode.id));
 
 	// Progress indicators reflect the shared player's per-id progress, so a
 	// card updates live without a reload no matter which copy of the episode
@@ -98,6 +111,23 @@
 				result.ok ? 'success' : 'error'
 			);
 		}
+	}
+
+	// Favorite toggle: hollow star when not favorite, filled when favorite,
+	// notifying on both outcomes. The id set from the shared store drives the
+	// button state, so every copy of the episode flips together
+	// (episode-favorites).
+	async function toggleFavorite() {
+		const favorite = !isFavorite.value;
+		const result = await favorites.set(props.episode, favorite);
+		notification.show(
+			result.ok
+				? favorite
+					? t('favorites.added')
+					: t('favorites.removed')
+				: t('favorites.failed'),
+			result.ok ? 'success' : 'error'
+		);
 	}
 
 	// "Mark as not listened": clears the listened state (position reset to 0),
@@ -282,6 +312,15 @@
 							@click="unmark"
 						>
 							<PhArrowCounterClockwise class="h-4 w-4" weight="regular" />
+						</button>
+						<button
+							type="button"
+							class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-accent-500 transition-colors hover:text-accent-400"
+							:aria-label="isFavorite ? $t('favorites.remove') : $t('favorites.add')"
+							:title="isFavorite ? $t('favorites.remove') : $t('favorites.add')"
+							@click="toggleFavorite"
+						>
+							<PhStar class="h-4 w-4" :weight="isFavorite ? 'fill' : 'regular'" />
 						</button>
 						<button
 							type="button"

@@ -29,6 +29,7 @@ pub struct Episode {
     pub listen: bool,
     pub position_seconds: i64,
     pub listened_at: Option<DateTime<Utc>>,
+    pub favorite: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -66,6 +67,7 @@ impl Episode {
             listen: row.get("listen"),
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
+            favorite: row.get("favorite"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -88,6 +90,7 @@ impl Episode {
             listen: row.get("listen"),
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
+            favorite: row.get("favorite"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -116,6 +119,7 @@ impl Episode {
             listen,
             position_seconds: 0,
             listened_at: None,
+            favorite: false,
             created_at,
             updated_at,
         };
@@ -128,9 +132,10 @@ impl Episode {
     ) -> Result<Episode, Error> {
         let sql = "INSERT INTO episodes (channel_id, title, description, yt_id,
                    webpage_url, published_at, duration, image, listen,
-                   position_seconds, listened_at, created_at, updated_at)
+                   position_seconds, listened_at, favorite, created_at,
+                   updated_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                   $13) RETURNING *;";
+                   $13, $14) RETURNING *;";
         query(sql)
             .bind(episode.channel_id)
             .bind(&episode.title)
@@ -143,6 +148,7 @@ impl Episode {
             .bind(episode.listen)
             .bind(episode.position_seconds)
             .bind(episode.listened_at)
+            .bind(episode.favorite)
             .bind(episode.created_at)
             .bind(episode.updated_at)
             .map(Self::from_row)
@@ -267,7 +273,8 @@ impl Episode {
         let sql = "UPDATE episodes SET channel_id = $2, title = $3,
                    description = $4, yt_id = $5, published_at = $6,
                    duration = $7, image = $8, listen = $9,
-                   position_seconds = $10, listened_at = $11, updated_at = $12
+                   position_seconds = $10, listened_at = $11, favorite = $12,
+                   updated_at = $13
                    WHERE id = $1 RETURNING * ;";
         let updated_at = Utc::now();
         query(sql)
@@ -282,6 +289,7 @@ impl Episode {
             .bind(episode.listen)
             .bind(episode.position_seconds)
             .bind(episode.listened_at)
+            .bind(episode.favorite)
             .bind(updated_at)
             .map(Self::from_row)
             .fetch_one(pool)
@@ -347,6 +355,37 @@ impl Episode {
                 Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND)
             })?;
         Self::update_progress(pool, id, position_seconds, listened).await
+    }
+
+    /// Sets the favorite flag on the episode identified by its public id
+    /// (`yt_id`), the same identity the progress and media endpoints use.
+    /// `favorite` is written with its own targeted UPDATE so unrelated fields
+    /// are never touched; missing episodes surface as 404, mirroring the
+    /// progress endpoints.
+    pub async fn set_favorite_by_yt_id(
+        pool: &SqlitePool,
+        yt_id: &str,
+        favorite: bool,
+    ) -> Result<Self, Error> {
+        info!("set_favorite_by_yt_id");
+        let updated_at = Utc::now();
+        let sql = "UPDATE episodes SET favorite = $1, updated_at = $2 \
+                   WHERE yt_id = $3 RETURNING *;";
+        match query(sql)
+            .bind(favorite)
+            .bind(updated_at)
+            .bind(yt_id)
+            .map(Self::from_row)
+            .fetch_optional(pool)
+            .await
+        {
+            Ok(Some(episode)) => Ok(episode),
+            Ok(None) => Err(Error::new_with_status_code(
+                "episode not found",
+                StatusCode::NOT_FOUND,
+            )),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Returns the stored playback-progress fields for an episode, keyed by its
@@ -465,6 +504,7 @@ mod episode_update_tests {
             listen: false,
             position_seconds: 0,
             listened_at: None,
+            favorite: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -648,6 +688,45 @@ mod episode_update_tests {
 
         let missing = Episode::read_progress_by_yt_id(&pool, "missing_yt_zzz").await;
         assert!(missing.is_err(), "unknown episode must produce an error");
+    }
+
+    #[tokio::test]
+    async fn created_episodes_default_to_not_favorite_and_serialize_the_flag() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "fav0001");
+        let saved = Episode::create(&pool, &created).await.expect("create");
+        assert!(!saved.favorite, "new episodes must default to not favorite");
+        // The payload contract (episode-favorites): `favorite` is part of the
+        // serialized episode so the frontend renders the star without a second
+        // lookup.
+        let json = serde_json::to_value(&saved).expect("serialize");
+        assert_eq!(json["favorite"], false);
+        assert_eq!(json["yt_id"], "fav0001");
+    }
+
+    #[tokio::test]
+    async fn set_favorite_by_yt_id_toggles_and_404s_on_missing() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let created = episode_struct(channel_id, "fav0002");
+        Episode::create(&pool, &created).await.expect("create");
+
+        let marked = Episode::set_favorite_by_yt_id(&pool, "fav0002", true)
+            .await
+            .expect("mark must succeed");
+        assert!(marked.favorite, "flag must be true after marking");
+
+        let read = Episode::read(&pool, marked.id).await.expect("read back");
+        assert!(read.favorite, "flag must persist in the row");
+
+        let unmarked = Episode::set_favorite_by_yt_id(&pool, "fav0002", false)
+            .await
+            .expect("unmark must succeed");
+        assert!(!unmarked.favorite, "flag must be false after unmarking");
+
+        let missing = Episode::set_favorite_by_yt_id(&pool, "missing_fav_zzz", true).await;
+        assert!(missing.is_err(), "unknown episode must 404");
     }
 }
 

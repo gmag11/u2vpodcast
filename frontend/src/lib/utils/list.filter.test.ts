@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterBySearchWords } from '@/lib/utils/list.filter';
+import { filterBySearchWords, filterByFavorites } from '@/lib/utils/list.filter';
 import { toHHMMSS } from '@/lib/utils/formatter';
 
 interface Item {
@@ -9,7 +9,8 @@ interface Item {
 
 const items: Item[] = [
 	{ title: 'Confesiones de Gasolinera', description: 'un canal de entretenimiento' },
-	{ title: 'Linux y Tapas', description: 'kernel y cocina' }
+	{ title: 'Linux y Tapas', description: 'kernel y cocina' },
+	{ title: 'Otro Podcast', description: 'tercer episodio' }
 ];
 
 const haystack = (item: Item) => `${item.title} ${item.description}`;
@@ -40,6 +41,20 @@ describe('filterBySearchWords', () => {
 
 	it('returns an empty list when nothing matches', () => {
 		expect(filterBySearchWords(items, 'zzz', haystack)).toHaveLength(0);
+	});
+});
+
+describe('filterByFavorites', () => {
+	const favorited = [1, 3];
+	const withIds = items.map((item, i) => ({ ...item, id: i + 1 }));
+
+	it('keeps only the items whose id is favorited', () => {
+		const result = filterByFavorites(withIds, (id) => favorited.includes(id));
+		expect(result.map((r) => r.id)).toEqual([1, 3]);
+	});
+
+	it('returns an empty list when nothing is favorited', () => {
+		expect(filterByFavorites(withIds, () => false)).toHaveLength(0);
 	});
 });
 
