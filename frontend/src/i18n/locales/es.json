@@ -82,8 +82,13 @@
 		"removeFailed": "No se pudo quitar de la playlist",
 		"unmark": "Marcar como no escuchado",
 		"unmarkFailed": "No se pudo eliminar la marca de escuchado",
-		"moveUp": "Subir",
-		"moveDown": "Bajar",
+		"dragHandle": "Reordenar {title}",
+		"pickedUp": "Has seleccionado {title}, posición {position} de {total}",
+		"moved": "Has movido {title} a la posición {position} de {total}",
+		"dropped": "Has colocado {title} en la posición {position} de {total}",
+		"cancelled": "Reordenación cancelada. {title} vuelve a la posición {position} de {total}",
+		"reorderPending": "Guardando el orden de la playlist",
+		"reorderFailed": "No se pudo guardar el orden de la playlist",
 		"playAll": "Reproducir todo"
 	},
 	"card": {

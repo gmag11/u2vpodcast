@@ -82,8 +82,13 @@
 		"removeFailed": "Could not remove from playlist",
 		"unmark": "Mark as not listened",
 		"unmarkFailed": "Could not clear the listened state",
-		"moveUp": "Move up",
-		"moveDown": "Move down",
+		"dragHandle": "Reorder {title}",
+		"pickedUp": "Picked up {title}, position {position} of {total}",
+		"moved": "Moved {title} to position {position} of {total}",
+		"dropped": "Dropped {title} at position {position} of {total}",
+		"cancelled": "Reordering cancelled. {title} returned to position {position} of {total}",
+		"reorderPending": "Saving playlist order",
+		"reorderFailed": "Could not save the playlist order",
 		"playAll": "Play all"
 	},
 	"card": {

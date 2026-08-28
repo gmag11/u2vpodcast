@@ -18,6 +18,7 @@
 		"pinia": "^4.0.2",
 		"radix-vue": "^1.9.17",
 		"vue": "^3.5.41",
+		"vue-draggable-plus": "^0.6.1",
 		"vue-i18n": "^11.4.8",
 		"vue-router": "^5.2.0"
 	},

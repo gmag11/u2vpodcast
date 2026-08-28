@@ -43,6 +43,16 @@ const okResult = (data: unknown = null) => ({
 	status: true
 });
 
+const failedResult = () => ({ ok: false, data: null, user: null, status: false });
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 describe('playlist store', () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
@@ -101,12 +111,69 @@ describe('playlist store', () => {
 		expect(store.items.map((e) => e.id)).toEqual([1, 2]);
 	});
 
-	it('reorder rewrites the local order in the submitted sequence', async () => {
-		vi.mocked(api.reorderPlaylist).mockResolvedValue(okResult() as never);
+	it('reorder applies the complete order optimistically and persists it', async () => {
+		const request = deferred<ReturnType<typeof okResult>>();
+		vi.mocked(api.reorderPlaylist).mockReturnValue(request.promise as never);
 		const store = usePlaylistStore();
 		store.items = [episode(1), episode(2), episode(3)];
-		await store.reorder([3, 1, 2]);
-		expect(api.reorderPlaylist).toHaveBeenCalledWith([3, 1, 2]);
+		const result = store.reorder([3, 1, 2]);
+		await vi.waitFor(() => expect(store.reorderPending).toBe(true));
 		expect(store.items.map((e) => e.id)).toEqual([3, 1, 2]);
+		expect(api.reorderPlaylist).toHaveBeenCalledWith([3, 1, 2]);
+		request.resolve(okResult());
+		await result;
+		expect(store.items.map((e) => e.id)).toEqual([3, 1, 2]);
+		expect(store.reorderPending).toBe(false);
+	});
+
+	it('reorder restores the previous order when persistence fails', async () => {
+		vi.mocked(api.reorderPlaylist).mockResolvedValue(failedResult() as never);
+		const store = usePlaylistStore();
+		store.items = [episode(1), episode(2), episode(3)];
+		const result = await store.reorder([3, 1, 2]);
+		expect(result.ok).toBe(false);
+		expect(store.items.map((e) => e.id)).toEqual([1, 2, 3]);
+	});
+
+	it('reorder reloads instead of reviving an item removed while pending', async () => {
+		const request = deferred<ReturnType<typeof failedResult>>();
+		vi.mocked(api.reorderPlaylist).mockReturnValue(request.promise as never);
+		vi.mocked(api.removeEpisodeFromPlaylist).mockResolvedValue(okResult() as never);
+		vi.mocked(api.getPlaylist).mockResolvedValue(okResult([episode(3), episode(1)]) as never);
+		const store = usePlaylistStore();
+		store.items = [episode(1), episode(2), episode(3)];
+		const reorderResult = store.reorder([3, 1, 2]);
+		await vi.waitFor(() => expect(store.reorderPending).toBe(true));
+		await store.remove(2);
+		request.resolve(failedResult());
+		await reorderResult;
+		expect(api.getPlaylist).toHaveBeenCalledOnce();
+		expect(store.items.map((e) => e.id)).toEqual([3, 1]);
+	});
+
+	it('reorder serializes consecutive persistence requests', async () => {
+		const first = deferred<ReturnType<typeof okResult>>();
+		vi.mocked(api.reorderPlaylist)
+			.mockReturnValueOnce(first.promise as never)
+			.mockResolvedValueOnce(okResult() as never);
+		const store = usePlaylistStore();
+		store.items = [episode(1), episode(2), episode(3)];
+		const firstResult = store.reorder([3, 1, 2]);
+		const secondResult = store.reorder([2, 3, 1]);
+		await vi.waitFor(() => expect(api.reorderPlaylist).toHaveBeenCalledTimes(1));
+		first.resolve(okResult());
+		await firstResult;
+		await secondResult;
+		expect(api.reorderPlaylist).toHaveBeenNthCalledWith(2, [2, 3, 1]);
+		expect(store.items.map((e) => e.id)).toEqual([2, 3, 1]);
+	});
+
+	it('reorder rejects an incomplete order without calling the api', async () => {
+		const store = usePlaylistStore();
+		store.items = [episode(1), episode(2), episode(3)];
+		const result = await store.reorder([3, 1]);
+		expect(result.ok).toBe(false);
+		expect(api.reorderPlaylist).not.toHaveBeenCalled();
+		expect(store.items.map((e) => e.id)).toEqual([1, 2, 3]);
 	});
 });
