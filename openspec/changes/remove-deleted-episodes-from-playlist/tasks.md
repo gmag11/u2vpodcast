@@ -11,5 +11,5 @@
 
 ## 3. Full verification
 
-- [ ] 3.1 Run `cargo test` and confirm all existing and new tests pass
+- [x] 3.1 Run `cargo test` and confirm all existing and new tests pass
 - [x] 3.2 Run `cargo clippy` and confirm no new warnings on the touched files

@@ -48,9 +48,11 @@ struct ChannelSyncGuard {
 impl ChannelSyncGuard {
     fn acquire(channel_id: i64) -> Option<Self> {
         let mut channel_syncs = CHANNEL_SYNCS.lock().unwrap_or_else(|e| e.into_inner());
-        channel_syncs
-            .insert(channel_id)
-            .then_some(Self { channel_id })
+        if channel_syncs.insert(channel_id) {
+            Some(Self { channel_id })
+        } else {
+            None
+        }
     }
 }
 
@@ -295,8 +297,8 @@ async fn process_episode(
     // so the stored episode is built from authoritative metadata; the flat
     // listing candidate fills any field yt-dlp omitted (scalable-channel
     // -listing).
-    let (status, info) = ytdlp.download(&ytvideo.id, &filename).await?;
-    if !status.success(){
+    let (success, info) = ytdlp.download(&ytvideo.id, &filename).await?;
+    if !success{
         Err(Error::default(&format!("Cant download {filename}")))?
     }
     let published_at = get_published_at(&info);
