@@ -348,6 +348,10 @@ fn needs_episode_download(episode_exists: bool, original_exists: bool) -> bool {
     !episode_exists || !original_exists
 }
 
+fn needs_metadata_probe(episode_exists: bool, video: &YtVideo) -> bool {
+    !episode_exists && flat_date(video).is_none()
+}
+
 async fn process_episode(
     pool: &SqlitePool,
     channel: &Channel,
@@ -372,6 +376,18 @@ async fn process_episode(
     }
     if episode_exists {
         info!("The original media for {} is missing; downloading it again", ytvideo.id);
+    }
+    if needs_metadata_probe(episode_exists, ytvideo) {
+        info!("Checking publish date before downloading {}", ytvideo.id);
+        let metadata = ytdlp.metadata(&ytvideo.id).await?;
+        let published_at = get_published_at(&metadata);
+        if published_at < floor {
+            info!(
+                "Skipping {} published {published_at}: below the {floor} floor",
+                ytvideo.id
+            );
+            return Ok(());
+        }
     }
     info!("Downloading video: {:?}", ytvideo);
 
@@ -682,13 +698,38 @@ mod selection_tests {
 
 #[cfg(test)]
 mod episode_download_tests {
-    use super::needs_episode_download;
+    use super::{needs_episode_download, needs_metadata_probe};
+    use crate::models::YtVideo;
+
+    fn video(timestamp: Option<i64>, upload_date: &str) -> YtVideo {
+        YtVideo {
+            id: "video-id".to_string(),
+            title: "Video".to_string(),
+            description: String::new(),
+            thumbnail: String::new(),
+            original_url: String::new(),
+            webpage_url: String::new(),
+            upload_date: upload_date.to_string(),
+            timestamp,
+            duration_string: String::new(),
+            release_date: String::new(),
+            live_status: String::new(),
+        }
+    }
 
     #[test]
     fn existing_episode_is_downloaded_again_when_original_is_missing() {
         assert!(!needs_episode_download(true, true));
         assert!(needs_episode_download(true, false));
         assert!(needs_episode_download(false, false));
+    }
+
+    #[test]
+    fn only_new_undated_episodes_need_a_metadata_probe() {
+        assert!(needs_metadata_probe(false, &video(None, "")));
+        assert!(!needs_metadata_probe(false, &video(Some(1_704_067_200), "")));
+        assert!(!needs_metadata_probe(false, &video(None, "20240101")));
+        assert!(!needs_metadata_probe(true, &video(None, "")));
     }
 }
 

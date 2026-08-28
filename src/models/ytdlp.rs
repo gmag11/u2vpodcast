@@ -178,6 +178,24 @@ impl Ytdlp {
         Ok((download_output.success, info))
     }
 
+    pub async fn metadata(&self, id: &str) -> Result<YtVideo, Error> {
+        let url = format!("https://www.youtube.com/watch?v={}", id);
+        let mut args = vec!["--skip-download", "--print-json", "--js-runtimes", "node",
+            "--js-runtimes", "deno", "--retries", "10", "--retry-sleep", "5"];
+        args.extend(self.cookies_args());
+        args.push(&url);
+        let output = with_youtube_slot(move || async move {
+            self.runner.run(&self.path, &args).await
+        })
+        .await
+        .map_err(|e| Error::default(&e.to_string()))?;
+        let mut videos = parse_dump_output(&output.stdout)?;
+        videos.pop().ok_or_else(|| Error::default(&format!(
+            "yt-dlp produced no metadata for {url} (exit {:?})",
+            output.code
+        )))
+    }
+
     pub async fn auto_update() -> Result<(), Error>{
         let python3 = "python3";
         let args = vec!["-m", "pip", "install", "--user", "--upgrade",
@@ -423,6 +441,20 @@ mod download_args_tests {
 
         let args = runner.args.lock().unwrap();
         assert!(args.windows(2).any(|pair| pair == ["--audio-quality", "160K"]));
+    }
+
+    #[tokio::test]
+    async fn metadata_probe_skips_media_download() {
+        crate::utils::throttle::init_throttle(Duration::ZERO);
+        let runner = Arc::new(ArgumentsRunner { args: Mutex::new(Vec::new()) });
+        let ytdlp = Ytdlp::with_runner("mock-yt-dlp", "", runner.clone());
+
+        let metadata = ytdlp.metadata("video-id").await.unwrap();
+
+        assert_eq!(metadata.upload_date, "20260828");
+        let args = runner.args.lock().unwrap();
+        assert!(args.iter().any(|arg| arg == "--skip-download"));
+        assert!(!args.iter().any(|arg| arg == "-x" || arg == "-o"));
     }
 }
 
