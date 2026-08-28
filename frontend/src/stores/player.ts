@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import type { Episode, EpisodeProgress } from '@/types';
+import type { Episode, EpisodeProgress, SponsorBlockSegment } from '@/types';
 import { loadQueue, saveQueue, type RepeatMode } from '@/lib/utils/queue.storage';
 import { api } from '@/lib/api/client';
 import { usePlaylistStore } from '@/stores/playlists';
@@ -61,6 +61,32 @@ export function parseDurationSeconds(raw: string | null | undefined): number | n
 	const parts = raw.split(':').map((p) => Number(p));
 	if (parts.length === 0 || parts.some((p) => !isFinite(p) || p < 0)) return null;
 	return parts.reduce((acc, p) => acc * 60 + p, 0);
+}
+
+export function sponsorBlockSkipTarget(
+	seconds: number,
+	segments: SponsorBlockSegment[] | null | undefined
+): number {
+	const segment = segments?.find(({ start, end }) => seconds >= start && seconds < end);
+	return segment?.end ?? seconds;
+}
+
+export function sponsorBlockTimelineMarkers(
+	duration: number,
+	segments: SponsorBlockSegment[] | null | undefined
+): Array<{ left: number; width: number }> {
+	if (!Number.isFinite(duration) || duration <= 0) return [];
+	return (segments ?? []).flatMap(({ start, end }) => {
+		const clampedStart = Math.min(Math.max(start, 0), duration);
+		const clampedEnd = Math.min(Math.max(end, 0), duration);
+		if (!Number.isFinite(start) || !Number.isFinite(end) || clampedEnd <= clampedStart) return [];
+		return [
+			{
+				left: (clampedStart / duration) * 100,
+				width: ((clampedEnd - clampedStart) / duration) * 100
+			}
+		];
+	});
 }
 
 export const usePlayerStore = defineStore('player', () => {
@@ -250,7 +276,14 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function onTimeUpdate() {
-		if (audio) currentTime.value = audio.currentTime;
+		if (audio) {
+			const target = sponsorBlockSkipTarget(
+				audio.currentTime,
+				currentEpisode.value?.sponsorblock_segments
+			);
+			if (target !== audio.currentTime) audio.currentTime = target;
+			currentTime.value = target;
+		}
 		tryResumeSeek();
 		// Periodic saves only make sense while actually playing: a stopped or
 		// paused element must not keep persisting positions every 10s.
@@ -335,8 +368,9 @@ export const usePlayerStore = defineStore('player', () => {
 			return;
 		}
 		trace('resume: seek attempt', { target: resumeTarget, at: el.currentTime });
-		el.currentTime = resumeTarget;
-		currentTime.value = resumeTarget;
+		const target = sponsorBlockSkipTarget(resumeTarget, current.sponsorblock_segments);
+		el.currentTime = target;
+		currentTime.value = target;
 	}
 
 	// Starts playback, arming the resume retry loop when one is pending.
@@ -855,7 +889,10 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function seek(seconds: number) {
-		if (audio) audio.currentTime = seconds;
+		if (!audio) return;
+		const target = sponsorBlockSkipTarget(seconds, currentEpisode.value?.sponsorblock_segments);
+		audio.currentTime = target;
+		currentTime.value = target;
 	}
 
 	// Keyboard shortcut: seek ±15s clamped to the episode bounds. Persisted by
@@ -863,9 +900,21 @@ export const usePlayerStore = defineStore('player', () => {
 	function seekRelative(delta: number) {
 		if (!audio || !currentEpisode.value) return;
 		const max = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
-		const next = Math.min(Math.max(audio.currentTime + delta, 0), max);
+		const requested = Math.min(Math.max(audio.currentTime + delta, 0), max);
+		const next = sponsorBlockSkipTarget(requested, currentEpisode.value.sponsorblock_segments);
 		audio.currentTime = next;
 		currentTime.value = next;
+	}
+
+	function applySponsorBlockSnapshot(episode: Episode) {
+		if (currentEpisode.value?.id !== episode.id) return;
+		if (currentEpisode.value.sponsorblock_hash === episode.sponsorblock_hash) return;
+		currentEpisode.value = {
+			...currentEpisode.value,
+			sponsorblock_segments: episode.sponsorblock_segments,
+			sponsorblock_hash: episode.sponsorblock_hash
+		};
+		persistQueue();
 	}
 
 	function onWindowKeydown(event: KeyboardEvent) {
@@ -982,6 +1031,7 @@ export const usePlayerStore = defineStore('player', () => {
 		episodeWithProgress,
 		seedProgress,
 		applyProgress,
+		applySponsorBlockSnapshot,
 		setVolume,
 		toggleMute,
 		setSpeed,

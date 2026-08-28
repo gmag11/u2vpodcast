@@ -39,8 +39,15 @@ export interface Episode {
 	position_seconds: number;
 	listened_at: string | null;
 	favorite: boolean;
+	sponsorblock_segments?: SponsorBlockSegment[];
+	sponsorblock_hash?: string | null;
 	created_at: Date;
 	updated_at: Date;
+}
+
+export interface SponsorBlockSegment {
+	start: number;
+	end: number;
 }
 
 export interface EpisodeProgress {

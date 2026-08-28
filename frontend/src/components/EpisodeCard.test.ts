@@ -30,6 +30,9 @@ vi.mock('@/lib/api/client', () => ({
 		),
 		setEpisodeFavorite: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		refreshEpisodeSponsorBlock: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		)
 	}
 }));
@@ -280,6 +283,7 @@ describe('EpisodeCard mobile playlist presentation', () => {
 			'Favourite',
 			'Remove from playlist',
 			'Original link',
+			'Refresh SponsorBlock segments',
 			'Reset progress',
 			'Channel view'
 		]);
@@ -318,6 +322,33 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		expect(useNotificationStore().current?.message).toBe('Removed from playlist');
 	});
 
+	it('refreshes SponsorBlock data for an old favorite and applies the live snapshot', async () => {
+		const ep = episode({ id: 7, yt_id: 'yt7', favorite: true });
+		const refreshed = {
+			...ep,
+			sponsorblock_hash: 'hash-b',
+			sponsorblock_segments: [{ start: 10, end: 20 }]
+		};
+		vi.mocked(api.refreshEpisodeSponsorBlock).mockResolvedValueOnce({
+			ok: true,
+			data: refreshed,
+			user: null,
+			status: true
+		});
+		const wrapper = mountPlaylistCard(ep);
+		const player = usePlayerStore();
+		player.currentEpisode = ep;
+
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		await wrapper.get('[data-testid="playlist-refresh-sponsorblock"]').trigger('click');
+		await flushPromises();
+
+		expect(api.refreshEpisodeSponsorBlock).toHaveBeenCalledWith('yt7');
+		expect(player.currentEpisode?.sponsorblock_hash).toBe('hash-b');
+		expect(player.currentEpisode?.sponsorblock_segments).toEqual([{ start: 10, end: 20 }]);
+		expect(useNotificationStore().current?.message).toBe('SponsorBlock segments refreshed');
+	});
+
 	it('provides non-empty Spanish labels for the trigger and menu items', async () => {
 		testI18n.global.locale.value = 'es';
 		const wrapper = mountPlaylistCard(episode());
@@ -334,6 +365,7 @@ describe('EpisodeCard mobile playlist presentation', () => {
 			'Favorito',
 			'Quitar de la playlist',
 			'Enlace original',
+			'Actualizar segmentos de SponsorBlock',
 			'Reiniciar progreso',
 			'Ver canal'
 		]);
@@ -413,6 +445,18 @@ describe('EpisodeCard playback indicators', () => {
 	it('does not render the progress strip without a saved position', () => {
 		const wrapper = mountCard(episode({ position_seconds: 0 }));
 		expect(wrapper.find('[data-testid="episode-progress"]').exists()).toBe(false);
+	});
+
+	it('shows SponsorBlock segments without playback progress', () => {
+		const wrapper = mountCard(
+			episode({
+				position_seconds: 0,
+				sponsorblock_segments: [{ start: 900, end: 1800 }]
+			})
+		);
+		const marker = wrapper.get('[data-testid="episode-sponsorblock-segment"]');
+		expect(marker.attributes('style')).toContain('left: 25%');
+		expect(marker.attributes('style')).toContain('width: 25%');
 	});
 });
 

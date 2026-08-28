@@ -64,6 +64,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .service(episodes::read_progress)
                                     .service(episodes::update_progress)
                                     .service(episodes::update_favorite)
+                                    .service(episodes::refresh_sponsorblock)
                                     .service(channels::create)
                                     .service(channels::update_episodes)
                                     .service(channels::refresh_image)

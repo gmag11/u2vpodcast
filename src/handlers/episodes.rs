@@ -3,6 +3,7 @@ use actix_web::{
     HttpResponse,
     get,
     put,
+    post,
     web::{
         Path,
         Data,
@@ -24,8 +25,11 @@ use super::{
         Episode,
         EpisodeProgress,
         CResponse,
+        audios_dir,
     },
 };
+    use crate::utils::sponsorblock::{reconcile_episode, SponsorBlockClient};
+    use std::path::Path as FsPath;
 
 #[get("/channels/{channel}/episodes/")]
 async fn read_with_pagination(
@@ -150,5 +154,135 @@ async fn update_favorite(
             error!("Error updating favorite: {e}");
             CResponse::ko(e.status_code(), session)
         }
+    }
+}
+
+#[post("/episodes/{yt_id}/sponsorblock/refresh/")]
+async fn refresh_sponsorblock(
+    data: Data<AppState>,
+    session: Session,
+    yt_id: Path<String>,
+) -> actix_web::HttpResponse {
+    match refresh_sponsorblock_episode(
+        &data.pool,
+        &SponsorBlockClient::default(),
+        FsPath::new(audios_dir()),
+        &yt_id.into_inner(),
+    )
+    .await
+    {
+        Ok(updated) => CResponse::ok(session, updated),
+        Err(error) => {
+            error!("Error refreshing SponsorBlock data: {error}");
+            CResponse::ko(error.status_code(), session)
+        }
+    }
+}
+
+async fn refresh_sponsorblock_episode(
+    pool: &sqlx::SqlitePool,
+    client: &SponsorBlockClient,
+    audio_root: &FsPath,
+    yt_id: &str,
+) -> Result<Episode, super::super::models::Error> {
+    let episode = Episode::read_by_yt_id_with_channel(pool, yt_id).await?;
+    let channel_dir = audio_root.join(&episode.channel_slug);
+    reconcile_episode(pool, client, &episode, &channel_dir).await?;
+    Episode::read_by_yt_id_with_channel(pool, yt_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::SponsorBlockCache;
+    use actix_web::http::StatusCode;
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        path::PathBuf,
+        thread,
+        time::Duration,
+    };
+
+    async fn fixture() -> (sqlx::SqlitePool, PathBuf) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        Migrator::new(FsPath::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        let old = chrono::Utc::now() - chrono::Duration::days(365);
+        let channel_id: i64 = sqlx::query_scalar(
+            "INSERT INTO channels (url, title, slug, active, description, image, first, max, created_at, updated_at) \
+             VALUES ('https://example.com', 'Channel', 'channel', TRUE, '', '', $1, 5, $1, $1) RETURNING id",
+        )
+        .bind(old)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO episodes (channel_id, title, yt_id, webpage_url, published_at, duration, favorite, created_at, updated_at) \
+             VALUES ($1, 'Old favorite', 'old-favorite', 'https://example.com/video', $2, '00:03:00', TRUE, $2, $2)",
+        )
+        .bind(channel_id)
+        .bind(old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "u2vpodcast-sponsorblock-handler-{}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(root.join("channel")).unwrap();
+        (pool, root)
+    }
+
+    fn empty_snapshot_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            let read = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..read]).contains("videoID=old-favorite"));
+            stream
+                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    #[actix_web::test]
+    async fn manual_refresh_accepts_an_old_favorite() {
+        let (pool, root) = fixture().await;
+        let client = SponsorBlockClient::new(&empty_snapshot_server(), Duration::from_secs(1));
+
+        let refreshed = refresh_sponsorblock_episode(&pool, &client, &root, "old-favorite")
+            .await
+            .unwrap();
+
+        assert!(refreshed.favorite);
+        assert!(refreshed.sponsorblock_segments.is_empty());
+        assert!(SponsorBlockCache::read(&pool, refreshed.id).await.unwrap().is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn manual_refresh_rejects_an_unknown_episode() {
+        let (pool, root) = fixture().await;
+        let client = SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(50));
+
+        let error = refresh_sponsorblock_episode(&pool, &client, &root, "unknown")
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

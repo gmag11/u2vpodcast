@@ -85,6 +85,14 @@ After that, go to `https://u2vpodcast.tuservidor.com` and you can find a list of
 1. The channel: https://u2vpodcast.tuservidor.com/linux_y_tapas?page=1
 2. The feed: https://u2vpodcast.tuservidor.com/linux_y_tapas/feed.xml
 
+### SponsorBlock processing
+
+During synchronization, u2vpodcast requests `sponsor` segments with the `skip` action from the [SponsorBlock](https://github.com/ajayyy/SponsorBlock) [official public service](https://sponsor.ajay.app/) for episodes in the current channel selection window. The original-timeline audio is retained as `{yt_id}.mp3` and encoded as 160 kbps CBR so browser seeks map accurately to SponsorBlock timestamps. Existing VBR files must be downloaded again to adopt this encoding. When segments are available, FFmpeg creates a stream-copy derivative named `{yt_id}.sponsorblock.{hash-prefix}.mp3`; RSS feeds select that derivative and its measured duration. The web player continues to use the original file and skips the same intervals on the original timeline.
+
+An authenticated user can refresh any stored episode, including an older favorite, with `POST /api/1.0/episodes/{yt_id}/sponsorblock/refresh/`. An unchanged snapshot reuses the active derivative. Empty snapshots restore original-media selection. Retrieval, processing, or probing failures preserve the last valid selection, and synchronization continues with later episodes. Cuts use MP3 stream copying, so their boundaries have frame-level rather than sample-level precision.
+
+SponsorBlock segment data is transformed into derived audio cuts. SponsorBlock data is provided under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/), including its non-commercial restriction. Frontend attribution is intentionally deferred to a follow-up change.
+
 ### SQLite & backups
 
 The database runs in WAL journal mode. Backing up the database therefore also requires the companion files `u2vpodcast.db-wal` and `u2vpodcast.db-shm` (or run an explicit SQLite checkpoint/`sqlite3 u2vpodcast.db ".backup backup.db"` before copying only the `.db` file). The pool size is configurable via `db_pool_max_connections` (default 5).

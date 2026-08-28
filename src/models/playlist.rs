@@ -59,10 +59,15 @@ impl PlaylistItem {
     pub async fn read_episodes_with_channels(pool: &SqlitePool) -> Result<Vec<Episode>, Error> {
         info!("read_episodes_with_channels");
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, \
-                   COALESCE(c.title, '') AS channel_title \
+               COALESCE(c.title, '') AS channel_title, \
+               sc.segments_json AS sponsorblock_segments_json, \
+               sc.snapshot_hash AS sponsorblock_hash, \
+               sc.processed_filename AS sponsorblock_processed_filename, \
+               sc.processed_duration AS sponsorblock_processed_duration \
                    FROM playlist_items p \
                    INNER JOIN episodes e ON e.id = p.episode_id \
                    LEFT JOIN channels c ON c.id = e.channel_id \
+               LEFT JOIN sponsorblock_cache sc ON sc.episode_id = e.id \
                    ORDER BY p.position ASC";
         query(sql)
             .map(Episode::from_row_with_channel)

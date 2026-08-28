@@ -230,3 +230,52 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
     debug!("media 200 {} {total} bytes", req.method());
     builder.streaming(ReaderStream::new(file))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{body::to_bytes, test::TestRequest};
+
+    #[actix_web::test]
+    async fn serves_hash_versioned_mp3_with_full_head_range_and_conditional_requests() {
+        let slug = format!("sponsorblock_media_test_{}", rand::random::<u64>());
+        let relative = format!("{slug}/video.sponsorblock.abcdef0123456789.mp3");
+        let directory = Path::new(audios_dir()).join(&slug);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("video.sponsorblock.abcdef0123456789.mp3"), b"0123456789").unwrap();
+
+        let get = serve_media(
+            TestRequest::get().uri(&format!("/media/{relative}")).to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(get.status(), StatusCode::OK);
+        let modified = get.headers().get(header::LAST_MODIFIED).unwrap().to_str().unwrap().to_string();
+        assert_eq!(to_bytes(get.into_body()).await.unwrap(), b"0123456789".as_slice());
+
+        let head = serve_media(
+            TestRequest::default().method(Method::HEAD).to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(head.status(), StatusCode::OK);
+        assert_eq!(head.headers().get(header::CONTENT_LENGTH).unwrap(), "10");
+
+        let range = serve_media(
+            TestRequest::get().insert_header((header::RANGE, "bytes=2-5")).to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(range.headers().get(header::CONTENT_RANGE).unwrap(), "bytes 2-5/10");
+        assert_eq!(to_bytes(range.into_body()).await.unwrap(), b"2345".as_slice());
+
+        let conditional = serve_media(
+            TestRequest::get().insert_header((header::IF_MODIFIED_SINCE, modified)).to_http_request(),
+            WebPath::from(relative),
+        )
+        .await;
+        assert_eq!(conditional.status(), StatusCode::NOT_MODIFIED);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

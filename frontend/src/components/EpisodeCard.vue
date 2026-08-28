@@ -13,7 +13,12 @@
 		PhStar,
 		PhStop
 	} from '@phosphor-icons/vue';
-	import { usePlayerStore, RESUME_POSITION_S, parseDurationSeconds } from '@/stores/player';
+	import {
+		usePlayerStore,
+		RESUME_POSITION_S,
+		parseDurationSeconds,
+		sponsorBlockTimelineMarkers
+	} from '@/stores/player';
 	import { usePlaylistStore } from '@/stores/playlists';
 	import { useFavoritesStore } from '@/stores/favorites';
 	import { useNotificationStore } from '@/stores/notification';
@@ -76,12 +81,11 @@
 			: minuteSeconds;
 	}
 
-	const durationLabel = computed(() => {
+	const timelineDuration = computed(() => {
 		const storedDuration = parseDurationSeconds(props.episode.duration) ?? 0;
-		const durationSeconds =
-			isCurrent.value && player.duration > 0 ? player.duration : storedDuration;
-		return formatDurationLabel(durationSeconds);
+		return isCurrent.value && player.duration > 0 ? player.duration : storedDuration;
 	});
+	const durationLabel = computed(() => formatDurationLabel(timelineDuration.value));
 	const inPlaylist = computed(() => playlists.episodeIdSet.has(props.episode.id));
 	const isFavorite = computed(() => favorites.favoriteIdSet.has(props.episode.id));
 
@@ -116,6 +120,12 @@
 	});
 	const progressRatio = computed(() =>
 		isCurrent.value && !player.stopped ? player.progress : savedProgress.value
+	);
+	const sponsorBlockMarkers = computed(() =>
+		sponsorBlockTimelineMarkers(
+			timelineDuration.value,
+			liveEpisode.value.sponsorblock_segments
+		)
 	);
 	const titleScrollActive = computed(() => isPlaying.value && titleScrollDistance.value > 0);
 	const titleScrollStyle = computed(() => ({
@@ -253,6 +263,26 @@
 		} catch (err) {
 			console.error(err);
 			notification.show(t('playlist.resetProgressFailed'), 'error');
+		}
+	}
+
+	const refreshingSponsorBlock = ref(false);
+	async function refreshSponsorBlock() {
+		if (refreshingSponsorBlock.value) return;
+		refreshingSponsorBlock.value = true;
+		try {
+			const result = await api.refreshEpisodeSponsorBlock(props.episode.yt_id);
+			if (!result.ok || !result.data) {
+				notification.show(t('playlist.refreshSponsorBlockFailed'), 'error');
+				return;
+			}
+			player.applySponsorBlockSnapshot(result.data);
+			notification.show(t('playlist.sponsorBlockRefreshed'), 'success');
+		} catch (err) {
+			console.error(err);
+			notification.show(t('playlist.refreshSponsorBlockFailed'), 'error');
+		} finally {
+			refreshingSponsorBlock.value = false;
 		}
 	}
 
@@ -445,6 +475,18 @@
 						<PhLinkSimple class="h-4 w-4" />
 						<span>{{ $t('playlist.originalLink') }}</span>
 					</a>
+					<button
+						type="button"
+						role="menuitem"
+						class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-high focus:bg-surface-high focus:outline-none disabled:opacity-50"
+						data-testid="playlist-refresh-sponsorblock"
+						:aria-label="$t('playlist.refreshSponsorBlock')"
+						:disabled="refreshingSponsorBlock"
+						@click="runMenuAction(refreshSponsorBlock)"
+					>
+						<PhArrowCounterClockwise class="h-4 w-4" />
+						<span>{{ $t('playlist.refreshSponsorBlock') }}</span>
+					</button>
 					<button
 						type="button"
 						role="menuitem"
@@ -647,12 +689,19 @@
 		<!-- Read-only progress strip: reflects the saved playback point (or the
 		     live playhead for the current episode). Never interactive. -->
 		<div
-			v-if="progressRatio > 0"
-			class="absolute inset-x-0 bottom-0 h-1 bg-surface-input"
+			v-if="progressRatio > 0 || sponsorBlockMarkers.length > 0"
+			class="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-surface-input"
 			aria-hidden="true"
 			data-testid="episode-progress"
 		>
-			<div class="h-full bg-success" :style="{ width: `${progressRatio}%` }"></div>
+			<div class="absolute inset-y-0 left-0 bg-success" :style="{ width: `${progressRatio}%` }"></div>
+			<div
+				v-for="(marker, index) in sponsorBlockMarkers"
+				:key="index"
+				class="absolute inset-y-0 z-10 bg-sponsorblock"
+				data-testid="episode-sponsorblock-segment"
+				:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
+			></div>
 		</div>
 	</article>
 </template>

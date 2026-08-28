@@ -135,6 +135,23 @@ describe('PersistentPlayer controls', () => {
 		expect((nextBtn.element as HTMLButtonElement).disabled).toBe(true);
 	});
 
+	it('keeps SponsorBlock segments visible while playback is paused', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_segments: [{ start: 60, end: 120 }]
+		};
+		const bar = await mountBar();
+
+		player.playing = false;
+		await flushPromises();
+
+		const marker = bar.get('[data-testid="player-sponsorblock-segment"]');
+		expect(marker.attributes('style')).toContain('left: 10%');
+		expect(marker.attributes('style')).toContain('width: 10%');
+	});
+
 	it('previous restarts the current episode beyond 3 seconds', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

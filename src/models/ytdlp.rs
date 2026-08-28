@@ -150,6 +150,7 @@ impl Ytdlp {
     pub async fn download(&self, id: &str, output: &str) -> Result<(bool, YtVideo), Error>{
         let url = format!("https://www.youtube.com/watch?v={}", id);
         let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3",
+            "--audio-quality", "160K",
             "-o", output, "--print-json", "--js-runtimes", "node",
             "--js-runtimes", "deno", "--retries", "10",
             "--retry-sleep", "5"];
@@ -387,6 +388,41 @@ mod parse_dump_output_tests {
     #[test]
     fn non_json_output_errors() {
         assert!(parse_dump_output(b"not json at all\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod download_args_tests {
+    use super::*;
+    use std::{sync::Mutex, time::Duration};
+
+    struct ArgumentsRunner {
+        args: Mutex<Vec<String>>,
+    }
+
+    impl CommandRunner for ArgumentsRunner {
+        fn run<'a>(&'a self, _path: &'a str, args: &'a [&'a str]) -> CommandFuture<'a> {
+            *self.args.lock().unwrap() = args.iter().map(|arg| (*arg).to_string()).collect();
+            Box::pin(async {
+                Ok(CommandOutput {
+                    success: true,
+                    code: Some(0),
+                    stdout: br#"{"id":"video-id","title":"Video","description":"","thumbnail":"","original_url":"https://youtu.be/video-id","webpage_url":"https://youtu.be/video-id","upload_date":"20260828","duration_string":"00:01:00"}"#.to_vec(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn download_requests_constant_bitrate_mp3() {
+        crate::utils::throttle::init_throttle(Duration::ZERO);
+        let runner = Arc::new(ArgumentsRunner { args: Mutex::new(Vec::new()) });
+        let ytdlp = Ytdlp::with_runner("mock-yt-dlp", "", runner.clone());
+
+        ytdlp.download("video-id", "audio.mp3").await.unwrap();
+
+        let args = runner.args.lock().unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--audio-quality", "160K"]));
     }
 }
 

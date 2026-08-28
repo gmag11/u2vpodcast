@@ -16,6 +16,7 @@ use chrono::{
 use std::{
     collections::HashSet,
     convert::TryFrom,
+    path::Path,
     sync::{LazyLock, Mutex},
 };
 use rand::Rng;
@@ -33,6 +34,7 @@ use super::super::models::{
     ytdlp_path,
     cookies_file,
 };
+use super::sponsorblock::{reconcile_episode, SponsorBlockClient};
 
 // Extra videos requested beyond `max` so exclusions (upcoming/live/future)
 // cannot starve the window (scalable-channel-listing).
@@ -115,8 +117,16 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
     let channel = Channel::read(pool, channel_id).await?;
     let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
     let folder = audios_dir();
-    process_channel(pool, &channel, &ytdlp, folder).await?;
+    let window_ids = process_channel(pool, &channel, &ytdlp, folder).await?;
     clean_channel(pool, &channel, folder).await?;
+    reconcile_sponsorblock_window(
+        pool,
+        &channel,
+        folder,
+        &window_ids,
+        &SponsorBlockClient::default(),
+    )
+    .await?;
     // Remove transient/orphan files left by interrupted runs (`.part`,
     // yt-dlp temp files, mp3 without an episode row). Always runs, even when
     // pruning is skipped for an invalid max.
@@ -139,7 +149,11 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
 // a stored episode: yt-dlp/ffmpeg transients (`.part`, `.ytdlp-*`, `.tmp`) and
 // any file (mp3 or not) that no episode row references.
 fn is_orphan(name: &str, referenced: bool) -> bool {
-    if name.ends_with(".part") || name.contains(".ytdlp-") || name.ends_with(".tmp") {
+    if name.ends_with(".part")
+        || name.contains(".ytdlp-")
+        || name.ends_with(".tmp")
+        || name.contains(".tmp.")
+    {
         return true;
     }
     !name.ends_with(".mp3") || !referenced
@@ -151,6 +165,20 @@ fn is_orphan(name: &str, referenced: bool) -> bool {
 // download referenced by a stored row is never touched.
 async fn clean_orphan_files(pool: &SqlitePool, channel: &Channel, folder: &str) {
     let dir = format!("{folder}/{}", channel.slug);
+    let episodes = match Episode::read_episodes_for_channel(pool, channel.id).await {
+        Ok(episodes) => episodes,
+        Err(error) => {
+            error!("Cant load episode files for orphan cleanup: {error}");
+            return;
+        }
+    };
+    let mut referenced_files = HashSet::new();
+    for episode in episodes {
+        referenced_files.insert(format!("{}.mp3", episode.yt_id));
+        if let Some(filename) = episode.sponsorblock_processed_filename {
+            referenced_files.insert(filename);
+        }
+    }
     let mut entries = match tokio::fs::read_dir(&dir).await {
         Ok(entries) => entries,
         Err(_) => return, // nothing to clean (e.g. channel never downloaded)
@@ -164,15 +192,36 @@ async fn clean_orphan_files(pool: &SqlitePool, channel: &Channel, folder: &str) 
             Some(name) => name,
             None => continue,
         };
-        let referenced = match name.strip_suffix(".mp3") {
-            Some(yt_id) => Episode::exists(pool, channel.id, yt_id).await,
-            None => false,
-        };
+        let referenced = referenced_files.contains(name);
         if is_orphan(name, referenced) {
             info!(
                 "Removing orphan file {}/{} (not a stored episode)",
                 &channel.slug, name
             );
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+}
+
+fn is_episode_file(name: &str, yt_id: &str) -> bool {
+    name == format!("{yt_id}.mp3")
+        || name.starts_with(&format!("{yt_id}.mp3."))
+        || name.starts_with(&format!("{yt_id}.sponsorblock."))
+        || name.starts_with(&format!(".{yt_id}.sponsorblock."))
+}
+
+async fn remove_episode_files(channel_dir: &Path, yt_id: &str) {
+    let mut entries = match tokio::fs::read_dir(channel_dir).await {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .map(|name| is_episode_file(name, yt_id))
+            .unwrap_or(false)
+        {
             let _ = tokio::fs::remove_file(entry.path()).await;
         }
     }
@@ -215,21 +264,11 @@ async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Re
     };
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     for episode in evict_ids(&episodes, max) { // remove
-        let filename = format!("{}/{}/{}.mp3", folder, channel.slug, episode.yt_id);
-        info!("Deleting file {filename}");
-        let exists = tokio::fs::metadata(&filename)
-            .await
-            .map(|f| f.is_file())
-            .unwrap_or(false);
-        let removed = tokio::fs::remove_file(&filename)
-            .await
-            .map(|_| true)
-            .unwrap_or(false);
-        if !exists || removed {
-            match Episode::remove(pool, episode.id).await{
-                Ok(_) => info!("Removed {}", &filename),
-                Err(e) => error!("Cant remove {}. {}", &filename, e),
-            }
+        let channel_dir = Path::new(folder).join(&channel.slug);
+        remove_episode_files(&channel_dir, &episode.yt_id).await;
+        match Episode::remove(pool, episode.id).await{
+            Ok(_) => info!("Removed episode {} and its media", episode.yt_id),
+            Err(e) => error!("Cant remove episode {}. {}", episode.yt_id, e),
         }
     }
     Ok(())
@@ -240,7 +279,7 @@ async fn process_channel(
     channel: &Channel,
     ytdlp: &Ytdlp,
     folder: &str,
-) -> Result<(), Error>{
+) -> Result<HashSet<String>, Error>{
     info!("Create directory {}/{}", folder, &channel.slug);
     let _ = create_dir_all(format!("{}/{}", folder, channel.slug))
         .await;
@@ -254,6 +293,11 @@ async fn process_channel(
     info!("Listing up to {wanted} recent videos (window {max}) for {}", channel);
     let candidates = ytdlp.list_videos(&channel.url, wanted).await?;
     let selection = select_window(candidates, max, channel.first, Utc::now());
+    let window_ids = selection
+        .window
+        .iter()
+        .map(|video| video.id.clone())
+        .collect::<HashSet<_>>();
     info!(
         "Candidate window: {} videos ({} excluded as upcoming/live/future, floor break: {})",
         selection.window.len(),
@@ -265,6 +309,36 @@ async fn process_channel(
         match process_episode(pool, channel, ytvideo, ytdlp, folder, channel.first).await{
             Ok(_) => {},
             Err(e) => error!("Cant process episode: {e}"),
+        }
+    }
+    Ok(window_ids)
+}
+
+fn episodes_in_window<'a>(
+    episodes: &'a [Episode],
+    window_ids: &HashSet<String>,
+) -> Vec<&'a Episode> {
+    episodes
+        .iter()
+        .filter(|episode| window_ids.contains(&episode.yt_id))
+        .collect()
+}
+
+async fn reconcile_sponsorblock_window(
+    pool: &SqlitePool,
+    channel: &Channel,
+    folder: &str,
+    window_ids: &HashSet<String>,
+    client: &SponsorBlockClient,
+) -> Result<(), Error> {
+    let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
+    let channel_dir = Path::new(folder).join(&channel.slug);
+    for episode in episodes_in_window(&episodes, window_ids) {
+        if let Err(error) = reconcile_episode(pool, client, episode, &channel_dir).await {
+            error!(
+                "Cant reconcile SponsorBlock data for episode {}: {}",
+                episode.yt_id, error
+            );
         }
     }
     Ok(())
@@ -623,7 +697,7 @@ mod orphan_tests {
 #[cfg(test)]
 mod eviction_tests {
     use super::*;
-    use crate::models::Episode;
+    use crate::models::{Episode, SponsorBlockCache};
     use sqlx::{
         query,
         migrate::Migrator,
@@ -631,6 +705,31 @@ mod eviction_tests {
         Row,
     };
     use std::path::Path;
+
+    fn mixed_sponsorblock_server(request_count: usize) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..request_count {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let read = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..read]);
+                let (status, body) = if request.contains("videoID=failed") {
+                    ("500 Internal Server Error", "{}")
+                } else {
+                    ("404 Not Found", "{}")
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        format!("http://{address}")
+    }
 
     async fn memory_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -793,5 +892,154 @@ mod eviction_tests {
             "favorites must never be evicted"
         );
         assert_eq!(evict[0].yt_id, "nf0");
+    }
+
+    #[tokio::test]
+    async fn sponsorblock_window_includes_recent_episodes_but_not_old_favorites() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let now = Utc::now();
+        insert_episode(&pool, channel, "recent", now, false).await;
+        insert_episode(&pool, channel, "recent-favorite", now, true).await;
+        insert_episode(
+            &pool,
+            channel,
+            "old-favorite",
+            now - chrono::Duration::days(30),
+            true,
+        )
+        .await;
+        let episodes = for_channel(&pool, channel).await;
+        let window_ids = HashSet::from([
+            "recent".to_string(),
+            "recent-favorite".to_string(),
+        ]);
+
+        let selected = episodes_in_window(&episodes, &window_ids)
+            .into_iter()
+            .map(|episode| episode.yt_id.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(selected, HashSet::from(["recent", "recent-favorite"]));
+        assert!(!selected.contains("old-favorite"));
+    }
+
+    #[tokio::test]
+    async fn retention_and_orphan_cleanup_manage_sponsorblock_files() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        query("UPDATE channels SET max = 1 WHERE id = $1")
+            .bind(channel_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let now = Utc::now();
+        let old_id = insert_episode(
+            &pool,
+            channel_id,
+            "old",
+            now - chrono::Duration::days(1),
+            false,
+        )
+        .await;
+        let new_id = insert_episode(&pool, channel_id, "new", now, false).await;
+        SponsorBlockCache::upsert_success(
+            &pool,
+            old_id,
+            &[],
+            "old-hash",
+            Some("old.sponsorblock.active.mp3"),
+            Some(500.0),
+        )
+        .await
+        .unwrap();
+        SponsorBlockCache::upsert_success(
+            &pool,
+            new_id,
+            &[],
+            "new-hash",
+            Some("new.sponsorblock.active.mp3"),
+            Some(500.0),
+        )
+        .await
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "u2vpodcast-worker-cleanup-{}",
+            rand::random::<u64>()
+        ));
+        let channel_dir = root.join("evict_test_channel");
+        std::fs::create_dir_all(&channel_dir).unwrap();
+        for name in [
+            "old.mp3",
+            "old.sponsorblock.active.mp3",
+            "old.sponsorblock.stale.mp3",
+            ".old.sponsorblock.active.mp3.42.tmp.mp3",
+            "new.mp3",
+            "new.sponsorblock.active.mp3",
+            "new.sponsorblock.stale.mp3",
+            ".new.sponsorblock.active.mp3.42.tmp.mp3",
+        ] {
+            std::fs::write(channel_dir.join(name), b"fixture").unwrap();
+        }
+        let channel = Channel::read(&pool, channel_id).await.unwrap();
+        let root_string = root.to_string_lossy().into_owned();
+
+        clean_channel(&pool, &channel, &root_string).await.unwrap();
+        assert!(SponsorBlockCache::read(&pool, old_id).await.unwrap().is_none());
+        assert!(std::fs::read_dir(&channel_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains("old")));
+
+        clean_orphan_files(&pool, &channel, &root_string).await;
+        assert!(channel_dir.join("new.mp3").is_file());
+        assert!(channel_dir.join("new.sponsorblock.active.mp3").is_file());
+        assert!(!channel_dir.join("new.sponsorblock.stale.mp3").exists());
+        assert!(!channel_dir.join(".new.sponsorblock.active.mp3.42.tmp.mp3").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sponsorblock_failure_does_not_abort_later_window_episodes() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let now = Utc::now();
+        let failed_id = insert_episode(&pool, channel_id, "failed", now, false).await;
+        let successful_id = insert_episode(
+            &pool,
+            channel_id,
+            "successful",
+            now - chrono::Duration::seconds(1),
+            false,
+        )
+        .await;
+        let channel = Channel::read(&pool, channel_id).await.unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "u2vpodcast-worker-reconcile-{}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(root.join(&channel.slug)).unwrap();
+        let client = SponsorBlockClient::new(
+            &mixed_sponsorblock_server(2),
+            Duration::from_secs(1),
+        );
+        let window_ids = HashSet::from(["failed".to_string(), "successful".to_string()]);
+
+        reconcile_sponsorblock_window(
+            &pool,
+            &channel,
+            &root.to_string_lossy(),
+            &window_ids,
+            &client,
+        )
+        .await
+        .expect("mixed reconciliation completes");
+
+        assert!(SponsorBlockCache::read(&pool, failed_id).await.unwrap().is_none());
+        let successful = SponsorBlockCache::read(&pool, successful_id)
+            .await
+            .unwrap()
+            .expect("later episode persisted");
+        assert!(successful.segments.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

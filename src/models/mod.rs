@@ -6,6 +6,7 @@ mod error;
 mod role;
 mod episode;
 mod playlist;
+mod sponsorblock;
 mod ytdlp;
 pub mod channel;
 pub mod response;
@@ -48,6 +49,7 @@ pub use episode::{
     EpisodeProgress,
 };
 pub use playlist::PlaylistItem;
+pub use sponsorblock::{SponsorBlockCache, SponsorBlockSegment};
 pub use appstate::AppState;
 pub use user::{
     User,
