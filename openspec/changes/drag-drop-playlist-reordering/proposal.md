@@ -8,6 +8,7 @@ Reordering the playlist one position at a time with separate up/down buttons is 
 - Reorder the existing playlist rows directly in the main view, moving the complete episode card and showing a visible insertion position between cards.
 - Auto-scroll the page when a dragged row reaches the top or bottom edge of the visible playlist so off-screen positions remain reachable.
 - Persist each completed drop through the existing full-order playlist reorder operation and restore the previous order if persistence fails.
+- Immediately synchronize an active playlist-sourced playback queue with the reordered playlist so the next episode and Up Next reflect the new order, including rollback after persistence failure.
 - Make the handle usable with pointer, touch, and keyboard input, with a touch-sized mobile target, localized accessible labels, and status feedback.
 
 ## Capabilities
@@ -21,6 +22,6 @@ Reordering the playlist one position at a time with separate up/down buttons is 
 ## Impact
 
 - Frontend playlist view and an inline draggable-row component or directive.
-- Playlist store error handling for optimistic reorder and rollback.
+- Playlist and player store coordination for optimistic reorder, active-queue synchronization, and rollback.
 - English and Spanish playlist translations and focused frontend tests.
 - A frontend drag-and-drop dependency may be added; the backend, database schema, and existing playlist API contract remain unchanged.

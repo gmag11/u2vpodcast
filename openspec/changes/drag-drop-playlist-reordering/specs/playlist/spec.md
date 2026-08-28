@@ -12,6 +12,8 @@ On mobile viewports, the drag handle SHALL provide a touch target of at least 44
 
 Completing a drop that changes the order SHALL submit the complete resulting list of episode ids for persistence. The main playlist SHALL retain the new order when persistence succeeds. If persistence fails, the main playlist SHALL restore the last persisted order and the user SHALL receive an error notification. Dropping an episode without changing its position SHALL NOT submit a reorder request.
 
+When playback was started from the playlist, completing a changed reorder SHALL immediately rebuild the active authored queue from the episodes after the current episode in the new playlist order. The next automatic advance and the Up Next interface SHALL use that updated queue without restarting or interrupting the current episode. If persistence fails, the active queue SHALL be reconciled with the restored playlist order. A queue started from a non-playlist episode list SHALL remain unchanged.
+
 #### Scenario: Playlist presents compact drag handles
 - **WHEN** the playlist contains at least two episodes
 - **THEN** each episode card has one six-dot drag handle on its left and no up/down reorder buttons are shown
@@ -43,6 +45,18 @@ Completing a drop that changes the order SHALL submit the complete resulting lis
 #### Scenario: Episode is dropped in its original position
 - **WHEN** the user drops an episode without changing its position
 - **THEN** the visible order remains unchanged and no reorder request is sent
+
+#### Scenario: Active playlist playback follows a new order
+- **WHEN** an episode is playing from the playlist and the user completes a changed reorder
+- **THEN** Up Next immediately lists the episodes after the current episode in the new playlist order and automatic advance plays the first of them
+
+#### Scenario: Active queue follows reorder rollback
+- **WHEN** an active playlist-sourced queue is updated optimistically and reorder persistence fails
+- **THEN** Up Next is restored to the remaining order derived from the restored playlist
+
+#### Scenario: Non-playlist queue is not replaced
+- **WHEN** playback was seeded from another episode list and the user reorders the playlist
+- **THEN** the existing Up Next queue remains unchanged
 
 #### Scenario: Playlist cannot be meaningfully reordered
 - **WHEN** the playlist contains fewer than two episodes

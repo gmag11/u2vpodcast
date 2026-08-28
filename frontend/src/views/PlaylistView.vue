@@ -74,9 +74,11 @@
 			return;
 		}
 
+		player.syncPlaylistOrder(sortableItems.value);
 		committing.value = true;
 		const result = await playlists.reorder(nextIds);
 		syncFromStore();
+		player.syncPlaylistOrder(playlists.items);
 		committing.value = false;
 
 		if (result.ok) {

@@ -717,6 +717,25 @@ export const usePlayerStore = defineStore('player', () => {
 		persistQueue();
 	}
 
+	function syncPlaylistOrder(episodes: Episode[]) {
+		if (queueSource.value !== 'playlist' || currentEpisode.value == null) return;
+		const currentIndex = episodes.findIndex((episode) => episode.id === currentEpisode.value?.id);
+		if (currentIndex < 0) return;
+
+		const nextSeed = episodes.slice(currentIndex + 1);
+		if (shuffle.value) {
+			const nextIds = new Set(nextSeed.map((episode) => episode.id));
+			const retained = upNext.value.filter((episode) => nextIds.has(episode.id));
+			const retainedIds = new Set(retained.map((episode) => episode.id));
+			const added = nextSeed.filter((episode) => !retainedIds.has(episode.id));
+			upNext.value = [...retained, ...shuffledCopy(added)];
+		} else {
+			upNext.value = [...nextSeed];
+		}
+		seedOrder.value = [...nextSeed];
+		persistQueue();
+	}
+
 	async function togglePlay() {
 		const el = ensureAudio();
 		if (!el || !currentEpisode.value) return;
@@ -953,6 +972,7 @@ export const usePlayerStore = defineStore('player', () => {
 		cycleRepeat,
 		removeFromQueue,
 		clearQueue,
+		syncPlaylistOrder,
 		togglePlay,
 		pause,
 		stop,

@@ -55,6 +55,14 @@ const okResult = (data: unknown = null) => ({
 
 const failedResult = () => ({ ok: false, data: null, user: null, status: false });
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 async function mountView(episodes = [episode(1), episode(2), episode(3)]) {
 	const pinia = createPinia();
 	setActivePinia(pinia);
@@ -162,6 +170,29 @@ describe('PlaylistView inline reordering', () => {
 		wrapper.unmount();
 	});
 
+	it('updates playlist-sourced up next before reorder persistence settles', async () => {
+		const episodes = [episode(1), episode(2), episode(3)];
+		const request = deferred<ReturnType<typeof okResult>>();
+		const { wrapper, player } = await mountView(episodes);
+		vi.mocked(api.reorderPlaylist).mockReturnValue(request.promise as never);
+		player.currentEpisode = episodes[0];
+		player.queueSource = 'playlist';
+		player.upNext = [episodes[1], episodes[2]];
+
+		const draggable = wrapper.findComponent(VueDraggable);
+		draggable.vm.$emit('start', { oldIndex: 1 });
+		draggable.vm.$emit('update:modelValue', [episodes[0], episodes[2], episodes[1]]);
+		await nextTick();
+		draggable.vm.$emit('end', { oldIndex: 1 });
+
+		await vi.waitFor(() => expect(api.reorderPlaylist).toHaveBeenCalledWith([1, 3, 2]));
+		expect(player.upNext.map((item) => item.id)).toEqual([3, 2]);
+
+		request.resolve(okResult());
+		await flushPromises();
+		wrapper.unmount();
+	});
+
 	it('supports keyboard pickup, movement, drop, and announcements', async () => {
 		const { wrapper } = await mountView();
 		const firstHandle = wrapper.find('[data-drag-handle="1"]');
@@ -190,10 +221,14 @@ describe('PlaylistView inline reordering', () => {
 
 	it('restores the persisted order and notifies when saving fails', async () => {
 		vi.spyOn(api, 'reorderPlaylist').mockResolvedValue(failedResult() as never);
-		const { wrapper } = await mountView();
+		const { wrapper, player } = await mountView();
 		vi.mocked(api.reorderPlaylist).mockResolvedValue(failedResult() as never);
+		player.currentEpisode = episode(1);
+		player.queueSource = 'playlist';
+		player.upNext = [episode(2), episode(3)];
 		await emitDrop(wrapper, [episode(3), episode(1), episode(2)], 2);
 		expect(rowIds(wrapper)).toEqual([1, 2, 3]);
+		expect(player.upNext.map((item) => item.id)).toEqual([2, 3]);
 		expect(useNotificationStore().current).toEqual({
 			message: 'Could not save the playlist order',
 			type: 'error'

@@ -18,7 +18,6 @@ Reordering must work with mouse, touch, and keyboard input. Playback completion 
 - Opening a drawer, modal, bottom sheet, or separate reorder mode.
 - Redesigning or duplicating the episode card content.
 - Changing the backend endpoint, database positions, or playlist lifecycle rules.
-- Reordering a player queue that has already been seeded.
 - Adding drag and drop to episode lists outside the playlist view.
 
 ## Decisions
@@ -61,12 +60,21 @@ Before committing, compare the dragged ID set with the current store ID set. If 
 
 **Alternatives considered:** Waiting for the server before updating the list makes the completed drop feel delayed. Submitting a stale snapshot can reintroduce a removed ID or fail server validation.
 
+### 6. Synchronize active playlist playback with the optimistic order
+
+Expose a player-store operation that accepts the complete playlist order and acts only when the active queue was seeded from the playlist. Rebuild the authored queue from the episodes after the current episode in that order, replace the visible Up Next queue immediately, and persist the updated queue. This makes the next automatic advance consume the same order the playlist view displays. A queue seeded from any other list remains untouched.
+
+The playlist view calls this operation when it commits the optimistic order, before awaiting persistence. After the reorder request settles, it calls the operation again with the playlist store's reconciled items so a failed request restores both the visible playlist and Up Next. When shuffle is active, update the authored seed while retaining the randomized order of the same remaining episodes; disabling shuffle then reveals the new authored order without silently disabling the user's playback mode.
+
+**Alternatives considered:** Importing the player store into the playlist store was rejected because the player already depends on the playlist store for completion-driven removal, which would introduce circular store ownership. Re-seeding through `play()` was rejected because it would reload the current media and reset unrelated playback state.
+
 ## Risks / Trade-offs
 
 - **[Risk] Touch dragging can conflict with page scrolling.** -> Start drag only from the handle, use touch delay/tolerance, and leave the card surface available for ordinary scrolling.
 - **[Risk] Viewport auto-scroll can be too aggressive.** -> Bound and tune its edge zone and speed, and test both directions on short mobile viewports.
 - **[Risk] The added handle can squeeze cards on narrow screens.** -> Keep one compact visual grip inside a 44-pixel target and allow the card wrapper to shrink without horizontal overflow.
 - **[Risk] Optimistic rollback can overwrite a concurrent removal.** -> Serialize commits, compare ID sets, and reload when the set changes during the request.
+- **[Risk] Reordering can desynchronize the active queue or revive consumed items.** -> Rebuild only the tail after the current episode and reconcile it again from the final store order after persistence settles.
 
 ## Migration Plan
 

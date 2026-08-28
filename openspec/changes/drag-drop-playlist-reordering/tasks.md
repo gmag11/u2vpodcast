@@ -20,8 +20,10 @@
 ## 4. Playback Integration
 
 - [x] 4.1 Confirm play-all, episode playback, playlist removal, and completion-driven removal still use the store's current order after inline reordering; verify the focused playlist view and player tests pass.
+- [x] 4.2 Add a player operation that synchronizes playlist-sourced Up Next and its authored seed from the reordered tail after the current episode, invoke it for optimistic reorder and rollback reconciliation, and verify active playlist playback advances in the new order while non-playlist queues remain unchanged.
 
 ## 5. Verification
 
 - [x] 5.1 Run `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm build` from `frontend/` and resolve regressions introduced by the change.
 - [x] 5.2 Exercise the main playlist at desktop and representative narrow/short mobile viewport sizes with mouse, touch emulation, and keyboard-only input; verify the grip stays visually compact, its touch target is at least 44 by 44 CSS pixels, cards do not overflow, card controls remain operable, insertion feedback is visible, and holding a dragged row at either viewport edge reaches initially hidden cards.
+- [x] 5.3 Run the focused player and playlist view tests, frontend typecheck, lint, and build after active-queue synchronization is implemented.

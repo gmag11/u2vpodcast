@@ -309,6 +309,40 @@ describe('player store queue', () => {
 		expect(player.queueSource).toBe('list');
 	});
 
+	it('synchronizes playlist up next and advances in the reordered tail', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4)];
+		await player.play(episodes[1], episodes, { queueSource: 'playlist' });
+
+		player.syncPlaylistOrder([episodes[1], episodes[3], episodes[0], episodes[2]]);
+
+		expect(player.upNext.map((item) => item.id)).toEqual([4, 1, 3]);
+		await player.advance();
+		expect(player.currentEpisode?.id).toBe(4);
+	});
+
+	it('does not replace a queue seeded from another list', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3)];
+		await player.play(episodes[0], episodes);
+
+		player.syncPlaylistOrder([episodes[0], episodes[2], episodes[1]]);
+
+		expect(player.upNext.map((item) => item.id)).toEqual([2, 3]);
+	});
+
+	it('restores the reordered playlist tail when shuffle is disabled', async () => {
+		const player = usePlayerStore();
+		const episodes = [episode(1), episode(2), episode(3), episode(4)];
+		await player.play(episodes[0], episodes, { queueSource: 'playlist' });
+		player.toggleShuffle();
+
+		player.syncPlaylistOrder([episodes[0], episodes[3], episodes[2], episodes[1]]);
+		player.toggleShuffle();
+
+		expect(player.upNext.map((item) => item.id)).toEqual([4, 3, 2]);
+	});
+
 	it('removes a completed playlist-sourced episode from the playlist', async () => {
 		const player = usePlayerStore();
 		const episodes = [episode(1), episode(2)];
