@@ -136,6 +136,31 @@ impl PlaylistItem {
         Ok(())
     }
 
+    pub(crate) async fn purge_episode(
+        conn: &mut sqlx::SqliteConnection,
+        episode_id: i64,
+    ) -> Result<(), Error> {
+        query("DELETE FROM playlist_items WHERE episode_id = $1")
+            .bind(episode_id)
+            .execute(&mut *conn)
+            .await?;
+        Self::reindex(conn).await
+    }
+
+    pub(crate) async fn purge_for_channel(
+        conn: &mut sqlx::SqliteConnection,
+        channel_id: i64,
+    ) -> Result<(), Error> {
+        query(
+            "DELETE FROM playlist_items WHERE episode_id IN \
+             (SELECT id FROM episodes WHERE channel_id = $1)",
+        )
+        .bind(channel_id)
+        .execute(&mut *conn)
+        .await?;
+        Self::reindex(conn).await
+    }
+
     /// Rewrites positions in the given order. The submission must cover exactly
     /// the stored rows whose episodes still exist; rows referencing deleted
     /// episodes are dropped (they are invisible to the INNER JOIN read anyway).
@@ -329,6 +354,66 @@ mod playlist_tests {
             .await
             .expect_err("missing item must 404");
         assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn purge_episode_removes_middle_item_and_reindexes() {
+        let pool = memory_pool().await;
+        let channel = insert_channel(&pool).await;
+        let ep1 = insert_episode(&pool, channel, "plpur1").await;
+        let ep2 = insert_episode(&pool, channel, "plpur2").await;
+        let ep3 = insert_episode(&pool, channel, "plpur3").await;
+        add_all(&pool, &[ep1, ep2, ep3]).await;
+
+        let mut tx = pool.begin().await.expect("begin transaction");
+        PlaylistItem::purge_episode(&mut tx, ep2)
+            .await
+            .expect("purge episode");
+        tx.commit().await.expect("commit transaction");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read_all");
+        assert_eq!(items.iter().map(|item| item.episode_id).collect::<Vec<_>>(), vec![ep1, ep3]);
+        assert_eq!(items.iter().map(|item| item.position).collect::<Vec<_>>(), vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn purge_for_channel_removes_its_items_and_reindexes() {
+        let pool = memory_pool().await;
+        let removed_channel = insert_channel(&pool).await;
+        let kept_channel = query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind("https://example.com/kept")
+        .bind("Kept Channel")
+        .bind("kept_channel")
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(Utc::now())
+        .bind(5i64)
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(&pool)
+        .await
+        .expect("insert kept channel");
+        let removed1 = insert_episode(&pool, removed_channel, "plch1").await;
+        let kept = insert_episode(&pool, kept_channel, "plkeep").await;
+        let removed2 = insert_episode(&pool, removed_channel, "plch2").await;
+        add_all(&pool, &[removed1, kept, removed2]).await;
+
+        let mut tx = pool.begin().await.expect("begin transaction");
+        PlaylistItem::purge_for_channel(&mut tx, removed_channel)
+            .await
+            .expect("purge channel");
+        tx.commit().await.expect("commit transaction");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read_all");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].episode_id, kept);
+        assert_eq!(items[0].position, 0);
     }
 
     #[tokio::test]

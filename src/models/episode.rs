@@ -1,4 +1,4 @@
-use super::Error;
+use super::{Error, PlaylistItem};
 use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -416,13 +416,16 @@ impl Episode {
 
     pub async fn remove(pool: &SqlitePool, id: i64) -> Result<Episode, Error> {
         info!("remove");
+        let mut tx = pool.begin().await?;
         let sql = "DELETE from episodes WHERE id = $1 RETURNING * ;";
-        query(sql)
+        let episode = query(sql)
             .bind(id)
             .map(Self::from_row)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| e.into())
+            .fetch_one(&mut *tx)
+            .await?;
+        PlaylistItem::purge_episode(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(episode)
     }
 
 
@@ -560,6 +563,50 @@ mod episode_update_tests {
             saved.updated_at >= saved.created_at,
             "updated_at must be refreshed on update"
         );
+    }
+
+    #[tokio::test]
+    async fn remove_deletes_playlist_item_and_reindexes() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let first = Episode::create(&pool, &episode_struct(channel_id, "rem111"))
+            .await
+            .expect("create first");
+        let middle = Episode::create(&pool, &episode_struct(channel_id, "rem222"))
+            .await
+            .expect("create middle");
+        let last = Episode::create(&pool, &episode_struct(channel_id, "rem333"))
+            .await
+            .expect("create last");
+        for episode in [&first, &middle, &last] {
+            PlaylistItem::add(&pool, episode.id).await.expect("add playlist item");
+        }
+
+        Episode::remove(&pool, middle.id).await.expect("remove episode");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
+        assert_eq!(items.iter().map(|item| item.episode_id).collect::<Vec<_>>(), vec![first.id, last.id]);
+        assert_eq!(items.iter().map(|item| item.position).collect::<Vec<_>>(), vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn remove_non_playlist_episode_leaves_playlist_unchanged() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let kept = Episode::create(&pool, &episode_struct(channel_id, "keep11"))
+            .await
+            .expect("create kept");
+        let removed = Episode::create(&pool, &episode_struct(channel_id, "gone22"))
+            .await
+            .expect("create removed");
+        PlaylistItem::add(&pool, kept.id).await.expect("add kept item");
+
+        Episode::remove(&pool, removed.id).await.expect("remove episode");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].episode_id, kept.id);
+        assert_eq!(items[0].position, 0);
     }
 
     #[tokio::test]

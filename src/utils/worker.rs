@@ -13,7 +13,11 @@ use chrono::{
         NaiveDate,
     },
 };
-use std::convert::TryFrom;
+use std::{
+    collections::HashSet,
+    convert::TryFrom,
+    sync::{LazyLock, Mutex},
+};
 use rand::Rng;
 use tokio::fs::create_dir_all;
 use tokio::time::sleep;
@@ -33,6 +37,33 @@ use super::super::models::{
 // Extra videos requested beyond `max` so exclusions (upcoming/live/future)
 // cannot starve the window (scalable-channel-listing).
 const MARGIN: usize = 5;
+
+static CHANNEL_SYNCS: LazyLock<Mutex<HashSet<i64>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+struct ChannelSyncGuard {
+    channel_id: i64,
+}
+
+impl ChannelSyncGuard {
+    fn acquire(channel_id: i64) -> Option<Self> {
+        let mut channel_syncs = CHANNEL_SYNCS.lock().unwrap_or_else(|e| e.into_inner());
+        if channel_syncs.insert(channel_id) {
+            Some(Self { channel_id })
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for ChannelSyncGuard {
+    fn drop(&mut self) {
+        CHANNEL_SYNCS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.channel_id);
+    }
+}
 
 pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
     let channels = Channel::read_active(pool).await?;
@@ -57,6 +88,13 @@ pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
 }
 
 pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+    let _guard = match ChannelSyncGuard::acquire(channel_id) {
+        Some(guard) => guard,
+        None => {
+            info!("Channel {channel_id} sync already in progress; skipping duplicate request");
+            return Ok(());
+        }
+    };
     let (ok, message) = match update_channel_inner(pool, channel_id).await {
         Ok(()) => (true, None),
         Err(e) => (false, Some(error_message(e))),
@@ -259,8 +297,8 @@ async fn process_episode(
     // so the stored episode is built from authoritative metadata; the flat
     // listing candidate fills any field yt-dlp omitted (scalable-channel
     // -listing).
-    let (status, info) = ytdlp.download(&ytvideo.id, &filename).await?;
-    if !status.success(){
+    let (success, info) = ytdlp.download(&ytvideo.id, &filename).await?;
+    if !success{
         Err(Error::default(&format!("Cant download {filename}")))?
     }
     let published_at = get_published_at(&info);
@@ -412,6 +450,23 @@ pub(crate) fn select_window(
         window,
         excluded,
         stopped_at_floor,
+    }
+}
+
+#[cfg(test)]
+mod channel_sync_guard_tests {
+    use super::*;
+
+    #[test]
+    fn guard_excludes_only_the_same_channel_and_releases_on_drop() {
+        let first = ChannelSyncGuard::acquire(-9_001).expect("first channel sync");
+        assert!(ChannelSyncGuard::acquire(-9_001).is_none());
+
+        let other = ChannelSyncGuard::acquire(-9_002).expect("different channel sync");
+        drop(other);
+        drop(first);
+
+        assert!(ChannelSyncGuard::acquire(-9_001).is_some());
     }
 }
 
