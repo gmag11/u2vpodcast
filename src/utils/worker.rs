@@ -344,6 +344,10 @@ async fn reconcile_sponsorblock_window(
     Ok(())
 }
 
+fn needs_episode_download(episode_exists: bool, original_exists: bool) -> bool {
+    !episode_exists || !original_exists
+}
+
 async fn process_episode(
     pool: &SqlitePool,
     channel: &Channel,
@@ -353,19 +357,23 @@ async fn process_episode(
     floor: DateTime<Utc>,
 ) -> Result<(), Error>{
     info!("Start processing episode {}", ytvideo.title);
-    if channel.episode_exists(pool, &ytvideo.id).await{
+    let filename = format!("{}/{}/{}.mp3",
+        folder,
+        channel.slug,
+        ytvideo.id
+    );
+    let episode_exists = channel.episode_exists(pool, &ytvideo.id).await;
+    if !needs_episode_download(episode_exists, Path::new(&filename).is_file()) {
         info!("El video {} titulado '{}', existe",
             &ytvideo.id,
             &ytvideo.title
         );
         return Ok(());
     }
+    if episode_exists {
+        info!("The original media for {} is missing; downloading it again", ytvideo.id);
+    }
     info!("Downloading video: {:?}", ytvideo);
-    let filename = format!("{}/{}/{}.mp3",
-        folder,
-        channel.slug,
-        ytvideo.id
-    );
 
     // The download run carries the full `yt-dlp` info dict (`--print-json`),
     // so the stored episode is built from authoritative metadata; the flat
@@ -403,6 +411,9 @@ async fn process_episode(
         filetime::FileTime::from_unix_time(
             published_at.timestamp(), 0)
     );
+    if episode_exists {
+        return Ok(());
+    }
     let listen = false;
     let episode = Episode::new(
         pool,
@@ -666,6 +677,18 @@ mod selection_tests {
         assert_eq!(thirty.window.len(), 30);
         assert_eq!(thirty.window[20].id, "v20");
         assert_eq!(thirty.window[29].id, "v29");
+    }
+}
+
+#[cfg(test)]
+mod episode_download_tests {
+    use super::needs_episode_download;
+
+    #[test]
+    fn existing_episode_is_downloaded_again_when_original_is_missing() {
+        assert!(!needs_episode_download(true, true));
+        assert!(needs_episode_download(true, false));
+        assert!(needs_episode_download(false, false));
     }
 }
 
