@@ -65,6 +65,296 @@ function mountCard(ep: Episode) {
 	});
 }
 
+function mountPlaylistCard(ep: Episode, attachToDocument = false, inPlaylist = true) {
+	const pinia = createPinia();
+	const playlists = usePlaylistStore(pinia);
+	playlists.items = inPlaylist ? [ep] : [];
+	return mount(EpisodeCard, {
+		...(attachToDocument ? { attachTo: document.body } : {}),
+		props: {
+			episode: ep,
+			list: [ep],
+			compact: true,
+			presentation: 'playlist',
+			queueSource: 'playlist'
+		},
+		global: { plugins: [pinia, testI18n], stubs: { RouterLink: true } }
+	});
+}
+
+function mockTitleMeasurements(viewportWidth = 100) {
+	const clientWidth = vi
+		.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'playlist-title-viewport' ? viewportWidth : 0;
+		});
+	const scrollWidth = vi
+		.spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'playlist-title-text'
+				? (this.textContent?.length ?? 0) * 8
+				: 0;
+		});
+	return () => {
+		clientWidth.mockRestore();
+		scrollWidth.mockRestore();
+	};
+}
+
+function marqueeMetric(wrapper: ReturnType<typeof mountPlaylistCard>, property: string) {
+	const track = wrapper.get('[data-testid="playlist-title-scroll"]').element as HTMLElement;
+	return Number.parseFloat(track.style.getPropertyValue(property));
+}
+
+describe('EpisodeCard mobile playlist presentation', () => {
+	beforeEach(() => {
+		localStorage.clear();
+		vi.clearAllMocks();
+		testI18n.global.locale.value = 'en';
+	});
+
+	it('renders the dense mobile content only when explicitly selected', () => {
+		const ep = episode({
+			title: 'A complete episode title that needs horizontal scrolling',
+			description: 'This description must stay out of the mobile playlist row',
+			channel_title: 'Static channel',
+			image: 'https://example.com/cover.jpg',
+			favorite: true,
+			position_seconds: 120
+		});
+		const playlistWrapper = mountPlaylistCard(ep);
+		const mobile = playlistWrapper.get('[data-testid="playlist-mobile-card"]');
+
+		expect(mobile.get('[data-testid="playlist-image-playback"]').attributes('aria-label')).toBe(
+			'Play'
+		);
+		expect(mobile.get('[data-testid="playlist-title-scroll"]').classes()).toContain(
+			'playlist-title-scroll'
+		);
+		expect(mobile.get('[data-testid="playlist-channel"]').text()).toBe('Static channel');
+		expect(mobile.text()).toContain('1:00:00');
+		expect(mobile.text()).not.toContain(ep.description);
+		expect(mobile.find('[aria-label="Stop"]').exists()).toBe(false);
+		expect(mobile.get('[data-testid="playlist-favorite-status"]').attributes('data-icon')).toBe(
+			'star'
+		);
+		expect(mobile.get('[data-testid="playlist-favorite-status"]').attributes('role')).toBe('img');
+		expect(mobile.get('[data-testid="playlist-favorite-status"]').attributes('data-active')).toBe(
+			'true'
+		);
+		expect(mobile.get('[data-testid="playlist-membership-status"]').attributes('data-active')).toBe(
+			'true'
+		);
+		expect(mobile.get('[data-testid="playlist-status-column"]').classes()).toContain('flex-col');
+		expect(mobile.get('[data-testid="playlist-metadata"]').classes()).toContain('justify-between');
+
+		const standardWrapper = mountCard(ep);
+		expect(standardWrapper.find('[data-testid="playlist-mobile-card"]').exists()).toBe(false);
+		expect(playlistWrapper.find('.hidden.sm\\:flex').exists()).toBe(true);
+	});
+
+	it('formats every duration with at least minutes and seconds', async () => {
+		const short = mountPlaylistCard(episode({ duration: '48' }));
+		expect(short.get('[data-testid="playlist-metadata"]').text()).toContain('0:48');
+
+		const currentEpisode = episode({ id: 7, duration: '9:47' });
+		const current = mountPlaylistCard(currentEpisode);
+		const player = usePlayerStore();
+		player.currentEpisode = currentEpisode;
+		player.duration = 0;
+		await flushPromises();
+		expect(current.get('[data-testid="playlist-metadata"]').text()).toContain('9:47');
+	});
+
+	it('uses the image for shared playlist playback and pause', async () => {
+		const ep = episode({ id: 7, yt_id: 'yt7' });
+		const wrapper = mountPlaylistCard(ep);
+		const player = usePlayerStore();
+		const play = vi.spyOn(player, 'play').mockImplementation(async () => undefined);
+		const togglePlay = vi.spyOn(player, 'togglePlay').mockImplementation(async () => undefined);
+
+		await wrapper.get('[data-testid="playlist-image-playback"]').trigger('click');
+		expect(play).toHaveBeenCalledWith(ep, [ep], { queueSource: 'playlist' });
+
+		player.currentEpisode = ep;
+		player.playing = true;
+		await flushPromises();
+		expect(wrapper.get('[data-testid="playlist-image-playback"]').attributes('aria-label')).toBe(
+			'Pause'
+		);
+		await wrapper.get('[data-testid="playlist-image-playback"]').trigger('click');
+		expect(togglePlay).toHaveBeenCalledOnce();
+	});
+
+	it('scrolls only the playing title and stops it while paused', async () => {
+		const restoreMeasurements = mockTitleMeasurements();
+		const ep = episode({ title: 'A title wide enough to overflow the mobile row' });
+		const wrapper = mountPlaylistCard(ep);
+		const player = usePlayerStore();
+		await flushPromises();
+
+		const track = wrapper.get('[data-testid="playlist-title-scroll"]');
+		expect(track.classes()).not.toContain('playlist-title-scroll--active');
+		expect(wrapper.find('[data-testid="playlist-title-copy"]').exists()).toBe(true);
+
+		player.currentEpisode = ep;
+		player.playing = true;
+		await flushPromises();
+		expect(track.classes()).toContain('playlist-title-scroll--active');
+		expect(wrapper.get('[data-testid="playlist-title-copy"]').attributes('aria-hidden')).toBe(
+			'true'
+		);
+
+		player.playing = false;
+		await flushPromises();
+		expect(track.classes()).not.toContain('playlist-title-scroll--active');
+		restoreMeasurements();
+	});
+
+	it('derives animation duration from travel distance at a fixed speed', async () => {
+		const restoreMeasurements = mockTitleMeasurements();
+		const shorter = mountPlaylistCard(episode({ title: 'A moderately long title' }));
+		const longer = mountPlaylistCard(
+			episode({ title: 'A substantially longer title that must travel much farther' })
+		);
+		await flushPromises();
+
+		const shortDistance = marqueeMetric(shorter, '--playlist-title-distance');
+		const longDistance = marqueeMetric(longer, '--playlist-title-distance');
+		const shortDuration = marqueeMetric(shorter, '--playlist-title-duration');
+		const longDuration = marqueeMetric(longer, '--playlist-title-duration');
+
+		expect(longDistance).toBeGreaterThan(shortDistance);
+		expect(longDuration).toBeGreaterThan(shortDuration);
+		expect(shortDistance / shortDuration).toBeCloseTo(longDistance / longDuration);
+		restoreMeasurements();
+	});
+
+	it('reuses loading, favorite, partial, listened, and untouched state', async () => {
+		const partial = mountPlaylistCard(episode({ position_seconds: 1800, favorite: true }));
+		expect(partial.find('[data-testid="playlist-favorite-status"]').exists()).toBe(true);
+		expect(partial.get('[data-testid="episode-progress"] div').attributes('style')).toContain(
+			'width: 50%'
+		);
+
+		const listened = mountPlaylistCard(episode({ listen: true, position_seconds: 3600 }));
+		expect(listened.get('[data-testid="episode-progress"] div').attributes('style')).toContain(
+			'width: 100%'
+		);
+
+		const untouched = mountPlaylistCard(episode(), false, false);
+		expect(untouched.find('[data-testid="playlist-favorite-status"]').exists()).toBe(true);
+		expect(
+			untouched.get('[data-testid="playlist-favorite-status"]').attributes('data-active')
+		).toBe('false');
+		expect(
+			untouched.get('[data-testid="playlist-membership-status"]').attributes('data-active')
+		).toBe('false');
+		expect(untouched.find('[data-testid="episode-progress"]').exists()).toBe(false);
+
+		const player = usePlayerStore();
+		player.currentEpisode = untouched.props('episode');
+		player.loading = true;
+		await flushPromises();
+		expect(
+			(untouched.get('[data-testid="playlist-image-playback"]').element as HTMLButtonElement)
+				.disabled
+		).toBe(true);
+	});
+
+	it('keeps row state icons informational', async () => {
+		const wrapper = mountPlaylistCard(episode({ favorite: true }));
+		await wrapper.get('[data-testid="playlist-favorite-status"]').trigger('click');
+		expect(api.setEpisodeFavorite).not.toHaveBeenCalled();
+		expect(api.removeEpisodeFromPlaylist).not.toHaveBeenCalled();
+	});
+
+	it('opens the exact ordered action menu and exposes its destinations', async () => {
+		const ep = episode({ id: 7, channel_id: 23, favorite: false, position_seconds: 120 });
+		const wrapper = mountPlaylistCard(ep);
+		const trigger = wrapper.get('[data-testid="playlist-actions-trigger"]');
+
+		await trigger.trigger('click');
+		const menu = wrapper.get('[role="menu"]');
+		expect(menu.findAll('[role="menuitem"]').map((item) => item.attributes('aria-label'))).toEqual([
+			'Favourite',
+			'Remove from playlist',
+			'Original link',
+			'Reset progress',
+			'Channel view'
+		]);
+		expect(menu.get('[data-testid="playlist-original-link"]').attributes('href')).toBe(
+			ep.webpage_url
+		);
+		expect(menu.get('[data-testid="playlist-channel-view"]').attributes('to')).toBe(
+			'[object Object]'
+		);
+		expect(menu.find('[aria-label="Stop"]').exists()).toBe(false);
+	});
+
+	it('runs favorite, removal, and reset actions through the shared behavior', async () => {
+		const ep = episode({ id: 7, yt_id: 'yt7', position_seconds: 120 });
+		const wrapper = mountPlaylistCard(ep);
+
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		await wrapper.get('[aria-label="Favourite"]').trigger('click');
+		await flushPromises();
+		expect(api.setEpisodeFavorite).toHaveBeenCalledWith('yt7', true);
+		expect(useNotificationStore().current?.message).toBe('Added to favorites');
+
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		await wrapper.get('[aria-label="Reset progress"]').trigger('click');
+		await flushPromises();
+		expect(api.updateEpisodeProgress).toHaveBeenCalledWith('yt7', {
+			position_seconds: 0,
+			listened: false
+		});
+		expect(useNotificationStore().current?.message).toBe('Playback progress reset');
+
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		await wrapper.get('[role="menu"]').get('[aria-label="Remove from playlist"]').trigger('click');
+		await flushPromises();
+		expect(api.removeEpisodeFromPlaylist).toHaveBeenCalledWith(7);
+		expect(useNotificationStore().current?.message).toBe('Removed from playlist');
+	});
+
+	it('provides non-empty Spanish labels for the trigger and menu items', async () => {
+		testI18n.global.locale.value = 'es';
+		const wrapper = mountPlaylistCard(episode());
+		expect(wrapper.get('[data-testid="playlist-actions-trigger"]').attributes('aria-label')).toBe(
+			'Acciones del episodio'
+		);
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		expect(
+			wrapper
+				.get('[role="menu"]')
+				.findAll('[role="menuitem"]')
+				.map((item) => item.attributes('aria-label'))
+		).toEqual([
+			'Favorito',
+			'Quitar de la playlist',
+			'Enlace original',
+			'Reiniciar progreso',
+			'Ver canal'
+		]);
+		testI18n.global.locale.value = 'en';
+	});
+
+	it('dismisses the menu with Escape and restores focus to its trigger', async () => {
+		const wrapper = mountPlaylistCard(episode(), true);
+		const trigger = wrapper.get('[data-testid="playlist-actions-trigger"]');
+		await trigger.trigger('click');
+		expect(trigger.attributes('aria-expanded')).toBe('true');
+
+		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await flushPromises();
+		expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+		expect(trigger.attributes('aria-expanded')).toBe('false');
+		expect(document.activeElement).toBe(trigger.element);
+		wrapper.unmount();
+	});
+});
+
 describe('EpisodeCard playback indicators', () => {
 	beforeEach(() => {
 		localStorage.clear();

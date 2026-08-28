@@ -224,8 +224,14 @@
 		</template>
 	</AppHeader>
 
-	<main class="flex min-h-screen flex-col items-center px-4 pb-28 pt-28">
-		<div class="mb-8 flex w-full max-w-6xl items-center gap-4">
+	<main
+		class="flex min-h-screen flex-col items-center px-0 pb-28 pt-28 sm:px-4"
+		data-testid="playlist-main"
+	>
+		<div
+			class="mb-8 flex w-full max-w-6xl items-center gap-4 px-4 sm:px-0"
+			data-testid="playlist-header"
+		>
 			<button
 				type="button"
 				aria-label="$t('header.backChannels')"
@@ -293,7 +299,11 @@
 						:data-drag-handle="episode.id"
 						@keydown="onHandleKeydown($event, episode)"
 					>
-						<PhDotsSix class="h-6 w-6" weight="bold" aria-hidden="true" />
+						<PhDotsSix
+							class="playlist-drag-icon h-4 w-4 sm:h-6 sm:w-6"
+							weight="bold"
+							aria-hidden="true"
+						/>
 					</button>
 				</div>
 				<EpisodeCard
@@ -301,6 +311,7 @@
 					:episode="episode"
 					:list="sortableItems"
 					compact
+					presentation="playlist"
 					queue-source="playlist"
 				/>
 			</div>

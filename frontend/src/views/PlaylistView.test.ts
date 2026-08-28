@@ -17,6 +17,7 @@ const EpisodeCardStub = defineComponent({
 	props: {
 		episode: { type: Object, required: true },
 		list: { type: Array, required: true },
+		presentation: { type: String, required: true },
 		queueSource: { type: String, required: true }
 	},
 	template:
@@ -118,9 +119,33 @@ describe('PlaylistView inline reordering', () => {
 		expect(handles[0].attributes('aria-label')).toBe('Reorder Episode 1');
 		expect(handles[0].classes()).toContain('h-11');
 		expect(handles[0].classes()).toContain('w-11');
+		expect(handles[0].find('.playlist-drag-icon').classes()).toContain('h-4');
 		expect(wrapper.find('[aria-label="Move up"]').exists()).toBe(false);
 		expect(wrapper.find('[aria-label="Move down"]').exists()).toBe(false);
 		expect(wrapper.findAll('.episode-card')).toHaveLength(3);
+		wrapper.unmount();
+	});
+
+	it('opts cards into the playlist presentation without making card actions draggable', async () => {
+		const { wrapper } = await mountView();
+		const cards = wrapper.findAllComponents(EpisodeCardStub);
+		expect(cards).toHaveLength(3);
+		expect(cards.every((card) => card.props('presentation') === 'playlist')).toBe(true);
+
+		await wrapper.get('.card-action').trigger('pointerdown');
+		await wrapper.get('.card-action').trigger('click');
+		expect(api.reorderPlaylist).not.toHaveBeenCalled();
+		expect(wrapper.find('.playlist-drag-handle').attributes('aria-pressed')).toBe('false');
+		wrapper.unmount();
+	});
+
+	it('removes only the mobile list inset while preserving header and desktop spacing', async () => {
+		const { wrapper } = await mountView();
+		const main = wrapper.get('[data-testid="playlist-main"]');
+		expect(main.classes()).toContain('px-0');
+		expect(main.classes()).toContain('sm:px-4');
+		expect(wrapper.get('[data-testid="playlist-header"]').classes()).toContain('px-4');
+		expect(wrapper.get('.playlist-list').classes()).not.toContain('px-4');
 		wrapper.unmount();
 	});
 

@@ -89,7 +89,14 @@
 		"cancelled": "Reordenación cancelada. {title} vuelve a la posición {position} de {total}",
 		"reorderPending": "Guardando el orden de la playlist",
 		"reorderFailed": "No se pudo guardar el orden de la playlist",
-		"playAll": "Reproducir todo"
+		"playAll": "Reproducir todo",
+		"actions": "Acciones del episodio",
+		"favorite": "Favorito",
+		"originalLink": "Enlace original",
+		"resetProgress": "Reiniciar progreso",
+		"progressReset": "Progreso de reproducción reiniciado",
+		"resetProgressFailed": "No se pudo reiniciar el progreso",
+		"channelView": "Ver canal"
 	},
 	"card": {
 		"openOnYouTube": "Abrir en YouTube",

@@ -89,7 +89,14 @@
 		"cancelled": "Reordering cancelled. {title} returned to position {position} of {total}",
 		"reorderPending": "Saving playlist order",
 		"reorderFailed": "Could not save the playlist order",
-		"playAll": "Play all"
+		"playAll": "Play all",
+		"actions": "Episode actions",
+		"favorite": "Favourite",
+		"originalLink": "Original link",
+		"resetProgress": "Reset progress",
+		"progressReset": "Playback progress reset",
+		"resetProgressFailed": "Could not reset playback progress",
+		"channelView": "Channel view"
 	},
 	"card": {
 		"openOnYouTube": "Open on YouTube",
