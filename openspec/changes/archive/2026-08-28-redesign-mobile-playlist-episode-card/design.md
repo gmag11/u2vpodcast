@@ -37,9 +37,11 @@ Keep the current `compact` contract available for history. The playlist presenta
 
 For the selected playlist presentation, render a dedicated row below `sm` and hide the existing card body there. Render the existing card body at `sm` and wider with its current classes, spacing, controls, metadata, and action placement. Non-playlist cards continue to render only the existing body.
 
-The mobile branch follows this order: compact episode image acting as play/pause, a flexible text column with a bold single-line horizontally scrolling title and a smaller normal-weight static channel name, duration and date metadata, read-only state icons, then a vertical overflow trigger. The existing progress strip remains on the bottom edge. Favorite state uses the current star icon and app tokens, not the mockup's heart. Description, stop, and standalone action buttons are omitted from the mobile playlist branch.
+The mobile branch follows this order: compact episode image acting as play/pause, a flexible text column with a bold single-line horizontally scrolling title and a smaller normal-weight static channel name, and a narrow trailing column. The trailing column places the vertical overflow trigger above smaller favorite and playlist status icons. Both status icons always render: inactive uses the unfilled icon and muted color, while active uses the filled icon and accent color. Their lower row aligns with the duration/date metadata baseline, and the date is pushed to the right edge of the text column. The existing progress strip remains on the bottom edge. Favorite state uses the current star icon and app tokens, not the mockup's heart. Description, stop, and standalone action buttons are omitted from the mobile playlist branch.
 
-Use stable image, drag-target, action-trigger, and metadata dimensions so long translated text cannot resize controls. The text column must have `min-width: 0`. Apply horizontal scrolling only to an overflowing title so its full text can be read; keep the channel on its own non-scrolling line and truncate it if required. Respect reduced-motion preferences with a non-animated fallback that still exposes the full title accessibly.
+Use stable image, drag-target, action-trigger, and metadata dimensions so long translated text cannot resize controls. The text column must have `min-width: 0`. Apply horizontal scrolling only to the overflowing title of the episode that is actively playing; the current episode must remain static while paused. Keep the channel on its own non-scrolling line and truncate it if required.
+
+Render a second, accessibility-hidden copy of the active title after a gap wider than a normal word space. Move the two-copy track continuously in one direction by exactly the first copy's rendered width plus that gap, so the next copy replaces it without a visible reset. Calculate animation duration from that measured travel distance and a shared pixels-per-second constant rather than assigning a fixed duration, which keeps visual speed independent of title length. Recalculate after title or container-size changes. Respect reduced-motion preferences with a non-animated fallback that still exposes the full title accessibly.
 
 **Alternative considered:** restyle the current single template exclusively with utility classes. Rejected because the mobile information order and action grouping differ enough that conditional class combinations would be fragile and could alter desktop.
 
@@ -61,6 +63,8 @@ Playback remains directly available from the episode image. Favorite and playlis
 
 `PlaylistView` remains the owner of sortable rows and the existing handle. On mobile, reduce the visible handle icon and surrounding gap so the image, text, state icons, and overflow trigger fit without page overflow. Preserve an adequately padded hit area, visible focus, and keyboard operation. The menu and all card interactions remain outside the configured drag handle selector, preserving normal scrolling and click behavior.
 
+Remove the playlist main container's horizontal padding below `sm` so the sortable rows can use the drawer width. Preserve the existing inset at `sm` and wider, and retain a mobile inset on the playlist header so its controls do not touch the viewport edge.
+
 **Alternative considered:** move the handle into `EpisodeCard`. Rejected because sorting belongs to the containing list and would couple a reusable card to the draggable library.
 
 ### 6. Verify structure, behavior, and rendered responsive output
@@ -76,6 +80,7 @@ Because DOM tests do not apply responsive CSS, browser verification must capture
 - **CSS-hidden desktop controls still exist in the DOM.** -> Use `display: none` breakpoint utilities so only the active branch enters the accessibility tree; test active presentation markers and browser accessibility output.
 - **The reduced handle may become difficult to acquire.** -> Reduce its visual footprint while preserving an accessible hit area, visible focus, and keyboard operation; validate at 320, 390, and 640 CSS pixels.
 - **Moving actions behind a menu adds one interaction.** -> Keep primary play/pause direct and use clear text labels and state indicators for secondary actions.
+- **Measured marquee dimensions can change after layout or font loading.** -> Observe the title viewport and text size, recalculate the travel distance, and keep the static first copy as the accessible label and reduced-motion fallback.
 
 ## Migration Plan
 
