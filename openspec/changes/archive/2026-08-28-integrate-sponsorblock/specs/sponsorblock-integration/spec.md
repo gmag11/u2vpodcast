@@ -94,6 +94,10 @@ SponsorBlock retrieval failures and media-processing failures SHALL NOT replace 
 - **WHEN** a changed non-empty snapshot is retrieved but derived MP3 generation fails
 - **THEN** no partial file is published and the previously active representation remains selected
 
+#### Scenario: Sponsor segments cover the complete episode
+- **WHEN** a normalized snapshot leaves no original-audio interval to retain
+- **THEN** the system rejects the snapshot as a processing failure and preserves the previously active representation without generating replacement silence
+
 ### Requirement: Episode APIs expose SponsorBlock state and allow refresh
 Episode payloads SHALL include the normalized SponsorBlock segments and snapshot hash when available. An authenticated episode refresh operation SHALL retrieve and reconcile the latest SponsorBlock snapshot for that episode regardless of whether it is outside the automatic synchronization window, and SHALL return the resulting active snapshot. A refresh failure SHALL report failure without discarding the last valid snapshot.
 

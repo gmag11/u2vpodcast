@@ -22,11 +22,15 @@ The system SHALL serve a protected RSS document at `/feed.xml` containing every 
 
 ### Requirement: Global feed items carry a channel-distinct enclosure and title
 
-Each `<item>` in the global feed SHALL have an `<enclosure>` URL of `{url}/media/{slug}/{yt_id}.mp3` where `slug` is the owning channel's slug and `yt_id` is that item's own episode identifier, and SHALL prefix the item title with the owning channel's title so episodes are distinguishable in the aggregated feed.
+Each `<item>` in the global feed SHALL select the active processed SponsorBlock MP3 when one exists and otherwise SHALL select the original MP3. Its `<enclosure>` URL SHALL be `{url}/media/{slug}/{selected_filename}` where `slug` is the owning channel's slug, and its iTunes duration SHALL describe that selected file. The item title SHALL remain prefixed with the owning channel's title so episodes are distinguishable in the aggregated feed.
 
 #### Scenario: Enclosure resolves to the owning channel's media
-- **WHEN** an episode of channel with slug `confesiones_de_gasolinera` and `yt_id` `abc123` appears in `/feed.xml`
-- **THEN** the episode's `<enclosure>` URL is `{url}/media/confesiones_de_gasolinera/abc123.mp3`
+- **WHEN** episode `abc123` of channel `confesiones_de_gasolinera` selects processed file `abc123.sponsorblock.a81f302c.mp3`
+- **THEN** its enclosure is `{url}/media/confesiones_de_gasolinera/abc123.sponsorblock.a81f302c.mp3` and its iTunes duration is the measured processed duration
+
+#### Scenario: Original enclosure resolves to the owning channel's media
+- **WHEN** episode `abc123` of channel `confesiones_de_gasolinera` has no active processed file
+- **THEN** its enclosure is `{url}/media/confesiones_de_gasolinera/abc123.mp3` and its iTunes duration is the original episode duration
 
 #### Scenario: Title is prefixed with the channel
 - **WHEN** an episode titled `Episodio 10` belongs to a channel titled `Confesiones de Gasolinera`
