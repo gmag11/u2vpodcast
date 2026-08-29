@@ -4,6 +4,7 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path, process::Command, time::Duration};
+use tracing::info;
 use ureq::{Agent, Error as UreqError};
 
 const SPONSORBLOCK_BASE_URL: &str = "https://sponsor.ajay.app";
@@ -385,6 +386,10 @@ pub async fn reconcile_episode(
     channel_dir: &Path,
     rejected_categories: &[String],
 ) -> Result<SponsorBlockCache, Error> {
+    info!(
+        "Refreshing SponsorBlock segments for episode {}",
+        episode.yt_id
+    );
     let original_duration = parse_duration_seconds(&episode.duration)
         .ok_or_else(|| Error::default("episode has an invalid duration"))?;
     let response = match client.fetch(&episode.yt_id).await {
@@ -399,11 +404,21 @@ pub async fn reconcile_episode(
     let processing_hash = processing_hash(&segments, rejected_categories);
     let rejected = rejected_intervals(&segments, rejected_categories);
     let previous = SponsorBlockCache::read(pool, episode.id).await?;
+    info!(
+        "SponsorBlock refresh for {} returned {} segments and {} rejected intervals",
+        episode.yt_id,
+        segments.len(),
+        rejected.len()
+    );
 
     if let Some(active) = previous
         .as_ref()
         .filter(|active| active.processing_hash.as_deref() == Some(processing_hash.as_str()))
     {
+        info!(
+            "SponsorBlock processing is unchanged for {}; keeping existing media",
+            episode.yt_id
+        );
         return SponsorBlockCache::upsert_success(
             pool,
             episode.id,
@@ -417,6 +432,10 @@ pub async fn reconcile_episode(
     }
 
     if rejected.is_empty() {
+        info!(
+            "SponsorBlock rejected intervals are empty for {}; selecting original media",
+            episode.yt_id
+        );
         let current = SponsorBlockCache::upsert_success(
             pool,
             episode.id,
@@ -433,6 +452,10 @@ pub async fn reconcile_episode(
         return Ok(current);
     }
 
+    info!(
+        "SponsorBlock processing changed for {}; generating processed media",
+        episode.yt_id
+    );
     let original = channel_dir.join(format!("{}.mp3", episode.yt_id));
     let processed =
         match generate_processed_mp3(&original, &rejected, original_duration, &processing_hash)
@@ -467,6 +490,10 @@ pub async fn reconcile_episode(
     {
         let _ = fs::remove_file(channel_dir.join(filename));
     }
+    info!(
+        "SponsorBlock processed media for {} is now {}",
+        episode.yt_id, processed.filename
+    );
     Ok(current)
 }
 
