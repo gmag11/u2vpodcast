@@ -60,6 +60,7 @@ impl PlaylistItem {
         info!("read_episodes_with_channels");
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, \
                COALESCE(c.title, '') AS channel_title, \
+               COALESCE(c.playback_speed, 1.0) AS playback_speed, \
                sc.segments_json AS sponsorblock_segments_json, \
                sc.snapshot_hash AS sponsorblock_hash, \
                sc.processed_filename AS sponsorblock_processed_filename, \

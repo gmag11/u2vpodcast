@@ -3,8 +3,10 @@
 	import {
 		PhGauge,
 		PhList,
+		PhMinus,
 		PhPause,
 		PhPlay,
+		PhPlus,
 		PhRepeat,
 		PhRepeatOnce,
 		PhShuffle,
@@ -18,6 +20,9 @@
 	import {
 		parseDurationSeconds,
 		sponsorBlockTimelineMarkers,
+		SPEED_MAX,
+		SPEED_MIN,
+		SPEED_STEP,
 		usePlayerStore
 	} from '@/stores/player';
 
@@ -35,6 +40,12 @@
 			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
 		);
 	});
+
+	// Formats a rate for display without float artifacts, trimming trailing
+	// zeros: 1.35 → "1.35", 1.7 → "1.7", 1 → "1" (per-channel-playback-speed).
+	function speedLabel(value: number) {
+		return String(Math.round(value * 100) / 100);
+	}
 
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
 	let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -278,15 +289,43 @@
 					<button
 						type="button"
 						class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition-colors hover:text-text"
+						:aria-label="$t('player.speed')"
+						:aria-expanded="showSpeed"
 						@click="showSpeed = !showSpeed"
 					>
 						<PhGauge class="h-4 w-4" weight="regular" />
-						{{ player.speed }}x
+						{{ speedLabel(player.speed) }}x
 					</button>
 					<div
 						v-if="showSpeed"
-						class="absolute bottom-full right-0 z-10 mb-2 flex flex-col rounded-lg border border-outline bg-surface-card p-1 shadow-card"
+						class="absolute bottom-full right-0 z-10 mb-2 flex flex-col gap-1 rounded-lg border border-outline bg-surface-card p-1 shadow-card"
+						data-testid="speed-panel"
 					>
+						<div class="flex items-center justify-between gap-1 px-1">
+							<button
+								type="button"
+								class="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+								:disabled="player.speed <= SPEED_MIN"
+								:aria-label="$t('player.speedDecrease')"
+								@click="player.setSpeed(player.speed - SPEED_STEP)"
+							>
+								<PhMinus class="h-4 w-4" weight="bold" />
+							</button>
+							<span
+								class="min-w-[3rem] text-center text-xs font-semibold text-text"
+								data-testid="speed-value"
+								>{{ speedLabel(player.speed) }}x</span
+							>
+							<button
+								type="button"
+								class="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+								:disabled="player.speed >= SPEED_MAX"
+								:aria-label="$t('player.speedIncrease')"
+								@click="player.setSpeed(player.speed + SPEED_STEP)"
+							>
+								<PhPlus class="h-4 w-4" weight="bold" />
+							</button>
+						</div>
 						<button
 							v-for="s in speeds"
 							:key="s"
@@ -300,7 +339,7 @@
 								showSpeed = false;
 							"
 						>
-							{{ s }}x
+							{{ speedLabel(s) }}x
 						</button>
 					</div>
 				</div>

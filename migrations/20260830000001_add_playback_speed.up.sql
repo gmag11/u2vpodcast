@@ -1,0 +1,1 @@
+ALTER TABLE channels ADD COLUMN playback_speed REAL NOT NULL DEFAULT 1.0;

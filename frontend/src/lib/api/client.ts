@@ -137,6 +137,14 @@ export const api = {
 		});
 	},
 
+	async setChannelPlaybackSpeed(slug: string, playbackSpeed: number) {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/channels/${slug}/playback_speed/`, {
+			method: 'PUT',
+			body: JSON.stringify({ playback_speed: playbackSpeed })
+		});
+	},
+
 	async refreshEpisodeSponsorBlock(ytId: string) {
 		return request<Episode>(`/api/1.0/episodes/${ytId}/sponsorblock/refresh/`, {
 			method: 'POST'

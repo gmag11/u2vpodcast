@@ -13,6 +13,9 @@ vi.mock('@/lib/api/client', () => ({
 		),
 		getEpisodeProgress: vi.fn(() =>
 			Promise.resolve({ ok: false, data: null, user: null, status: false })
+		),
+		setChannelPlaybackSpeed: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		)
 	}
 }));
@@ -24,6 +27,8 @@ class MockAudioElement {
 	volume = 1;
 	muted = false;
 	playbackRate = 1;
+	// A real media element keeps the rate a load() should reset back to.
+	defaultPlaybackRate = 1;
 	paused = true;
 	preload = 'metadata';
 
@@ -35,7 +40,9 @@ class MockAudioElement {
 	pause = vi.fn(() => {
 		this.paused = true;
 	});
-	load = vi.fn();
+	load = vi.fn(() => {
+		this.playbackRate = this.defaultPlaybackRate;
+	});
 
 	addEventListener(event: string, listener: () => void) {
 		(this.listeners[event] ??= []).push(listener);
@@ -54,6 +61,7 @@ function episode(id: number, listen = false): Episode {
 		channel_id: 1,
 		channel_slug: 'c',
 		channel_title: 'Channel',
+		playback_speed: 1,
 		title: `Episode ${id}`,
 		description: '',
 		yt_id: `yt${id}`,
@@ -290,5 +298,118 @@ describe('PersistentPlayer controls', () => {
 		// queue stays reachable: the popover opens without a current episode
 		await bar.get('button[aria-label="Up next queue"]').trigger('click');
 		expect(bar.text()).toContain('Episode 2');
+	});
+});
+
+describe('PersistentPlayer speed control', () => {
+	let wrapper: ReturnType<typeof mount> | null = null;
+
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		localStorage.clear();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		wrapper?.unmount();
+		wrapper = null;
+	});
+
+	async function mountBar() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+		return wrapper;
+	}
+
+	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
+		player.currentEpisode = episode(1);
+		player.playing = true;
+		player.stopped = false;
+	}
+
+	function openPanel(bar: ReturnType<typeof mount>) {
+		return bar.get('button[aria-label="Playback speed"]').trigger('click');
+	}
+
+	it('adjusts the speed in half-tenth steps with the stepper', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+
+		const value = () => bar.get('[data-testid="speed-value"]').text();
+		expect(value()).toBe('1x');
+
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(value()).toBe('1.05x');
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(value()).toBe('1.1x');
+		await bar.get('button[aria-label="Decrease speed"]').trigger('click');
+		expect(value()).toBe('1.05x');
+		expect(player.speed).toBe(1.05);
+	});
+
+	it('keeps the panel open while stepping', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(bar.find('[data-testid="speed-panel"]').exists()).toBe(true);
+	});
+
+	it('presets are still selectable from the panel', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+
+		const preset = bar
+			.findAll('[data-testid="speed-panel"] button')
+			.find((b) => b.text() === '1.5x');
+		expect(preset).toBeTruthy();
+		await preset!.trigger('click');
+		expect(player.speed).toBe(1.5);
+		// selecting a preset closes the panel
+		expect(bar.find('[data-testid="speed-panel"]').exists()).toBe(false);
+	});
+
+	it('disables the steppers at the range bounds', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		player.speed = 0.5;
+		await openPanel(bar);
+		expect(
+			(bar.get('button[aria-label="Decrease speed"]').element as HTMLButtonElement).disabled
+		).toBe(true);
+		expect(
+			(bar.get('button[aria-label="Increase speed"]').element as HTMLButtonElement).disabled
+		).toBe(false);
+
+		// crossing the max bound while the panel stays open disables the
+		// increase stepper reactively
+		player.speed = 3;
+		await flushPromises();
+		expect(
+			(bar.get('button[aria-label="Increase speed"]').element as HTMLButtonElement).disabled
+		).toBe(true);
+		expect(
+			(bar.get('button[aria-label="Decrease speed"]').element as HTMLButtonElement).disabled
+		).toBe(false);
+	});
+
+	it('formats the displayed label trimming trailing zeros', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.speed = 1.7;
+		const bar = await mountBar();
+		expect(bar.get('button[aria-label="Playback speed"]').text()).toContain('1.7x');
+
+		await openPanel(bar);
+		expect(bar.get('[data-testid="speed-value"]').text()).toBe('1.7x');
 	});
 });

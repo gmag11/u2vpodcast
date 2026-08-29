@@ -139,7 +139,10 @@
 		"removeFromQueue": "Remove from queue",
 		"clearQueue": "Clear",
 		"emptyQueue": "No episodes queued",
-		"queueReady": "Queue ready"
+		"queueReady": "Queue ready",
+		"speed": "Playback speed",
+		"speedIncrease": "Increase speed",
+		"speedDecrease": "Decrease speed"
 	},
 	"pagination": {
 		"previous": "Previous",

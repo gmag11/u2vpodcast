@@ -31,6 +31,7 @@ function episode(id: number): Episode {
 		channel_id: 1,
 		channel_slug: 'channel',
 		channel_title: 'Channel',
+		playback_speed: 1,
 		title: `Episode ${id}`,
 		description: '',
 		yt_id: `yt${id}`,

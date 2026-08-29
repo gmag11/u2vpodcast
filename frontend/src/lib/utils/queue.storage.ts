@@ -13,6 +13,10 @@ export interface QueuePayload {
 	seedOrder?: Episode[];
 	shuffle?: boolean;
 	repeat?: RepeatMode;
+	// Per-channel playback speeds (per-channel-playback-speed): lets a reloaded
+	// session start episodes at the right rate even though restored episodes
+	// carry no payload fields. Optional like the modes.
+	channelSpeedBySlug?: Record<string, number>;
 }
 
 /** `QueuePayload` as normalized by `loadQueue()`: defaults are resolved. */
@@ -20,6 +24,7 @@ export interface ResolvedQueuePayload extends QueuePayload {
 	seedOrder: Episode[];
 	shuffle: boolean;
 	repeat: RepeatMode;
+	channelSpeedBySlug: Record<string, number>;
 }
 
 const STORAGE_KEY = 'u2vpodcast.up-next.v1';
@@ -66,7 +71,10 @@ export function loadQueue(): ResolvedQueuePayload | null {
 			// available source.
 			seedOrder: Array.isArray(payload.seedOrder) ? payload.seedOrder : [...payload.upNext],
 			shuffle: payload.shuffle ?? false,
-			repeat: payload.repeat === 'all' || payload.repeat === 'one' ? payload.repeat : 'none'
+			repeat: payload.repeat === 'all' || payload.repeat === 'one' ? payload.repeat : 'none',
+			// Per-channel speeds from newer payloads; legacy payloads yield an
+			// empty map and episodes fall back to 1.0 until a fetch seeds them.
+			channelSpeedBySlug: payload.channelSpeedBySlug ?? {}
 		};
 	} catch {
 		return null;

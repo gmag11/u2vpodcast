@@ -24,6 +24,7 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		channel_id: 1,
 		channel_slug: 'c',
 		channel_title: channelTitle,
+		playback_speed: 1,
 		title,
 		description: 'Description',
 		yt_id: `yt${id}`,

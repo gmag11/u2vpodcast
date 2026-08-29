@@ -18,6 +18,8 @@ pub struct Episode {
     pub channel_slug: String,
     #[serde(default = "get_default_empty")]
     pub channel_title: String,
+    #[serde(default)]
+    pub playback_speed: f64,
     pub title: String,
     #[serde(default = "get_default_empty")]
     pub description: String,
@@ -138,6 +140,7 @@ impl Episode {
             channel_id: row.get("channel_id"),
             channel_slug: String::new(),
             channel_title: String::new(),
+            playback_speed: 1.0,
             title: row.get("title"),
             description: row.get("description"),
             yt_id: row.get("yt_id"),
@@ -167,6 +170,7 @@ impl Episode {
             channel_id: row.get("channel_id"),
             channel_slug: row.get("channel_slug"),
             channel_title: row.get("channel_title"),
+            playback_speed: row.try_get("playback_speed").unwrap_or(1.0),
             title: row.get("title"),
             description: row.get("description"),
             yt_id: row.get("yt_id"),
@@ -209,6 +213,7 @@ impl Episode {
             channel_id,
             channel_slug: String::new(),
             channel_title: String::new(),
+            playback_speed: 1.0,
             title: title.to_string(),
             description: description.to_string(),
             yt_id: yt_id.to_string(),
@@ -315,6 +320,7 @@ impl Episode {
     pub async fn read_all_with_channels(pool: &SqlitePool) -> Result<Vec<Self>, Error> {
         info!("read_all_with_channels");
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, COALESCE(c.title, '') AS channel_title, \
+                  COALESCE(c.playback_speed, 1.0) AS playback_speed, \
                   sc.segments_json AS sponsorblock_segments_json, \
                   sc.snapshot_hash AS sponsorblock_hash, \
                   sc.processed_filename AS sponsorblock_processed_filename, \
@@ -331,6 +337,7 @@ impl Episode {
 
     pub async fn read_by_yt_id_with_channel(pool: &SqlitePool, yt_id: &str) -> Result<Self, Error> {
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, COALESCE(c.title, '') AS channel_title, \
+                          COALESCE(c.playback_speed, 1.0) AS playback_speed, \
                           sc.segments_json AS sponsorblock_segments_json, sc.snapshot_hash AS sponsorblock_hash, \
                           sc.processed_filename AS sponsorblock_processed_filename, \
                           sc.processed_duration AS sponsorblock_processed_duration \
@@ -635,6 +642,7 @@ mod episode_update_tests {
             channel_id,
             channel_slug: String::new(),
             channel_title: String::new(),
+            playback_speed: 1.0,
             title: format!("episode {yt_id}"),
             description: String::new(),
             yt_id: yt_id.to_string(),
