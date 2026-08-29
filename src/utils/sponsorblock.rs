@@ -4,10 +4,11 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path, process::Command, time::Duration};
-use tracing::info;
+use tracing::{info, warn};
 use ureq::{Agent, Error as UreqError};
 
 const SPONSORBLOCK_BASE_URL: &str = "https://sponsor.ajay.app";
+const SPONSORBLOCK_FALLBACK_BASE_URL: &str = "https://api.sponsor.ajay.app";
 const SPONSORBLOCK_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_MAX_BYTES: u64 = 1024 * 1024;
 const PROCESSING_FORMAT_VERSION: u32 = 1;
@@ -22,36 +23,40 @@ pub struct SponsorBlockApiSegment {
 
 #[derive(Debug, Clone)]
 pub struct SponsorBlockClient {
-    base_url: String,
+    base_urls: Vec<String>,
     timeout: Duration,
 }
 
 impl Default for SponsorBlockClient {
     fn default() -> Self {
-        Self::new(SPONSORBLOCK_BASE_URL, SPONSORBLOCK_TIMEOUT)
+        let mut client = Self::new(SPONSORBLOCK_BASE_URL, SPONSORBLOCK_TIMEOUT);
+        client
+            .base_urls
+            .push(SPONSORBLOCK_FALLBACK_BASE_URL.to_string());
+        client
     }
 }
 
 impl SponsorBlockClient {
     pub fn new(base_url: &str, timeout: Duration) -> Self {
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_urls: vec![base_url.trim_end_matches('/').to_string()],
             timeout,
         }
     }
 
     pub async fn fetch(&self, video_id: &str) -> Result<Vec<SponsorBlockApiSegment>, String> {
-        let base_url = self.base_url.clone();
+        let base_urls = self.base_urls.clone();
         let timeout = self.timeout;
         let video_id = video_id.to_string();
-        actix_web::rt::task::spawn_blocking(move || fetch_blocking(&base_url, timeout, &video_id))
+        actix_web::rt::task::spawn_blocking(move || fetch_blocking(&base_urls, timeout, &video_id))
             .await
             .map_err(|error| format!("SponsorBlock task failed: {error}"))?
     }
 }
 
 fn fetch_blocking(
-    base_url: &str,
+    base_urls: &[String],
     timeout: Duration,
     video_id: &str,
 ) -> Result<Vec<SponsorBlockApiSegment>, String> {
@@ -59,13 +64,34 @@ fn fetch_blocking(
         .timeout_global(Some(timeout))
         .build()
         .into();
-    let url = format!("{base_url}/api/skipSegments");
     let categories = serde_json::to_string(&SUPPORTED_SPONSORBLOCK_CATEGORIES)
         .expect("supported SponsorBlock categories serialize");
-    let response = match agent
+    let mut last_error = None;
+    for (index, base_url) in base_urls.iter().enumerate() {
+        match fetch_from_base_url(&agent, base_url, video_id, &categories) {
+            Ok(segments) => return Ok(segments),
+            Err(error) => {
+                if index + 1 < base_urls.len() {
+                    warn!(base_url, %error, "SponsorBlock endpoint failed; trying fallback");
+                }
+                last_error = Some(error);
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "no SponsorBlock endpoints configured".to_string()))
+}
+
+fn fetch_from_base_url(
+    agent: &Agent,
+    base_url: &str,
+    video_id: &str,
+    categories: &str,
+) -> Result<Vec<SponsorBlockApiSegment>, String> {
+    let url = format!("{base_url}/api/skipSegments");
+    let mut response = match agent
         .get(&url)
         .query("videoID", video_id)
-        .query("categories", &categories)
+        .query("categories", categories)
         .query("actionTypes", r#"["skip"]"#)
         .header(
             "User-Agent",
@@ -75,16 +101,16 @@ fn fetch_blocking(
     {
         Ok(response) => response,
         Err(UreqError::StatusCode(404)) => return Ok(Vec::new()),
-        Err(error) => return Err(format!("SponsorBlock request failed: {error}")),
+        Err(error) => return Err(format!("SponsorBlock request to {base_url} failed: {error}")),
     };
-    let mut response = response;
     let body = response
         .body_mut()
         .with_config()
         .limit(RESPONSE_MAX_BYTES)
         .read_to_string()
-        .map_err(|error| format!("read SponsorBlock response: {error}"))?;
-    serde_json::from_str(&body).map_err(|error| format!("parse SponsorBlock response: {error}"))
+        .map_err(|error| format!("read SponsorBlock response from {base_url}: {error}"))?;
+    serde_json::from_str(&body)
+        .map_err(|error| format!("parse SponsorBlock response from {base_url}: {error}"))
 }
 
 pub fn normalize_segments(
@@ -580,6 +606,13 @@ mod tests {
         format!("http://{address}")
     }
 
+    fn unavailable_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind unavailable endpoint");
+        let address = listener.local_addr().expect("unavailable endpoint address");
+        drop(listener);
+        format!("http://{address}")
+    }
+
     fn raw_category(start: f64, end: f64, category: &str) -> SponsorBlockApiSegment {
         SponsorBlockApiSegment {
             segment: [start, end],
@@ -1046,28 +1079,56 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn fetches_matching_response_from_configured_server() {
+    async fn prefers_primary_endpoint_response() {
         let body = r#"[{"segment":[10.0,20.0],"category":"sponsor","actionType":"skip"}]"#;
-        let client = SponsorBlockClient::new(
+        let mut client = SponsorBlockClient::new(
             &server("200 OK", body, Duration::ZERO),
             Duration::from_secs(1),
         );
+        client.base_urls.push(unavailable_server());
+
         let segments = client.fetch("video-id").await.expect("fetch segments");
+
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].segment, [10.0, 20.0]);
     }
 
     #[actix_web::test]
-    async fn treats_not_found_as_an_empty_snapshot() {
-        let client = SponsorBlockClient::new(
+    async fn uses_fallback_when_primary_endpoint_is_unavailable() {
+        let body = r#"[{"segment":[10.0,20.0],"category":"sponsor","actionType":"skip"}]"#;
+        let mut client = SponsorBlockClient::new(&unavailable_server(), Duration::from_secs(1));
+        client
+            .base_urls
+            .push(server("200 OK", body, Duration::ZERO));
+
+        let segments = client.fetch("video-id").await.expect("fallback segments");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].segment, [10.0, 20.0]);
+    }
+
+    #[actix_web::test]
+    async fn treats_primary_endpoint_not_found_as_empty_without_fallback() {
+        let mut client = SponsorBlockClient::new(
             &server("404 Not Found", "{}", Duration::ZERO),
             Duration::from_secs(1),
         );
+        client.base_urls.push(unavailable_server());
+
         assert!(client
             .fetch("video-id")
             .await
             .expect("empty snapshot")
             .is_empty());
+    }
+
+    #[actix_web::test]
+    async fn returns_error_when_all_endpoints_fail() {
+        let mut client =
+            SponsorBlockClient::new(&unavailable_server(), Duration::from_secs(1));
+        client.base_urls.push(unavailable_server());
+
+        assert!(client.fetch("video-id").await.is_err());
     }
 
     #[actix_web::test]
