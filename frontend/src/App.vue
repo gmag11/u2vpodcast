@@ -20,7 +20,7 @@
 	watch(
 		() => auth.isAuthenticated,
 		(isAuthenticated) => {
-			if (!isAuthenticated) player.halt();
+			if (!isAuthenticated) player.teardownNativeMedia();
 			else playlists.load();
 		},
 		{ immediate: true }
