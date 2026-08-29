@@ -16,8 +16,18 @@ const SAVE_INTERVAL_MS = 10_000;
 export const RESUME_POSITION_S = 30;
 // Positions within 95% of the duration count as finished (no resume).
 const RESUME_DURATION_RATIO = 0.95;
-// Keyboard seek step (playback-progress shortcuts).
+// Keyboard and default system-media seek step (playback-progress shortcuts).
 const KEYBOARD_SEEK_STEP = 15;
+
+const MEDIA_SESSION_ACTIONS: MediaSessionAction[] = [
+	'play',
+	'pause',
+	'nexttrack',
+	'previoustrack',
+	'seekforward',
+	'seekbackward',
+	'seekto'
+];
 
 // Playback-progress debug traces only in development builds; production
 // carries no `[player]` console noise. Console: DevTools > Console (F12).
@@ -142,6 +152,8 @@ export const usePlayerStore = defineStore('player', () => {
 	const progressByEpisode = ref<Record<number, EpisodeProgress>>({});
 
 	let audio: HTMLAudioElement | null = null;
+	let mediaSessionRegistered = false;
+	let mediaSessionGeneration = 0;
 
 	// Playback-progress bookkeeping: wall-clock gate for the throttled saves,
 	// the last (episode, position) actually sent, and the pending resume flag
@@ -276,8 +288,131 @@ export const usePlayerStore = defineStore('player', () => {
 		});
 	}
 
+	function getMediaSession(): MediaSession | null {
+		if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return null;
+		return navigator.mediaSession ?? null;
+	}
+
+	function runMediaSessionAction(generation: number, action: () => void | Promise<void>) {
+		if (!mediaSessionRegistered || generation !== mediaSessionGeneration) return;
+		try {
+			Promise.resolve(action()).catch(() => {});
+		} catch {
+			// A system gesture must never break ordinary in-app playback.
+		}
+	}
+
+	function usableMediaDuration(): number | null {
+		const value = audio?.duration;
+		return value != null && Number.isFinite(value) && value > 0 ? value : null;
+	}
+
+	function seekRelativeFromSystem(details: MediaSessionActionDetails, direction: 1 | -1) {
+		if (!usableMediaDuration()) return;
+		const requested = details.seekOffset;
+		const offset =
+			requested != null && Number.isFinite(requested) && requested > 0
+				? requested
+				: KEYBOARD_SEEK_STEP;
+		seekRelative(direction * offset);
+	}
+
+	function seekAbsoluteFromSystem(details: MediaSessionActionDetails) {
+		const max = usableMediaDuration();
+		const requested = details.seekTime;
+		if (max == null || requested == null || !Number.isFinite(requested)) return;
+		seek(Math.min(Math.max(requested, 0), max));
+	}
+
+	function ensureMediaSession() {
+		const session = getMediaSession();
+		if (!session || mediaSessionRegistered) return;
+		mediaSessionRegistered = true;
+		const generation = ++mediaSessionGeneration;
+		const handlers: Array<
+			[MediaSessionAction, (details: MediaSessionActionDetails) => void | Promise<void>]
+		> = [
+			['play', () => (audio?.paused && currentEpisode.value ? togglePlay() : undefined)],
+			['pause', () => (!audio?.paused ? pause() : undefined)],
+			['nexttrack', () => (upNext.value.length > 0 ? skipNext() : undefined)],
+			[
+				'previoustrack',
+				() =>
+					currentEpisode.value && (currentTime.value > 3 || playStack.value.length > 0)
+						? playPrevious()
+						: undefined
+			],
+			['seekforward', (details) => seekRelativeFromSystem(details, 1)],
+			['seekbackward', (details) => seekRelativeFromSystem(details, -1)],
+			['seekto', seekAbsoluteFromSystem]
+		];
+		for (const [action, handler] of handlers) {
+			try {
+				session.setActionHandler(action, (details) =>
+					runMediaSessionAction(generation, () => handler(details))
+				);
+			} catch {
+				// Browsers expose different action subsets; keep the rest available.
+			}
+		}
+		if (currentEpisode.value) publishMediaMetadata(currentEpisode.value);
+	}
+
+	function publishMediaMetadata(episode: Episode) {
+		const session = getMediaSession();
+		if (!session || typeof MediaMetadata === 'undefined') return;
+		const base: MediaMetadataInit = { title: episode.title, artist: episode.channel_title };
+		const image = episode.image?.trim();
+		try {
+			session.metadata = new MediaMetadata(image ? { ...base, artwork: [{ src: image }] } : base);
+		} catch {
+			try {
+				session.metadata = new MediaMetadata(base);
+			} catch {
+				// Text metadata is optional when the browser rejects construction.
+			}
+		}
+	}
+
+	function publishMediaPlaybackState(state?: MediaSessionPlaybackState) {
+		const session = getMediaSession();
+		if (!session) return;
+		try {
+			session.playbackState =
+				state ?? (stopped.value ? 'none' : playing.value ? 'playing' : 'paused');
+		} catch {
+			// Playback continues when the browser rejects a state transition.
+		}
+	}
+
+	function publishMediaPositionState() {
+		const session = getMediaSession();
+		if (!session || typeof session.setPositionState !== 'function') return;
+		const mediaDuration = usableMediaDuration();
+		const position = audio?.currentTime;
+		const playbackRate = audio?.playbackRate ?? speed.value;
+		if (
+			mediaDuration == null ||
+			position == null ||
+			!Number.isFinite(position) ||
+			!Number.isFinite(playbackRate) ||
+			playbackRate <= 0
+		)
+			return;
+		try {
+			session.setPositionState({
+				duration: mediaDuration,
+				position: Math.min(Math.max(position, 0), mediaDuration),
+				playbackRate
+			});
+		} catch {
+			// Invalid/transitional values must not interrupt audio playback.
+		}
+	}
+
 	function ensureAudio(): HTMLAudioElement | null {
 		if (typeof window === 'undefined') return null;
+		ensureMediaSession();
 		if (!audio) {
 			audio = new Audio();
 			audio.preload = 'metadata';
@@ -303,6 +438,7 @@ export const usePlayerStore = defineStore('player', () => {
 			currentTime.value = target;
 		}
 		tryResumeSeek();
+		publishMediaPositionState();
 		// Periodic saves only make sense while actually playing: a stopped or
 		// paused element must not keep persisting positions every 10s.
 		if (!audio || audio.paused || stopped.value) return;
@@ -317,6 +453,7 @@ export const usePlayerStore = defineStore('player', () => {
 		if (audio) duration.value = audio.duration;
 		// The duration became known: re-evaluate the pending resume.
 		tryResumeSeek();
+		publishMediaPositionState();
 	}
 
 	// Clears the pending resume state and stops the retry loop.
@@ -389,6 +526,7 @@ export const usePlayerStore = defineStore('player', () => {
 		const target = sponsorBlockSkipTarget(resumeTarget, activeSponsorBlockSegments(current));
 		el.currentTime = target;
 		currentTime.value = target;
+		publishMediaPositionState();
 	}
 
 	// Starts playback, arming the resume retry loop when one is pending.
@@ -412,11 +550,16 @@ export const usePlayerStore = defineStore('player', () => {
 	function onPlay() {
 		playing.value = true;
 		loading.value = false;
+		stopped.value = false;
+		publishMediaPlaybackState('playing');
+		publishMediaPositionState();
 	}
 
 	function onPause() {
 		playing.value = false;
 		persistProgress();
+		publishMediaPlaybackState(stopped.value ? 'none' : 'paused');
+		publishMediaPositionState();
 	}
 
 	function onWaiting() {
@@ -429,6 +572,8 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function onEnded() {
 		playing.value = false;
+		publishMediaPlaybackState('none');
+		publishMediaPositionState();
 		markListened();
 		advance();
 	}
@@ -554,6 +699,8 @@ export const usePlayerStore = defineStore('player', () => {
 		}
 		currentEpisode.value = episode;
 		stopped.value = false;
+		publishMediaMetadata(episode);
+		publishMediaPlaybackState('paused');
 		// Playback is (re)starting on this episode: any previous finalize no
 		// longer protects its completion position from live saves.
 		finalizedEpisodeId = null;
@@ -743,6 +890,7 @@ export const usePlayerStore = defineStore('player', () => {
 		if (currentTime.value > 3) {
 			if (audio) audio.currentTime = 0;
 			currentTime.value = 0;
+			publishMediaPositionState();
 			return;
 		}
 		const previous = playStack.value.pop();
@@ -841,6 +989,8 @@ export const usePlayerStore = defineStore('player', () => {
 			audio.pause();
 			audio.currentTime = 0;
 		}
+		publishMediaPlaybackState('none');
+		publishMediaPositionState();
 	}
 
 	// Resets the saved start point of an episode to 0, keeping its listened
@@ -904,6 +1054,41 @@ export const usePlayerStore = defineStore('player', () => {
 			el.pause();
 			el.currentTime = 0;
 		}
+		publishMediaPlaybackState('none');
+		publishMediaPositionState();
+	}
+
+	function teardownNativeMedia() {
+		persistProgress();
+		finishResume();
+		playing.value = false;
+		loading.value = false;
+		stopped.value = true;
+		currentTime.value = 0;
+		duration.value = 0;
+		if (audio) {
+			audio.pause();
+			audio.removeAttribute('src');
+			audio.load();
+		}
+		const session = getMediaSession();
+		mediaSessionRegistered = false;
+		mediaSessionGeneration += 1;
+		if (session) {
+			publishMediaPlaybackState('none');
+			try {
+				session.metadata = null;
+			} catch {
+				// Metadata cleanup is best effort on partial implementations.
+			}
+			for (const action of MEDIA_SESSION_ACTIONS) {
+				try {
+					session.setActionHandler(action, null);
+				} catch {
+					// Ignore actions the browser never supported.
+				}
+			}
+		}
 	}
 
 	function seek(seconds: number) {
@@ -914,6 +1099,7 @@ export const usePlayerStore = defineStore('player', () => {
 		);
 		audio.currentTime = target;
 		currentTime.value = target;
+		publishMediaPositionState();
 	}
 
 	// Keyboard shortcut: seek ±15s clamped to the episode bounds. Persisted by
@@ -928,6 +1114,7 @@ export const usePlayerStore = defineStore('player', () => {
 		);
 		audio.currentTime = next;
 		currentTime.value = next;
+		publishMediaPositionState();
 	}
 
 	function applySponsorBlockSnapshot(episode: Episode) {
@@ -980,6 +1167,7 @@ export const usePlayerStore = defineStore('player', () => {
 	function setSpeed(value: number) {
 		speed.value = value;
 		if (audio) audio.playbackRate = value;
+		publishMediaPositionState();
 	}
 
 	const progress = computed(() =>
@@ -1059,6 +1247,7 @@ export const usePlayerStore = defineStore('player', () => {
 		pause,
 		stop,
 		halt: haltPlayback,
+		teardownNativeMedia,
 		seek,
 		seekRelative,
 		episodeWithProgress,

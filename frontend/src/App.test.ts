@@ -68,21 +68,28 @@ describe('App player gating', () => {
 		expect(wrapper.findComponent(PersistentPlayer).exists()).toBe(true);
 	});
 
-	it('stops playback when the session is lost', async () => {
+	it('tears down native playback on session loss and allows a later login', async () => {
 		const auth = useAuthStore();
 		const player = usePlayerStore();
+		const teardown = vi.spyOn(player, 'teardownNativeMedia');
 		auth.setUser(admin);
 		// simulate active playback state
 		player.currentTime = 30;
+		player.playing = true;
 		player.stopped = false;
 
 		const wrapper = await mountApp();
 		auth.setUser(null);
 		await wrapper.vm.$nextTick();
+		expect(teardown).toHaveBeenCalledOnce();
 		expect(player.stopped).toBe(true);
 		expect(player.playing).toBe(false);
 		expect(player.currentTime).toBe(0);
 		expect(wrapper.find('.fixed.bottom-0').exists()).toBe(false);
+
+		auth.setUser(admin);
+		await wrapper.vm.$nextTick();
+		expect(wrapper.findComponent(PersistentPlayer).exists()).toBe(true);
 	});
 
 	it('loads the playlist when the session is restored before mount', async () => {
