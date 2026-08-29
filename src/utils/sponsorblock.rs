@@ -1,15 +1,9 @@
 use crate::models::{
-    Episode, Error, SponsorBlockCache, SponsorBlockSegment,
-    SUPPORTED_SPONSORBLOCK_CATEGORIES,
+    Episode, Error, SponsorBlockCache, SponsorBlockSegment, SUPPORTED_SPONSORBLOCK_CATEGORIES,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::Path,
-    process::Command,
-    time::Duration,
-};
+use std::{fs, path::Path, process::Command, time::Duration};
 use ureq::{Agent, Error as UreqError};
 
 const SPONSORBLOCK_BASE_URL: &str = "https://sponsor.ajay.app";
@@ -49,11 +43,9 @@ impl SponsorBlockClient {
         let base_url = self.base_url.clone();
         let timeout = self.timeout;
         let video_id = video_id.to_string();
-        actix_web::rt::task::spawn_blocking(move || {
-            fetch_blocking(&base_url, timeout, &video_id)
-        })
-        .await
-        .map_err(|error| format!("SponsorBlock task failed: {error}"))?
+        actix_web::rt::task::spawn_blocking(move || fetch_blocking(&base_url, timeout, &video_id))
+            .await
+            .map_err(|error| format!("SponsorBlock task failed: {error}"))?
     }
 }
 
@@ -74,7 +66,10 @@ fn fetch_blocking(
         .query("videoID", video_id)
         .query("categories", &categories)
         .query("actionTypes", r#"["skip"]"#)
-        .header("User-Agent", concat!("u2vpodcast/", env!("CARGO_PKG_VERSION")))
+        .header(
+            "User-Agent",
+            concat!("u2vpodcast/", env!("CARGO_PKG_VERSION")),
+        )
         .call()
     {
         Ok(response) => response,
@@ -88,8 +83,7 @@ fn fetch_blocking(
         .limit(RESPONSE_MAX_BYTES)
         .read_to_string()
         .map_err(|error| format!("read SponsorBlock response: {error}"))?;
-    serde_json::from_str(&body)
-        .map_err(|error| format!("parse SponsorBlock response: {error}"))
+    serde_json::from_str(&body).map_err(|error| format!("parse SponsorBlock response: {error}"))
 }
 
 pub fn normalize_segments(
@@ -156,7 +150,9 @@ pub fn rejected_intervals(
         .map(|segment| SponsorBlockSegment::new(segment.start, segment.end, "sponsor"))
         .collect::<Vec<_>>();
     rejected.sort_by(|left, right| {
-        left.start.total_cmp(&right.start).then_with(|| left.end.total_cmp(&right.end))
+        left.start
+            .total_cmp(&right.start)
+            .then_with(|| left.end.total_cmp(&right.end))
     });
     let mut merged: Vec<SponsorBlockSegment> = Vec::with_capacity(rejected.len());
     for segment in rejected {
@@ -184,13 +180,13 @@ struct CanonicalProcessing {
     segments: Vec<ProcessingInterval>,
 }
 
-pub fn processing_hash(
-    segments: &[SponsorBlockSegment],
-    rejected_categories: &[String],
-) -> String {
+pub fn processing_hash(segments: &[SponsorBlockSegment], rejected_categories: &[String]) -> String {
     let intervals = rejected_intervals(segments, rejected_categories)
         .into_iter()
-        .map(|segment| ProcessingInterval { start: segment.start, end: segment.end })
+        .map(|segment| ProcessingInterval {
+            start: segment.start,
+            end: segment.end,
+        })
         .collect();
     sha256_json(&CanonicalProcessing {
         processing_format_version: PROCESSING_FORMAT_VERSION,
@@ -217,7 +213,11 @@ pub fn retained_intervals(
         cursor = cursor.max(end);
     }
     if cursor < original_duration {
-        retained.push(SponsorBlockSegment::new(cursor, original_duration, "sponsor"));
+        retained.push(SponsorBlockSegment::new(
+            cursor,
+            original_duration,
+            "sponsor",
+        ));
     }
     retained
 }
@@ -269,12 +269,16 @@ fn generate_processed_mp3_blocking(
     if retained.is_empty() {
         return Err("SponsorBlock segments leave no original audio to retain".to_string());
     }
-    let parent = original.parent().ok_or_else(|| "original MP3 has no parent".to_string())?;
+    let parent = original
+        .parent()
+        .ok_or_else(|| "original MP3 has no parent".to_string())?;
     let stem = original
         .file_stem()
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| "original MP3 has no valid file stem".to_string())?;
-    let hash_prefix = hash.get(..16).ok_or_else(|| "SponsorBlock hash is too short".to_string())?;
+    let hash_prefix = hash
+        .get(..16)
+        .ok_or_else(|| "SponsorBlock hash is too short".to_string())?;
     let filename = format!("{stem}.sponsorblock.{hash_prefix}.mp3");
     let destination = parent.join(&filename);
     let nonce = rand::random::<u64>();
@@ -286,19 +290,38 @@ fn generate_processed_mp3_blocking(
             .file_name()
             .map(Path::new)
             .ok_or_else(|| "original MP3 has no filename".to_string())?;
-        fs::write(&manifest_path, ffconcat_manifest(manifest_source, &retained))
-            .map_err(|error| format!("write ffconcat manifest: {error}"))?;
+        fs::write(
+            &manifest_path,
+            ffconcat_manifest(manifest_source, &retained),
+        )
+        .map_err(|error| format!("write ffconcat manifest: {error}"))?;
         let output = Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i"])
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+            ])
             .arg(&manifest_path)
             .args(["-map", "0:a:0", "-c:a", "copy", "-y"])
             .arg(&temporary_path)
             .output()
             .map_err(|error| format!("start FFmpeg: {error}"))?;
         if !output.status.success() {
-            return Err(format!("FFmpeg failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+            return Err(format!(
+                "FFmpeg failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
         }
-        if fs::metadata(&temporary_path).map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+        if fs::metadata(&temporary_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+            == 0
+        {
             return Err("FFmpeg produced an empty MP3".to_string());
         }
         let duration = probe_duration(&temporary_path)?;
@@ -316,12 +339,22 @@ fn generate_processed_mp3_blocking(
 
 fn probe_duration(path: &Path) -> Result<f64, String> {
     let output = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
         .arg(path)
         .output()
         .map_err(|error| format!("start ffprobe: {error}"))?;
     if !output.status.success() {
-        return Err(format!("ffprobe failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(format!(
+            "ffprobe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     let duration = String::from_utf8_lossy(&output.stdout)
         .trim()
@@ -401,18 +434,16 @@ pub async fn reconcile_episode(
     }
 
     let original = channel_dir.join(format!("{}.mp3", episode.yt_id));
-    let processed = match generate_processed_mp3(
-        &original,
-        &rejected,
-        original_duration,
-        &processing_hash,
-    ).await {
-        Ok(processed) => processed,
-        Err(message) => {
-            let _ = SponsorBlockCache::record_failure(pool, episode.id, &message).await;
-            return Err(Error::default(&message));
-        }
-    };
+    let processed =
+        match generate_processed_mp3(&original, &rejected, original_duration, &processing_hash)
+            .await
+        {
+            Ok(processed) => processed,
+            Err(message) => {
+                let _ = SponsorBlockCache::record_failure(pool, episode.id, &message).await;
+                return Err(Error::default(&message));
+            }
+        };
     let current = match SponsorBlockCache::upsert_success(
         pool,
         episode.id,
@@ -442,13 +473,13 @@ pub async fn reconcile_episode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::{
         io::{Read, Write},
         net::TcpListener,
         path::PathBuf,
         thread,
     };
-    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
 
     fn media_fixture_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -506,7 +537,10 @@ mod tests {
             let request = String::from_utf8_lossy(&request[..read]);
             assert!(request.contains("videoID=video-id"));
             for category in SUPPORTED_SPONSORBLOCK_CATEGORIES {
-                assert!(request.contains(category), "missing category in request: {request}");
+                assert!(
+                    request.contains(category),
+                    "missing category in request: {request}"
+                );
             }
             assert!(request.contains("actionTypes=%5B%22skip%22%5D"));
             thread::sleep(delay);
@@ -565,7 +599,10 @@ mod tests {
     #[test]
     fn normalization_handles_empty_unknown_and_invalid_duration() {
         assert!(normalize_segments(&[], Some(100.0)).is_empty());
-        assert_eq!(normalize_segments(&[raw(90.0, 120.0)], None), [seg(90.0, 120.0)]);
+        assert_eq!(
+            normalize_segments(&[raw(90.0, 120.0)], None),
+            [seg(90.0, 120.0)]
+        );
         assert_eq!(
             normalize_segments(&[raw(90.0, 120.0)], Some(f64::NAN)),
             [seg(90.0, 120.0)]
@@ -575,20 +612,42 @@ mod tests {
     #[test]
     fn hashes_separate_visible_snapshots_from_processing_inputs() {
         let sponsor = vec!["sponsor".to_string()];
-        let reordered_duplicates = vec!["intro".to_string(), "sponsor".to_string(), "intro".to_string()];
+        let reordered_duplicates = vec![
+            "intro".to_string(),
+            "sponsor".to_string(),
+            "intro".to_string(),
+        ];
         let canonical = vec!["sponsor".to_string(), "intro".to_string()];
-        let base = [seg(10.0, 20.0), SponsorBlockSegment::new(15.0, 25.0, "intro")];
-        let playable_changed = [seg(10.0, 20.0), SponsorBlockSegment::new(15.0, 30.0, "intro")];
+        let base = [
+            seg(10.0, 20.0),
+            SponsorBlockSegment::new(15.0, 25.0, "intro"),
+        ];
+        let playable_changed = [
+            seg(10.0, 20.0),
+            SponsorBlockSegment::new(15.0, 30.0, "intro"),
+        ];
 
-        let rejected_changed = [seg(10.0, 21.0), SponsorBlockSegment::new(15.0, 25.0, "intro")];
+        let rejected_changed = [
+            seg(10.0, 21.0),
+            SponsorBlockSegment::new(15.0, 25.0, "intro"),
+        ];
         assert_ne!(snapshot_hash(&base), snapshot_hash(&playable_changed));
-        assert_eq!(processing_hash(&base, &sponsor), processing_hash(&playable_changed, &sponsor));
-        assert_ne!(processing_hash(&base, &sponsor), processing_hash(&rejected_changed, &sponsor));
+        assert_eq!(
+            processing_hash(&base, &sponsor),
+            processing_hash(&playable_changed, &sponsor)
+        );
+        assert_ne!(
+            processing_hash(&base, &sponsor),
+            processing_hash(&rejected_changed, &sponsor)
+        );
         assert_eq!(
             processing_hash(&base, &reordered_duplicates),
             processing_hash(&base, &canonical)
         );
-        assert_ne!(processing_hash(&base, &sponsor), processing_hash(&base, &canonical));
+        assert_ne!(
+            processing_hash(&base, &sponsor),
+            processing_hash(&base, &canonical)
+        );
         assert!(rejected_intervals(&base, &[]).is_empty());
         assert_eq!(rejected_intervals(&base, &canonical), [seg(10.0, 25.0)]);
         assert_eq!(snapshot_hash(&base).len(), 64);
@@ -596,12 +655,18 @@ mod tests {
 
     #[test]
     fn retained_intervals_cover_all_sponsor_positions() {
-        assert_eq!(retained_intervals(&[seg(0.0, 10.0)], 100.0), [seg(10.0, 100.0)]);
+        assert_eq!(
+            retained_intervals(&[seg(0.0, 10.0)], 100.0),
+            [seg(10.0, 100.0)]
+        );
         assert_eq!(
             retained_intervals(&[seg(40.0, 60.0)], 100.0),
             [seg(0.0, 40.0), seg(60.0, 100.0)]
         );
-        assert_eq!(retained_intervals(&[seg(90.0, 100.0)], 100.0), [seg(0.0, 90.0)]);
+        assert_eq!(
+            retained_intervals(&[seg(90.0, 100.0)], 100.0),
+            [seg(0.0, 90.0)]
+        );
         assert_eq!(
             retained_intervals(&[seg(10.0, 20.0), seg(30.0, 40.0)], 50.0),
             [seg(0.0, 10.0), seg(20.0, 30.0), seg(40.0, 50.0)]
@@ -624,11 +689,26 @@ mod tests {
         let dir = media_fixture_dir();
         let original = dir.join("video-id.mp3");
         let output = Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-q:a", "4", "-y"])
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-q:a",
+                "4",
+                "-y",
+            ])
             .arg(&original)
             .output()
             .expect("start fixture FFmpeg");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let original_bytes = fs::read(&original).expect("read original fixture");
 
         let processed = generate_processed_mp3(
@@ -640,8 +720,15 @@ mod tests {
         .await
         .expect("generate derivative");
 
-        assert_eq!(processed.filename, "video-id.sponsorblock.0123456789abcdef.mp3");
-        assert!((1.8..=2.2).contains(&processed.duration), "duration {}", processed.duration);
+        assert_eq!(
+            processed.filename,
+            "video-id.sponsorblock.0123456789abcdef.mp3"
+        );
+        assert!(
+            (1.8..=2.2).contains(&processed.duration),
+            "duration {}",
+            processed.duration
+        );
         assert_eq!(fs::read(&original).unwrap(), original_bytes);
         assert!(dir.join(processed.filename).is_file());
         assert_eq!(
@@ -657,18 +744,31 @@ mod tests {
 
     #[actix_web::test]
     async fn generates_derivative_from_a_nested_relative_path() {
-        let relative_dir = PathBuf::from("target").join(format!(
-            "sponsorblock-relative-{}",
-            rand::random::<u64>()
-        ));
+        let relative_dir = PathBuf::from("target")
+            .join(format!("sponsorblock-relative-{}", rand::random::<u64>()));
         fs::create_dir_all(&relative_dir).expect("create relative fixture directory");
         let original = relative_dir.join("video-id.mp3");
         let output = Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-q:a", "4", "-y"])
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-q:a",
+                "4",
+                "-y",
+            ])
             .arg(&original)
             .output()
             .expect("start fixture FFmpeg");
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         let processed = generate_processed_mp3(
             &original,
@@ -727,7 +827,9 @@ mod tests {
             &server("200 OK", same_body, Duration::ZERO),
             Duration::from_secs(1),
         );
-        let unchanged = reconcile_episode(&pool, &same_client, &episode, &dir, &categories).await.unwrap();
+        let unchanged = reconcile_episode(&pool, &same_client, &episode, &dir, &categories)
+            .await
+            .unwrap();
         assert_eq!(unchanged.snapshot_hash, hash);
         assert!(dir.join(&active_filename).is_file());
 
@@ -739,8 +841,15 @@ mod tests {
             &server("200 OK", changed_body, Duration::ZERO),
             Duration::from_secs(1),
         );
-        assert!(reconcile_episode(&pool, &changed_client, &episode, &dir, &categories).await.is_err());
-        let preserved = SponsorBlockCache::read(&pool, episode.id).await.unwrap().unwrap();
+        assert!(
+            reconcile_episode(&pool, &changed_client, &episode, &dir, &categories)
+                .await
+                .is_err()
+        );
+        let preserved = SponsorBlockCache::read(&pool, episode.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(preserved.snapshot_hash, hash);
         assert!(preserved.last_error.is_some());
         assert!(dir.join(&active_filename).is_file());
@@ -749,7 +858,9 @@ mod tests {
             &server("404 Not Found", "{}", Duration::ZERO),
             Duration::from_secs(1),
         );
-        let empty = reconcile_episode(&pool, &empty_client, &episode, &dir, &categories).await.unwrap();
+        let empty = reconcile_episode(&pool, &empty_client, &episode, &dir, &categories)
+            .await
+            .unwrap();
         assert!(empty.segments.is_empty());
         assert!(empty.processed_filename.is_none());
         assert!(!dir.join(active_filename).exists());
@@ -760,10 +871,7 @@ mod tests {
     async fn playable_only_changes_update_snapshot_without_running_ffmpeg() {
         let (pool, episode, dir) = reconciliation_fixture().await;
         let categories = vec!["sponsor".to_string()];
-        let old_segments = [
-            seg(1.0, 2.0),
-            SponsorBlockSegment::new(0.2, 0.4, "intro"),
-        ];
+        let old_segments = [seg(1.0, 2.0), SponsorBlockSegment::new(0.2, 0.4, "intro")];
         let old_snapshot = snapshot_hash(&old_segments);
         let process_hash = processing_hash(&old_segments, &categories);
         let filename = format!("video-id.sponsorblock.{}.mp3", &process_hash[..16]);
@@ -783,15 +891,24 @@ mod tests {
             {"segment":[1.0,2.0],"category":"sponsor","actionType":"skip"},
             {"segment":[0.2,0.6],"category":"intro","actionType":"skip"}
         ]"#;
-        let client = SponsorBlockClient::new(&server("200 OK", body, Duration::ZERO), Duration::from_secs(1));
+        let client = SponsorBlockClient::new(
+            &server("200 OK", body, Duration::ZERO),
+            Duration::from_secs(1),
+        );
 
         let updated = reconcile_episode(&pool, &client, &episode, &dir, &categories)
             .await
             .expect("playable-only update must not require the absent original MP3");
 
         assert_ne!(updated.snapshot_hash, old_snapshot);
-        assert_eq!(updated.processing_hash.as_deref(), Some(process_hash.as_str()));
-        assert_eq!(updated.processed_filename.as_deref(), Some(filename.as_str()));
+        assert_eq!(
+            updated.processing_hash.as_deref(),
+            Some(process_hash.as_str())
+        );
+        assert_eq!(
+            updated.processed_filename.as_deref(),
+            Some(filename.as_str())
+        );
         assert!(dir.join(filename).is_file());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -813,9 +930,14 @@ mod tests {
         .await
         .unwrap();
         let body = r#"[{"segment":[1.0,2.0],"category":"sponsor","actionType":"skip"}]"#;
-        let client = SponsorBlockClient::new(&server("200 OK", body, Duration::ZERO), Duration::from_secs(1));
+        let client = SponsorBlockClient::new(
+            &server("200 OK", body, Duration::ZERO),
+            Duration::from_secs(1),
+        );
 
-        let updated = reconcile_episode(&pool, &client, &episode, &dir, &[]).await.unwrap();
+        let updated = reconcile_episode(&pool, &client, &episode, &dir, &[])
+            .await
+            .unwrap();
 
         assert_eq!(updated.segments, [seg(1.0, 2.0)]);
         assert!(updated.processed_filename.is_none());
@@ -831,12 +953,30 @@ mod tests {
             &server("500 Internal Server Error", "{}", Duration::ZERO),
             Duration::from_secs(1),
         );
-        assert!(reconcile_episode(&pool, &failed_client, &episode, &dir, &categories).await.is_err());
-        assert_eq!(SponsorBlockCache::read(&pool, episode.id).await.unwrap(), None);
+        assert!(
+            reconcile_episode(&pool, &failed_client, &episode, &dir, &categories)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            SponsorBlockCache::read(&pool, episode.id).await.unwrap(),
+            None
+        );
 
         let original = dir.join("video-id.mp3");
         let fixture_output = Command::new("ffmpeg")
-            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-q:a", "4", "-y"])
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-q:a",
+                "4",
+                "-y",
+            ])
             .arg(&original)
             .output()
             .expect("start fixture FFmpeg");
@@ -847,7 +987,9 @@ mod tests {
             &server("200 OK", first_body, Duration::ZERO),
             Duration::from_secs(1),
         );
-        let first = reconcile_episode(&pool, &first_client, &episode, &dir, &categories).await.unwrap();
+        let first = reconcile_episode(&pool, &first_client, &episode, &dir, &categories)
+            .await
+            .unwrap();
         let first_filename = first.processed_filename.clone().expect("first derivative");
         assert!(dir.join(&first_filename).is_file());
 
@@ -856,7 +998,9 @@ mod tests {
             &server("200 OK", changed_body, Duration::ZERO),
             Duration::from_secs(1),
         );
-        let changed = reconcile_episode(&pool, &changed_client, &episode, &dir, &categories).await.unwrap();
+        let changed = reconcile_episode(&pool, &changed_client, &episode, &dir, &categories)
+            .await
+            .unwrap();
         let changed_filename = changed.processed_filename.expect("changed derivative");
         assert_ne!(changed.snapshot_hash, first.snapshot_hash);
         assert_ne!(changed_filename, first_filename);
@@ -892,16 +1036,35 @@ mod tests {
             &server("404 Not Found", "{}", Duration::ZERO),
             Duration::from_secs(1),
         );
-        assert!(client.fetch("video-id").await.expect("empty snapshot").is_empty());
+        assert!(client
+            .fetch("video-id")
+            .await
+            .expect("empty snapshot")
+            .is_empty());
     }
 
     #[actix_web::test]
     async fn rejects_timeout_malformed_rate_limit_and_server_error() {
         let cases = [
             ("200 OK", "not-json", Duration::ZERO, Duration::from_secs(1)),
-            ("429 Too Many Requests", "{}", Duration::ZERO, Duration::from_secs(1)),
-            ("500 Internal Server Error", "{}", Duration::ZERO, Duration::from_secs(1)),
-            ("200 OK", "[]", Duration::from_millis(100), Duration::from_millis(20)),
+            (
+                "429 Too Many Requests",
+                "{}",
+                Duration::ZERO,
+                Duration::from_secs(1),
+            ),
+            (
+                "500 Internal Server Error",
+                "{}",
+                Duration::ZERO,
+                Duration::from_secs(1),
+            ),
+            (
+                "200 OK",
+                "[]",
+                Duration::from_millis(100),
+                Duration::from_millis(20),
+            ),
         ];
         for (status, body, delay, timeout) in cases {
             let client = SponsorBlockClient::new(&server(status, body, delay), timeout);

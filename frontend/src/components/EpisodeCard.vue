@@ -124,9 +124,7 @@
 	const sponsorBlockMarkers = computed(() =>
 		sponsorBlockTimelineMarkers(
 			timelineDuration.value,
-			liveEpisode.value.sponsorblock_enabled === true
-				? liveEpisode.value.sponsorblock_segments
-				: []
+			liveEpisode.value.sponsorblock_enabled === true ? liveEpisode.value.sponsorblock_segments : []
 		)
 	);
 	const titleScrollActive = computed(() => isPlaying.value && titleScrollDistance.value > 0);
@@ -697,7 +695,10 @@
 			aria-hidden="true"
 			data-testid="episode-progress"
 		>
-			<div class="absolute inset-y-0 left-0 bg-success" :style="{ width: `${progressRatio}%` }"></div>
+			<div
+				class="absolute inset-y-0 left-0 bg-success"
+				:style="{ width: `${progressRatio}%` }"
+			></div>
 			<div
 				v-for="(marker, index) in sponsorBlockMarkers"
 				:key="index"

@@ -165,9 +165,7 @@ describe('PersistentPlayer controls', () => {
 		player.currentEpisode = {
 			...player.currentEpisode!,
 			sponsorblock_enabled: false,
-			sponsorblock_segments: [
-				{ start: 60, end: 120, category: 'sponsor', rejected: true }
-			]
+			sponsorblock_segments: [{ start: 60, end: 120, category: 'sponsor', rejected: true }]
 		};
 		const bar = await mountBar();
 		expect(bar.find('[data-testid="player-sponsorblock-segment"]').exists()).toBe(false);

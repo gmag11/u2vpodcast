@@ -1,48 +1,28 @@
-use sqlx::SqlitePool;
+use super::super::models::{
+    audios_dir, cookies_file, ytdlp_path, Channel, Config, Episode, Error, PlaylistItem, YtVideo,
+    Ytdlp,
+};
+use super::sponsorblock::{reconcile_episode, SponsorBlockClient};
 use actix_web::http::StatusCode;
-use tracing::{
-    info,
-    debug,
-    error,
-};
-use chrono::{
-    Utc,
-    DateTime,
-    TimeZone,
-    naive::{
-        NaiveDate,
-    },
-};
+use chrono::{naive::NaiveDate, DateTime, TimeZone, Utc};
+use rand::Rng;
+use sqlx::SqlitePool;
+use std::time::Duration;
 use std::{
     collections::HashSet,
     convert::TryFrom,
     path::Path,
     sync::{LazyLock, Mutex},
 };
-use rand::Rng;
 use tokio::fs::create_dir_all;
 use tokio::time::sleep;
-use std::time::Duration;
-use super::super::models::{
-    Error,
-    Channel,
-    Config,
-    Episode,
-    PlaylistItem,
-    Ytdlp,
-    YtVideo,
-    audios_dir,
-    ytdlp_path,
-    cookies_file,
-};
-use super::sponsorblock::{reconcile_episode, SponsorBlockClient};
+use tracing::{debug, error, info};
 
 // Extra videos requested beyond `max` so exclusions (upcoming/live/future)
 // cannot starve the window (scalable-channel-listing).
 const MARGIN: usize = 5;
 
-static CHANNEL_SYNCS: LazyLock<Mutex<HashSet<i64>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
+static CHANNEL_SYNCS: LazyLock<Mutex<HashSet<i64>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
 struct ChannelSyncGuard {
     channel_id: i64,
@@ -68,9 +48,9 @@ impl Drop for ChannelSyncGuard {
     }
 }
 
-pub async fn do_the_work(pool: &SqlitePool, config: &Config) -> Result<(), Error>{
+pub async fn do_the_work(pool: &SqlitePool, config: &Config) -> Result<(), Error> {
     let channels = Channel::read_active(pool).await?;
-    for channel in channels.as_slice(){
+    for channel in channels.as_slice() {
         info!("Processing: {}", channel.url);
         // Run each channel in its own isolated task so that a panic while
         // processing one channel (e.g. yt-dlp output, filesystem) can never
@@ -83,9 +63,14 @@ pub async fn do_the_work(pool: &SqlitePool, config: &Config) -> Result<(), Error
             if let Err(e) = update_channel(&pool, channel_id, &config).await {
                 error!("Cant process channel: {url_for_task}. Error: {e}");
             }
-        }).await {
-            Ok(()) => {},
-            Err(e) => error!("Task panicked while processing channel: {}. Error: {e}", channel.url),
+        })
+        .await
+        {
+            Ok(()) => {}
+            Err(e) => error!(
+                "Task panicked while processing channel: {}. Error: {e}",
+                channel.url
+            ),
         }
     }
     Ok(())
@@ -95,7 +80,7 @@ pub async fn update_channel(
     pool: &SqlitePool,
     channel_id: i64,
     config: &Config,
-) -> Result<(), Error>{
+) -> Result<(), Error> {
     let _guard = match ChannelSyncGuard::acquire(channel_id) {
         Some(guard) => guard,
         None => {
@@ -123,7 +108,7 @@ async fn update_channel_inner(
     pool: &SqlitePool,
     channel_id: i64,
     config: &Config,
-) -> Result<(), Error>{
+) -> Result<(), Error> {
     let channel = Channel::read(pool, channel_id).await?;
     let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
     let folder = audios_dir();
@@ -150,7 +135,10 @@ async fn update_channel_inner(
     // refresh is logged and does not fail the channel sync.
     if channel.active {
         if let Err(e) = Channel::refresh_cached_image(pool, &channel).await {
-            error!("Cant refresh cached image for channel {}: {}", channel.id, e);
+            error!(
+                "Cant refresh cached image for channel {}: {}",
+                channel.id, e
+            );
         }
     }
     info!("Channel {} updated", &channel.id);
@@ -260,7 +248,7 @@ fn evict_ids(episodes: &[Episode], max: usize) -> Vec<&Episode> {
     evict
 }
 
-async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error>{
+async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Result<(), Error> {
     // Defense in depth: a stored `max` below 1 (e.g. the historical -1 default)
     // must never trigger mass deletion and must not fail the sync. We keep all
     // episodes unchanged until the operator sets a valid retention limit.
@@ -275,10 +263,11 @@ async fn clean_channel(pool: &SqlitePool, channel: &Channel, folder: &str) -> Re
         }
     };
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
-    for episode in evict_ids(&episodes, max) { // remove
+    for episode in evict_ids(&episodes, max) {
+        // remove
         let channel_dir = Path::new(folder).join(&channel.slug);
         remove_episode_files(&channel_dir, &episode.yt_id).await;
-        match Episode::remove(pool, episode.id).await{
+        match Episode::remove(pool, episode.id).await {
             Ok(_) => info!("Removed episode {} and its media", episode.yt_id),
             Err(e) => error!("Cant remove episode {}. {}", episode.yt_id, e),
         }
@@ -291,10 +280,9 @@ async fn process_channel(
     channel: &Channel,
     ytdlp: &Ytdlp,
     folder: &str,
-) -> Result<HashSet<String>, Error>{
+) -> Result<HashSet<String>, Error> {
     info!("Create directory {}/{}", folder, &channel.slug);
-    let _ = create_dir_all(format!("{}/{}", folder, channel.slug))
-        .await;
+    let _ = create_dir_all(format!("{}/{}", folder, channel.slug)).await;
     info!("Syncing channel: {}", channel);
     // The sync window targets the `max` most recent videos (newest-first via
     // the channel `/videos` tab order). A small margin is requested so that
@@ -302,7 +290,10 @@ async fn process_channel(
     // (scalable-channel-listing).
     let max: usize = usize::try_from(channel.max.max(1)).unwrap_or(1);
     let wanted = max.saturating_add(MARGIN);
-    info!("Listing up to {wanted} recent videos (window {max}) for {}", channel);
+    info!(
+        "Listing up to {wanted} recent videos (window {max}) for {}",
+        channel
+    );
     let candidates = ytdlp.list_videos(&channel.url, wanted).await?;
     let selection = select_window(candidates, max, channel.first, Utc::now());
     let window_ids = selection
@@ -316,10 +307,15 @@ async fn process_channel(
         selection.excluded,
         selection.stopped_at_floor
     );
-    for (index, ytvideo) in selection.window.iter().enumerate(){
-        info!("Processing {}/{}: {}", index + 1, selection.window.len(), ytvideo.title);
-        match process_episode(pool, channel, ytvideo, ytdlp, folder, channel.first).await{
-            Ok(_) => {},
+    for (index, ytvideo) in selection.window.iter().enumerate() {
+        info!(
+            "Processing {}/{}: {}",
+            index + 1,
+            selection.window.len(),
+            ytvideo.title
+        );
+        match process_episode(pool, channel, ytvideo, ytdlp, folder, channel.first).await {
+            Ok(_) => {}
             Err(e) => error!("Cant process episode: {e}"),
         }
     }
@@ -351,13 +347,9 @@ async fn reconcile_sponsorblock_window(
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     let channel_dir = Path::new(folder).join(&channel.slug);
     for episode in episodes_in_window(&episodes, window_ids) {
-        if let Err(error) = reconcile_episode(
-            pool,
-            client,
-            episode,
-            &channel_dir,
-            rejected_categories,
-        ).await {
+        if let Err(error) =
+            reconcile_episode(pool, client, episode, &channel_dir, rejected_categories).await
+        {
             error!(
                 "Cant reconcile SponsorBlock data for episode {}: {}",
                 episode.yt_id, error
@@ -382,23 +374,22 @@ async fn process_episode(
     ytdlp: &Ytdlp,
     folder: &str,
     floor: DateTime<Utc>,
-) -> Result<(), Error>{
+) -> Result<(), Error> {
     info!("Start processing episode {}", ytvideo.title);
-    let filename = format!("{}/{}/{}.mp3",
-        folder,
-        channel.slug,
-        ytvideo.id
-    );
+    let filename = format!("{}/{}/{}.mp3", folder, channel.slug, ytvideo.id);
     let episode_exists = channel.episode_exists(pool, &ytvideo.id).await;
     if !needs_episode_download(episode_exists, Path::new(&filename).is_file()) {
-        info!("El video {} titulado '{}', existe",
-            &ytvideo.id,
-            &ytvideo.title
+        info!(
+            "El video {} titulado '{}', existe",
+            &ytvideo.id, &ytvideo.title
         );
         return Ok(());
     }
     if episode_exists {
-        info!("The original media for {} is missing; downloading it again", ytvideo.id);
+        info!(
+            "The original media for {} is missing; downloading it again",
+            ytvideo.id
+        );
     }
     if needs_metadata_probe(episode_exists, ytvideo) {
         info!("Checking publish date before downloading {}", ytvideo.id);
@@ -419,7 +410,7 @@ async fn process_episode(
     // listing candidate fills any field yt-dlp omitted (scalable-channel
     // -listing).
     let (success, info) = ytdlp.download(&ytvideo.id, &filename).await?;
-    if !success{
+    if !success {
         Err(Error::default(&format!("Cant download {filename}")))?
     }
     let published_at = get_published_at(&info);
@@ -438,17 +429,40 @@ async fn process_episode(
     let delay = rand::thread_rng().gen_range(10..=20);
     info!("Pausing {delay} seconds before next download");
     sleep(Duration::from_secs(delay)).await;
-    let title = if info.title.is_empty() { &ytvideo.title } else { &info.title };
-    let description = if info.description.is_empty() { &ytvideo.description } else { &info.description };
-    let yt_id = if info.id.is_empty() { &ytvideo.id } else { &info.id };
-    let webpage_url = if info.webpage_url.is_empty() { &ytvideo.webpage_url } else { &info.webpage_url };
-    let duration = if info.duration_string.is_empty() { &ytvideo.duration_string } else { &info.duration_string };
-    let image = if info.thumbnail.is_empty() { &ytvideo.thumbnail } else { &info.thumbnail };
+    let title = if info.title.is_empty() {
+        &ytvideo.title
+    } else {
+        &info.title
+    };
+    let description = if info.description.is_empty() {
+        &ytvideo.description
+    } else {
+        &info.description
+    };
+    let yt_id = if info.id.is_empty() {
+        &ytvideo.id
+    } else {
+        &info.id
+    };
+    let webpage_url = if info.webpage_url.is_empty() {
+        &ytvideo.webpage_url
+    } else {
+        &info.webpage_url
+    };
+    let duration = if info.duration_string.is_empty() {
+        &ytvideo.duration_string
+    } else {
+        &info.duration_string
+    };
+    let image = if info.thumbnail.is_empty() {
+        &ytvideo.thumbnail
+    } else {
+        &info.thumbnail
+    };
     info!("{}", &info.upload_date);
     let _ = filetime::set_file_mtime(
         &filename,
-        filetime::FileTime::from_unix_time(
-            published_at.timestamp(), 0)
+        filetime::FileTime::from_unix_time(published_at.timestamp(), 0),
     );
     if episode_exists {
         return Ok(());
@@ -464,8 +478,9 @@ async fn process_episode(
         &published_at,
         duration,
         image,
-        listen
-    ).await?;
+        listen,
+    )
+    .await?;
     // Auto-append freshly downloaded episodes to the end of the playlist
     // (auto-playlist-append): reuses the playlist API's "add" semantics
     // (append at end, dedupe via UNIQUE(episode_id)). The append is
@@ -476,14 +491,17 @@ async fn process_episode(
     match PlaylistItem::add(pool, episode.id).await {
         Ok(_) => info!("Appended {} to the playlist", episode.yt_id),
         Err(e) if e.status_code() == StatusCode::CONFLICT => {
-            debug!("Episode {} already in playlist; skipping append", episode.yt_id);
+            debug!(
+                "Episode {} already in playlist; skipping append",
+                episode.yt_id
+            );
         }
         Err(e) => error!("Cant append episode {} to playlist: {}", episode.yt_id, e),
     }
     Ok(())
 }
 
-fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
+fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc> {
     // Prefer the precise publish timestamp when available.
     if let Some(timestamp) = ytvideo.timestamp {
         if let Some(dt) = TimeZone::timestamp_opt(&Utc, timestamp, 0).single() {
@@ -502,7 +520,10 @@ fn get_published_at(ytvideo: &YtVideo) -> DateTime<Utc>{
     // and flat-listing entries that omit dates do not spam the ERROR log (the
     // candidate is conservatively kept; the authoritative date comes from the
     // per-video detail/download metadata - scalable-channel-listing).
-    debug!("Cant parse publish date from {:?}, using now()", &ytvideo.upload_date);
+    debug!(
+        "Cant parse publish date from {:?}, using now()",
+        &ytvideo.upload_date
+    );
     Utc::now()
 }
 
@@ -628,7 +649,11 @@ mod selection_tests {
         let now = TimeZone::timestamp_opt(&Utc, day_seconds(20), 0).unwrap();
         let selection = select_window(candidates, 3, floor, now);
         assert_eq!(
-            selection.window.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            selection
+                .window
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["v0", "v1", "v2"]
         );
         assert_eq!(selection.excluded, 0);
@@ -655,7 +680,11 @@ mod selection_tests {
         let floor = TimeZone::timestamp_opt(&Utc, 1_670_000_000, 0).unwrap();
         let selection = select_window(candidates, 10, floor, now);
         assert_eq!(
-            selection.window.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            selection
+                .window
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["recent", "older"]
         );
         assert_eq!(selection.excluded, 3);
@@ -673,7 +702,11 @@ mod selection_tests {
         ];
         let selection = select_window(candidates, 10, floor, now);
         assert_eq!(
-            selection.window.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            selection
+                .window
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["new1", "new2"]
         );
         assert!(selection.stopped_at_floor);
@@ -690,7 +723,11 @@ mod selection_tests {
         ];
         let selection = select_window(candidates, 3, floor, now);
         assert_eq!(
-            selection.window.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            selection
+                .window
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["dated1", "undated", "dated2"]
         );
     }
@@ -700,7 +737,11 @@ mod selection_tests {
         // 35 entries, newest (day 35) -> oldest (day 1), all within floor.
         let mut candidates = Vec::new();
         for i in 0..35 {
-            candidates.push(video(&format!("v{i}"), Some(day_seconds(35 - i as i64)), ""));
+            candidates.push(video(
+                &format!("v{i}"),
+                Some(day_seconds(35 - i as i64)),
+                "",
+            ));
         }
         let floor = TimeZone::timestamp_opt(&Utc, 1_600_000_000, 0).unwrap();
         let now = TimeZone::timestamp_opt(&Utc, day_seconds(40), 0).unwrap();
@@ -750,7 +791,10 @@ mod episode_download_tests {
     #[test]
     fn only_new_undated_episodes_need_a_metadata_probe() {
         assert!(needs_metadata_probe(false, &video(None, "")));
-        assert!(!needs_metadata_probe(false, &video(Some(1_704_067_200), "")));
+        assert!(!needs_metadata_probe(
+            false,
+            &video(Some(1_704_067_200), "")
+        ));
         assert!(!needs_metadata_probe(false, &video(None, "20240101")));
         assert!(!needs_metadata_probe(true, &video(None, "")));
     }
@@ -780,14 +824,13 @@ mod orphan_tests {
     }
 }
 
-
 #[cfg(test)]
 mod eviction_tests {
     use super::*;
     use crate::models::{Episode, SponsorBlockCache};
     use sqlx::{
-        query,
         migrate::Migrator,
+        query,
         sqlite::{SqlitePoolOptions, SqliteRow},
         Row,
     };
@@ -910,13 +953,30 @@ mod eviction_tests {
         let t0 = base_time();
         // 5 non-favorites (newest 5) + 1 favorite that is the OLDEST stored.
         for i in 0..5 {
-            insert_episode(&pool, channel, &format!("nf0{i}"), t0 + chrono::Duration::days(i), false).await;
+            insert_episode(
+                &pool,
+                channel,
+                &format!("nf0{i}"),
+                t0 + chrono::Duration::days(i),
+                false,
+            )
+            .await;
         }
-        insert_episode(&pool, channel, "favold", t0 - chrono::Duration::days(1), true).await;
+        insert_episode(
+            &pool,
+            channel,
+            "favold",
+            t0 - chrono::Duration::days(1),
+            true,
+        )
+        .await;
 
         let episodes = for_channel(&pool, channel).await;
         let evict = evict_ids(&episodes, 5);
-        assert!(evict.is_empty(), "non-favorites sit at max; nothing may be deleted");
+        assert!(
+            evict.is_empty(),
+            "non-favorites sit at max; nothing may be deleted"
+        );
     }
 
     #[tokio::test]
@@ -926,15 +986,39 @@ mod eviction_tests {
         let t0 = base_time();
         // 4 non-favorites + a favorite older than all of them; then a new
         // episode arrives → 5 non-favorites at max: nothing deleted.
-        insert_episode(&pool, channel, "favold", t0 - chrono::Duration::days(1), true).await;
+        insert_episode(
+            &pool,
+            channel,
+            "favold",
+            t0 - chrono::Duration::days(1),
+            true,
+        )
+        .await;
         for i in 0..4 {
-            insert_episode(&pool, channel, &format!("nf{i}"), t0 + chrono::Duration::days(i), false).await;
+            insert_episode(
+                &pool,
+                channel,
+                &format!("nf{i}"),
+                t0 + chrono::Duration::days(i),
+                false,
+            )
+            .await;
         }
-        insert_episode(&pool, channel, "nfnew", t0 + chrono::Duration::days(10), false).await;
+        insert_episode(
+            &pool,
+            channel,
+            "nfnew",
+            t0 + chrono::Duration::days(10),
+            false,
+        )
+        .await;
 
         let episodes = for_channel(&pool, channel).await;
         let evict = evict_ids(&episodes, 5);
-        assert!(evict.is_empty(), "the very old favorite must survive new arrivals");
+        assert!(
+            evict.is_empty(),
+            "the very old favorite must survive new arrivals"
+        );
     }
 
     #[tokio::test]
@@ -946,17 +1030,35 @@ mod eviction_tests {
         let mut oldest = String::new();
         for i in 0..6 {
             let yt_id = format!("nf{i}");
-            insert_episode(&pool, channel, &yt_id, t0 + chrono::Duration::days(i), false).await;
+            insert_episode(
+                &pool,
+                channel,
+                &yt_id,
+                t0 + chrono::Duration::days(i),
+                false,
+            )
+            .await;
             if i == 0 {
                 oldest = yt_id;
             }
         }
-        insert_episode(&pool, channel, "favx", t0 + chrono::Duration::days(10), true).await;
+        insert_episode(
+            &pool,
+            channel,
+            "favx",
+            t0 + chrono::Duration::days(10),
+            true,
+        )
+        .await;
 
         let episodes = for_channel(&pool, channel).await;
         let evict = evict_ids(&episodes, 5);
         let ids: Vec<String> = evict.iter().map(|e| e.yt_id.clone()).collect();
-        assert_eq!(ids, vec![oldest], "only the oldest non-favorite must be evicted");
+        assert_eq!(
+            ids,
+            vec![oldest],
+            "only the oldest non-favorite must be evicted"
+        );
     }
 
     #[tokio::test]
@@ -966,9 +1068,23 @@ mod eviction_tests {
         let t0 = base_time();
         // max 2: 3 non-favorites + 1 favorite → 1 non-favorite evicted, favorite
         // never in the eviction list.
-        insert_episode(&pool, channel, "favkeep", t0 + chrono::Duration::days(5), true).await;
+        insert_episode(
+            &pool,
+            channel,
+            "favkeep",
+            t0 + chrono::Duration::days(5),
+            true,
+        )
+        .await;
         for i in 0..3 {
-            insert_episode(&pool, channel, &format!("nf{i}"), t0 + chrono::Duration::days(i), false).await;
+            insert_episode(
+                &pool,
+                channel,
+                &format!("nf{i}"),
+                t0 + chrono::Duration::days(i),
+                false,
+            )
+            .await;
         }
 
         let episodes = for_channel(&pool, channel).await;
@@ -997,10 +1113,7 @@ mod eviction_tests {
         )
         .await;
         let episodes = for_channel(&pool, channel).await;
-        let window_ids = HashSet::from([
-            "recent".to_string(),
-            "recent-favorite".to_string(),
-        ]);
+        let window_ids = HashSet::from(["recent".to_string(), "recent-favorite".to_string()]);
 
         let selected = episodes_in_window(&episodes, &window_ids)
             .into_iter()
@@ -1073,7 +1186,10 @@ mod eviction_tests {
         let root_string = root.to_string_lossy().into_owned();
 
         clean_channel(&pool, &channel, &root_string).await.unwrap();
-        assert!(SponsorBlockCache::read(&pool, old_id).await.unwrap().is_none());
+        assert!(SponsorBlockCache::read(&pool, old_id)
+            .await
+            .unwrap()
+            .is_none());
         assert!(std::fs::read_dir(&channel_dir)
             .unwrap()
             .filter_map(Result::ok)
@@ -1083,7 +1199,9 @@ mod eviction_tests {
         assert!(channel_dir.join("new.mp3").is_file());
         assert!(channel_dir.join("new.sponsorblock.active.mp3").is_file());
         assert!(!channel_dir.join("new.sponsorblock.stale.mp3").exists());
-        assert!(!channel_dir.join(".new.sponsorblock.active.mp3.42.tmp.mp3").exists());
+        assert!(!channel_dir
+            .join(".new.sponsorblock.active.mp3.42.tmp.mp3")
+            .exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1107,10 +1225,7 @@ mod eviction_tests {
             rand::random::<u64>()
         ));
         std::fs::create_dir_all(root.join(&channel.slug)).unwrap();
-        let client = SponsorBlockClient::new(
-            &mixed_sponsorblock_server(2),
-            Duration::from_secs(1),
-        );
+        let client = SponsorBlockClient::new(&mixed_sponsorblock_server(2), Duration::from_secs(1));
         let window_ids = HashSet::from(["failed".to_string(), "successful".to_string()]);
 
         reconcile_sponsorblock_window(
@@ -1125,7 +1240,10 @@ mod eviction_tests {
         .await
         .expect("mixed reconciliation completes");
 
-        assert!(SponsorBlockCache::read(&pool, failed_id).await.unwrap().is_none());
+        assert!(SponsorBlockCache::read(&pool, failed_id)
+            .await
+            .unwrap()
+            .is_none());
         let successful = SponsorBlockCache::read(&pool, successful_id)
             .await
             .unwrap()
@@ -1150,7 +1268,10 @@ mod eviction_tests {
         )
         .await
         .unwrap();
-        let before = SponsorBlockCache::read(&pool, episode_id).await.unwrap().unwrap();
+        let before = SponsorBlockCache::read(&pool, episode_id)
+            .await
+            .unwrap()
+            .unwrap();
         let channel = Channel::read(&pool, channel_id).await.unwrap();
         let root = std::env::temp_dir().join(format!(
             "u2vpodcast-worker-disabled-{}",
@@ -1173,7 +1294,10 @@ mod eviction_tests {
         .await
         .unwrap();
 
-        assert_eq!(SponsorBlockCache::read(&pool, episode_id).await.unwrap(), Some(before));
+        assert_eq!(
+            SponsorBlockCache::read(&pool, episode_id).await.unwrap(),
+            Some(before)
+        );
         assert_eq!(std::fs::read(&derivative).unwrap(), b"active");
         std::fs::remove_dir_all(root).unwrap();
     }

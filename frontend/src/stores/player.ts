@@ -72,12 +72,16 @@ export function sponsorBlockSkipTarget(
 	segments: SponsorBlockSegment[] | null | undefined
 ): number {
 	const rejected = (segments ?? [])
-		.filter(({ start, end, rejected }) => rejected && Number.isFinite(start) && Number.isFinite(end) && end > start)
+		.filter(
+			({ start, end, rejected }) =>
+				rejected && Number.isFinite(start) && Number.isFinite(end) && end > start
+		)
 		.sort((left, right) => left.start - right.start || left.end - right.end);
 	const merged: Array<{ start: number; end: number }> = [];
 	for (const segment of rejected) {
 		const previous = merged.at(-1);
-		if (previous && segment.start <= previous.end) previous.end = Math.max(previous.end, segment.end);
+		if (previous && segment.start <= previous.end)
+			previous.end = Math.max(previous.end, segment.end);
 		else merged.push({ start: segment.start, end: segment.end });
 	}
 	const interval = merged.find(({ start, end }) => seconds >= start && seconds < end);
@@ -904,7 +908,10 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function seek(seconds: number) {
 		if (!audio) return;
-		const target = sponsorBlockSkipTarget(seconds, activeSponsorBlockSegments(currentEpisode.value));
+		const target = sponsorBlockSkipTarget(
+			seconds,
+			activeSponsorBlockSegments(currentEpisode.value)
+		);
 		audio.currentTime = target;
 		currentTime.value = target;
 	}
@@ -915,7 +922,10 @@ export const usePlayerStore = defineStore('player', () => {
 		if (!audio || !currentEpisode.value) return;
 		const max = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
 		const requested = Math.min(Math.max(audio.currentTime + delta, 0), max);
-		const next = sponsorBlockSkipTarget(requested, activeSponsorBlockSegments(currentEpisode.value));
+		const next = sponsorBlockSkipTarget(
+			requested,
+			activeSponsorBlockSegments(currentEpisode.value)
+		);
 		audio.currentTime = next;
 		currentTime.value = next;
 	}
@@ -929,7 +939,8 @@ export const usePlayerStore = defineStore('player', () => {
 			currentEpisode.value.sponsorblock_enabled === enabled &&
 			currentEpisode.value.sponsorblock_hash === hash &&
 			JSON.stringify(currentEpisode.value.sponsorblock_segments ?? []) === JSON.stringify(segments)
-		) return;
+		)
+			return;
 		currentEpisode.value = {
 			...currentEpisode.value,
 			sponsorblock_enabled: enabled,

@@ -328,9 +328,7 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		const refreshed = {
 			...ep,
 			sponsorblock_hash: 'hash-b',
-			sponsorblock_segments: [
-				{ start: 10, end: 20, category: 'intro', rejected: false }
-			]
+			sponsorblock_segments: [{ start: 10, end: 20, category: 'intro', rejected: false }]
 		};
 		vi.mocked(api.refreshEpisodeSponsorBlock).mockResolvedValueOnce({
 			ok: true,
@@ -474,9 +472,7 @@ describe('EpisodeCard playback indicators', () => {
 		const wrapper = mountPlaylistCard(
 			episode({
 				sponsorblock_enabled: false,
-				sponsorblock_segments: [
-					{ start: 900, end: 1800, category: 'sponsor', rejected: true }
-				]
+				sponsorblock_segments: [{ start: 900, end: 1800, category: 'sponsor', rejected: true }]
 			})
 		);
 		expect(wrapper.find('[data-testid="episode-sponsorblock-segment"]').exists()).toBe(false);

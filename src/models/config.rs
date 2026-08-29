@@ -1,7 +1,7 @@
-use std::{collections::HashSet, path::Path};
 use serde::Deserialize;
+use std::{collections::HashSet, path::Path};
 use tokio::fs::read_to_string;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 pub const SUPPORTED_SPONSORBLOCK_CATEGORIES: [&str; 8] = [
     "sponsor",
@@ -15,7 +15,7 @@ pub const SUPPORTED_SPONSORBLOCK_CATEGORIES: [&str; 8] = [
 ];
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config{
+pub struct Config {
     pub production: bool,
     pub url: String,
     pub port: u16,
@@ -193,7 +193,10 @@ mod tests {
             "sponsorblock_enabled: true\nsponsorblock_rejected_categories: [intro, sponsor, intro]\n",
         ))
         .unwrap();
-        assert_eq!(normalized.sponsorblock_rejected_categories, ["sponsor", "intro"]);
+        assert_eq!(
+            normalized.sponsorblock_rejected_categories,
+            ["sponsor", "intro"]
+        );
     }
 
     #[test]
@@ -213,10 +216,8 @@ mod tests {
 
     #[test]
     fn sponsorblock_rejects_unknown_categories() {
-        let error = Config::from_yaml(&yaml(
-            "sponsorblock_rejected_categories: [sponser]\n",
-        ))
-        .unwrap_err();
+        let error =
+            Config::from_yaml(&yaml("sponsorblock_rejected_categories: [sponser]\n")).unwrap_err();
         assert!(error.contains("sponser"));
         assert!(error.contains("invalid SponsorBlock category"));
     }

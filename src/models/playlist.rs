@@ -1,4 +1,4 @@
-use super::{Error, Episode};
+use super::{Episode, Error};
 use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct PlaylistItem {
     pub added_at: DateTime<Utc>,
 }
 
- // True when the sqlx error is a SQLite unique-constraint violation. On this
+// True when the sqlx error is a SQLite unique-constraint violation. On this
 // table the only unique constraint is `UNIQUE(episode_id)`, so a violation of
 // the add can only mean the episode is already in the playlist.
 fn is_unique_violation(e: &sqlx::Error) -> bool {
@@ -191,8 +191,11 @@ impl PlaylistItem {
             .await?
             .into_iter()
             .collect();
-        let stored_live: HashSet<i64> =
-            stored.iter().copied().filter(|id| live.contains(id)).collect();
+        let stored_live: HashSet<i64> = stored
+            .iter()
+            .copied()
+            .filter(|id| live.contains(id))
+            .collect();
         let submitted: HashSet<i64> = episode_ids.iter().copied().collect();
         if submitted.len() != episode_ids.len() || submitted != stored_live {
             return Err(Error::new_with_status_code(
@@ -224,10 +227,7 @@ impl PlaylistItem {
 #[cfg(test)]
 mod playlist_tests {
     use super::*;
-    use sqlx::{
-        migrate::Migrator,
-        sqlite::SqlitePoolOptions,
-    };
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::path::Path;
 
     async fn memory_pool() -> SqlitePool {
@@ -315,7 +315,11 @@ mod playlist_tests {
         let ids: Vec<i64> = items.iter().map(|i| i.episode_id).collect();
         let positions: Vec<i64> = items.iter().map(|i| i.position).collect();
         assert_eq!(ids, vec![ep1, ep2, ep3], "append must land at the end");
-        assert_eq!(positions, vec![0, 1, 2], "positions must be contiguous from 0");
+        assert_eq!(
+            positions,
+            vec![0, 1, 2],
+            "positions must be contiguous from 0"
+        );
     }
 
     #[tokio::test]
@@ -329,9 +333,19 @@ mod playlist_tests {
             .expect_err("duplicate must fail");
         assert_eq!(err.status_code(), StatusCode::CONFLICT);
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
-        assert_eq!(items.len(), 1, "duplicate add must leave the playlist unchanged");
-        assert_eq!(items[0].episode_id, ep, "the remaining entry must be the original episode");
-        assert_eq!(items[0].position, 0, "the remaining entry must keep its original position");
+        assert_eq!(
+            items.len(),
+            1,
+            "duplicate add must leave the playlist unchanged"
+        );
+        assert_eq!(
+            items[0].episode_id, ep,
+            "the remaining entry must be the original episode"
+        );
+        assert_eq!(
+            items[0].position, 0,
+            "the remaining entry must keep its original position"
+        );
     }
 
     #[tokio::test]
@@ -343,13 +357,19 @@ mod playlist_tests {
         let ep3 = insert_episode(&pool, channel, "plrem3").await;
         add_all(&pool, &[ep1, ep2, ep3]).await;
 
-        let removed = PlaylistItem::remove(&pool, ep2).await.expect("remove middle");
+        let removed = PlaylistItem::remove(&pool, ep2)
+            .await
+            .expect("remove middle");
         assert_eq!(removed.episode_id, ep2);
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
         let ids: Vec<i64> = items.iter().map(|i| i.episode_id).collect();
         let positions: Vec<i64> = items.iter().map(|i| i.position).collect();
         assert_eq!(ids, vec![ep1, ep3], "relative order must be kept");
-        assert_eq!(positions, vec![0, 1], "positions must be contiguous after removal");
+        assert_eq!(
+            positions,
+            vec![0, 1],
+            "positions must be contiguous after removal"
+        );
     }
 
     #[tokio::test]
@@ -377,8 +397,14 @@ mod playlist_tests {
         tx.commit().await.expect("commit transaction");
 
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
-        assert_eq!(items.iter().map(|item| item.episode_id).collect::<Vec<_>>(), vec![ep1, ep3]);
-        assert_eq!(items.iter().map(|item| item.position).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(
+            items.iter().map(|item| item.episode_id).collect::<Vec<_>>(),
+            vec![ep1, ep3]
+        );
+        assert_eq!(
+            items.iter().map(|item| item.position).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[tokio::test]
@@ -436,7 +462,11 @@ mod playlist_tests {
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
         let ids: Vec<i64> = items.iter().map(|i| i.episode_id).collect();
         let positions: Vec<i64> = items.iter().map(|i| i.position).collect();
-        assert_eq!(ids, vec![ep3, ep1, ep2], "stored order must match the submission");
+        assert_eq!(
+            ids,
+            vec![ep3, ep1, ep2],
+            "stored order must match the submission"
+        );
         assert_eq!(positions, vec![0, 1, 2]);
     }
 
@@ -479,7 +509,11 @@ mod playlist_tests {
             .expect("reorder over an orphaned row");
         let items = PlaylistItem::read_all(&pool).await.expect("read_all");
         let ids: Vec<i64> = items.iter().map(|i| i.episode_id).collect();
-        assert_eq!(ids, vec![ep3, ep1], "surviving ids keep the submitted order");
+        assert_eq!(
+            ids,
+            vec![ep3, ep1],
+            "surviving ids keep the submitted order"
+        );
         assert_eq!(items.len(), 2, "the orphan row must be dropped");
     }
 
@@ -494,7 +528,11 @@ mod playlist_tests {
         let episodes = PlaylistItem::read_episodes_with_channels(&pool)
             .await
             .expect("join read");
-        assert_eq!(episodes.len(), 2, "episodes must be returned in stored order");
+        assert_eq!(
+            episodes.len(),
+            2,
+            "episodes must be returned in stored order"
+        );
         assert_eq!(
             episodes.iter().map(|e| e.id).collect::<Vec<_>>(),
             vec![ep1, ep2]

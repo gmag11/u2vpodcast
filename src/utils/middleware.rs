@@ -10,34 +10,18 @@ use actix_session::SessionExt;
 use actix_web::{
     body::{BoxBody, MessageBody},
     dev::{Payload, Service, ServiceRequest, ServiceResponse, Transform},
-    http::{
-        header::WWW_AUTHENTICATE,
-        StatusCode,
-    },
+    http::{header::WWW_AUTHENTICATE, StatusCode},
     web::Data,
-    Error,
-    FromRequest,
-    HttpResponse,
+    Error, FromRequest, HttpResponse,
 };
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-use crate::models::{
-    AppState,
-    CustomResponse,
-    User,
-    from_session,
-};
-use crate::utils::{
-    USER_ID_KEY,
-    USER_NAME_KEY,
-    USER_ROLE_KEY,
-    USER_ACTIVE_KEY,
-};
+use crate::models::{from_session, AppState, CustomResponse, User};
+use crate::utils::{USER_ACTIVE_KEY, USER_ID_KEY, USER_NAME_KEY, USER_ROLE_KEY};
 
-type BoxFuture =
-    Pin<Box<dyn Future<Output = Result<ServiceResponse<BoxBody>, Error>>>>;
+type BoxFuture = Pin<Box<dyn Future<Output = Result<ServiceResponse<BoxBody>, Error>>>>;
 
 // Revalidates a session claim set against the current `users` table on every
 // request. A cookie that resolves to a missing or deactivated user is rejected
@@ -107,7 +91,9 @@ where
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let session = req.get_session();
-        let pool = req.app_data::<Data<AppState>>().map(|data| data.pool.clone());
+        let pool = req
+            .app_data::<Data<AppState>>()
+            .map(|data| data.pool.clone());
         let service = Rc::clone(&self.service);
         Box::pin(async move {
             let valid = match pool {

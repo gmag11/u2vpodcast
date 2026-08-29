@@ -164,18 +164,14 @@ describe('SponsorBlock playback', () => {
 			{ left: 95, width: 5, category: 'outro' }
 		]);
 		expect(
-			sponsorBlockTimelineMarkers(0, [
-				{ start: 1, end: 2, category: 'sponsor', rejected: true }
-			])
+			sponsorBlockTimelineMarkers(0, [{ start: 1, end: 2, category: 'sponsor', rejected: true }])
 		).toEqual([]);
 	});
 
 	it('skips on timeupdate and explicit seek using the original timeline', async () => {
 		const player = usePlayerStore();
 		const item = episode(1);
-		item.sponsorblock_segments = [
-			{ start: 120, end: 150, category: 'sponsor', rejected: true }
-		];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
 		item.sponsorblock_hash = 'hash-a';
 		await player.play(item);
 		const audio = MockAudioElement.instances[0];
@@ -216,9 +212,7 @@ describe('SponsorBlock playback', () => {
 		const player = usePlayerStore();
 		const item = episode(1);
 		item.sponsorblock_hash = 'hash-a';
-		item.sponsorblock_segments = [
-			{ start: 10, end: 20, category: 'intro', rejected: false }
-		];
+		item.sponsorblock_segments = [{ start: 10, end: 20, category: 'intro', rejected: false }];
 		await player.play(item);
 		const audio = MockAudioElement.instances[0];
 		const source = audio.src;
@@ -227,18 +221,14 @@ describe('SponsorBlock playback', () => {
 		player.applySponsorBlockSnapshot({
 			...item,
 			sponsorblock_hash: 'hash-b',
-			sponsorblock_segments: [
-				{ start: 10, end: 25, category: 'intro', rejected: false }
-			]
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: false }]
 		});
 		expect(player.currentEpisode?.sponsorblock_segments?.[0].end).toBe(25);
 
 		player.applySponsorBlockSnapshot({
 			...item,
 			sponsorblock_hash: 'hash-b',
-			sponsorblock_segments: [
-				{ start: 10, end: 25, category: 'intro', rejected: true }
-			]
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: true }]
 		});
 		expect(player.currentEpisode?.sponsorblock_segments?.[0].rejected).toBe(true);
 

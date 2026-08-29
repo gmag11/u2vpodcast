@@ -31,6 +31,6 @@
 
 ## 6. Integrated Verification
 
-- [ ] 6.1 Run frontend formatting/linting, type checking, and the focused SponsorBlock component/store test suites; verify all commands complete successfully.
+- [x] 6.1 Run frontend formatting/linting, type checking, and the focused SponsorBlock component/store test suites; verify all commands complete successfully.
 - [ ] 6.2 Run formatting plus focused Rust configuration, SponsorBlock model, reconciliation, handler, and migration tests, then run the full Rust test suite on Linux; verify all checks complete successfully without changing Unix-specific tests for Windows.
 - [ ] 6.3 Exercise the playlist in desktop and mobile browser viewports with SponsorBlock disabled, then enabled with sponsor, non-sponsor rejected, and non-rejected segments; verify the disabled UI has no SponsorBlock controls, markers, or skips and the enabled UI renders correctly and skips only rejected intervals.

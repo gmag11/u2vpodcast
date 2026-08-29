@@ -1,9 +1,5 @@
-use sqlx::{
-    Pool,
-    Sqlite,
-};
 use super::config::Config;
-
+use sqlx::{Pool, Sqlite};
 
 #[derive(Debug, Clone)]
 pub struct AppState {

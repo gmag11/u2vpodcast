@@ -1,7 +1,11 @@
 use super::Error;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{query, sqlite::{SqlitePool, SqliteRow}, Row};
+use sqlx::{
+    query,
+    sqlite::{SqlitePool, SqliteRow},
+    Row,
+};
 
 fn default_category() -> String {
     "sponsor".to_string()
@@ -19,7 +23,11 @@ pub struct SponsorBlockSegment {
 
 impl SponsorBlockSegment {
     pub fn new(start: f64, end: f64, category: &str) -> Self {
-        Self { start, end, category: category.to_string() }
+        Self {
+            start,
+            end,
+            category: category.to_string(),
+        }
     }
 }
 
@@ -92,8 +100,9 @@ impl SponsorBlockCache {
         processed_filename: Option<&str>,
         processed_duration: Option<f64>,
     ) -> Result<Self, Error> {
-        let segments_json = serde_json::to_string(segments)
-            .map_err(|error| Error::default(&format!("serialize SponsorBlock snapshot: {error}")))?;
+        let segments_json = serde_json::to_string(segments).map_err(|error| {
+            Error::default(&format!("serialize SponsorBlock snapshot: {error}"))
+        })?;
         let sql = "INSERT INTO sponsorblock_cache (
                        episode_id, segments_json, snapshot_hash, processing_hash, checked_at,
                        processed_filename, processed_duration, last_error, last_error_at
@@ -127,15 +136,17 @@ impl SponsorBlockCache {
         episode_id: i64,
         error: &str,
     ) -> Result<Option<Self>, Error> {
-        query("UPDATE sponsorblock_cache SET last_error = $1, last_error_at = $2 \
-               WHERE episode_id = $3 RETURNING *")
-            .bind(error)
-            .bind(Utc::now())
-            .bind(episode_id)
-            .map(Self::from_row)
-            .fetch_optional(pool)
-            .await
-            .map_err(Into::into)
+        query(
+            "UPDATE sponsorblock_cache SET last_error = $1, last_error_at = $2 \
+               WHERE episode_id = $3 RETURNING *",
+        )
+        .bind(error)
+        .bind(Utc::now())
+        .bind(episode_id)
+        .map(Self::from_row)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
     }
 }
 
@@ -153,8 +164,15 @@ mod tests {
             .await
             .expect("memory pool");
         Migrator::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
-            .await.expect("load migrations").run(&pool).await.expect("run migrations");
-        query("PRAGMA foreign_keys = ON").execute(&pool).await.expect("enable foreign keys");
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .expect("enable foreign keys");
         let now = Utc::now();
         let channel_id: i64 = sqlx::query_scalar(
             "INSERT INTO channels (url, title, slug, active, description, image, first, max, created_at, updated_at) \
@@ -169,39 +187,66 @@ mod tests {
 
     #[test]
     fn reads_legacy_and_categorized_segment_json() {
-        let legacy: Vec<SponsorBlockSegment> = serde_json::from_str(r#"[{"start":10,"end":20}]"#).unwrap();
+        let legacy: Vec<SponsorBlockSegment> =
+            serde_json::from_str(r#"[{"start":10,"end":20}]"#).unwrap();
         assert_eq!(legacy, [SponsorBlockSegment::new(10.0, 20.0, "sponsor")]);
         let legacy_api = legacy[0].for_api(["sponsor"].contains(&legacy[0].category.as_str()));
         assert_eq!(legacy_api.category, "sponsor");
         assert!(legacy_api.rejected);
-        let categorized: Vec<SponsorBlockSegment> = serde_json::from_str(
-            r#"[{"start":10,"end":20,"category":"intro"}]"#,
-        ).unwrap();
+        let categorized: Vec<SponsorBlockSegment> =
+            serde_json::from_str(r#"[{"start":10,"end":20,"category":"intro"}]"#).unwrap();
         assert_eq!(categorized, [SponsorBlockSegment::new(10.0, 20.0, "intro")]);
     }
 
     #[tokio::test]
     async fn distinguishes_unchecked_empty_and_non_empty_snapshots() {
         let (pool, channel_id, episode_id) = fixture().await;
-        assert_eq!(SponsorBlockCache::read(&pool, episode_id).await.unwrap(), None);
+        assert_eq!(
+            SponsorBlockCache::read(&pool, episode_id).await.unwrap(),
+            None
+        );
 
-        SponsorBlockCache::upsert_success(&pool, episode_id, &[], "empty-hash", "empty-processing", None, None)
-            .await.expect("store empty snapshot");
-        let empty = SponsorBlockCache::read(&pool, episode_id).await.unwrap().unwrap();
+        SponsorBlockCache::upsert_success(
+            &pool,
+            episode_id,
+            &[],
+            "empty-hash",
+            "empty-processing",
+            None,
+            None,
+        )
+        .await
+        .expect("store empty snapshot");
+        let empty = SponsorBlockCache::read(&pool, episode_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(empty.segments.is_empty());
         assert_eq!(empty.processing_hash.as_deref(), Some("empty-processing"));
 
         let segments = [SponsorBlockSegment::new(10.0, 20.0, "intro")];
         SponsorBlockCache::upsert_success(
-            &pool, episode_id, &segments, "non-empty-hash", "processing-hash",
-            Some("video-id.sponsorblock.nonempty.mp3"), Some(590.0),
-        ).await.expect("store non-empty snapshot");
-        let mut episodes = Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap();
+            &pool,
+            episode_id,
+            &segments,
+            "non-empty-hash",
+            "processing-hash",
+            Some("video-id.sponsorblock.nonempty.mp3"),
+            Some(590.0),
+        )
+        .await
+        .expect("store non-empty snapshot");
+        let mut episodes = Episode::read_episodes_for_channel(&pool, channel_id)
+            .await
+            .unwrap();
         episodes[0].apply_sponsorblock_config(true, &["intro".to_string()]);
         assert!(episodes[0].sponsorblock_enabled);
         assert_eq!(episodes[0].sponsorblock_segments[0].category, "intro");
         assert!(episodes[0].sponsorblock_segments[0].rejected);
-        assert_eq!(episodes[0].sponsorblock_hash.as_deref(), Some("non-empty-hash"));
+        assert_eq!(
+            episodes[0].sponsorblock_hash.as_deref(),
+            Some("non-empty-hash")
+        );
         let payload = serde_json::to_value(&episodes[0]).unwrap();
         assert_eq!(
             payload["sponsorblock_segments"][0],
@@ -217,9 +262,25 @@ mod tests {
     #[tokio::test]
     async fn cache_row_is_deleted_with_episode() {
         let (pool, _, episode_id) = fixture().await;
-        SponsorBlockCache::upsert_success(&pool, episode_id, &[], "empty-hash", "empty-processing", None, None)
-            .await.expect("store snapshot");
-        query("DELETE FROM episodes WHERE id = $1").bind(episode_id).execute(&pool).await.expect("delete episode");
-        assert_eq!(SponsorBlockCache::read(&pool, episode_id).await.unwrap(), None);
+        SponsorBlockCache::upsert_success(
+            &pool,
+            episode_id,
+            &[],
+            "empty-hash",
+            "empty-processing",
+            None,
+            None,
+        )
+        .await
+        .expect("store snapshot");
+        query("DELETE FROM episodes WHERE id = $1")
+            .bind(episode_id)
+            .execute(&pool)
+            .await
+            .expect("delete episode");
+        assert_eq!(
+            SponsorBlockCache::read(&pool, episode_id).await.unwrap(),
+            None
+        );
     }
 }

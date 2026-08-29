@@ -1,38 +1,16 @@
 use actix_web::http::StatusCode;
-use serde::{
-    Serialize,
-    Deserialize
-};
-use std::fmt::{
-    self,
-    Display
-};
-use tracing::{
-    info,
-    debug,
-    warn,
-};
-use chrono::{
-    DateTime,
-    Utc,
-};
+use chrono::{DateTime, Utc};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use sqlx::{
-    sqlite::{
-        SqlitePool,
-        SqliteRow
-    },
     query,
+    sqlite::{SqlitePool, SqliteRow},
     Row,
 };
+use std::fmt::{self, Display};
+use tracing::{debug, info, warn};
 
-use super::{
-    Error,
-    Episode,
-    PlaylistItem,
-    YTInfo,
-    cache_image,
-};
+use super::{cache_image, Episode, Error, PlaylistItem, YTInfo};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Channel {
@@ -94,10 +72,10 @@ fn slugify(title: &str) -> String {
     slug.trim_matches('_').to_string()
 }
 
-impl Channel{
-    fn from_row(row: SqliteRow) -> Self{
+impl Channel {
+    fn from_row(row: SqliteRow) -> Self {
         info!("from_row");
-        Self{
+        Self {
             id: row.get("id"),
             url: row.get("url"),
             title: row.get("title"),
@@ -116,7 +94,7 @@ impl Channel{
         }
     }
 
-    pub async fn new(pool: &SqlitePool, channel: NewChannel) -> Result<Self, Error>{
+    pub async fn new(pool: &SqlitePool, channel: NewChannel) -> Result<Self, Error> {
         info!("new");
         if channel.max < 1 {
             return Err(Error::new_with_status_code(
@@ -126,7 +104,7 @@ impl Channel{
         }
         let created_at = Utc::now();
         let updated_at = created_at;
-        let ytinfo = match YTInfo::new(&channel.url).await{
+        let ytinfo = match YTInfo::new(&channel.url).await {
             Ok(ytinfo) => ytinfo,
             Err(_) => YTInfo::default(),
         };
@@ -205,10 +183,7 @@ impl Channel{
                         .map_err(|e| Error::default(&e.to_string()))?;
                 }
                 Ok(_) => {}
-                Err(e) => warn!(
-                    "Cant cache image for new channel {}: {}",
-                    channel_row.id, e
-                ),
+                Err(e) => warn!("Cant cache image for new channel {}: {}", channel_row.id, e),
             }
         }
         Ok(channel_row)
@@ -244,7 +219,7 @@ impl Channel{
         }
     }
 
-    pub async fn read_by_slug(pool: &SqlitePool, slug: &str) -> Result<Self, Error>{
+    pub async fn read_by_slug(pool: &SqlitePool, slug: &str) -> Result<Self, Error> {
         info!("read_by_slug");
         let sql = "SELECT * FROM channels WHERE slug = $1";
         query(sql)
@@ -255,15 +230,15 @@ impl Channel{
             .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
     }
 
-    pub async fn read_by_id_or_slug(pool: &SqlitePool, key: &str) -> Result<Self, Error>{
+    pub async fn read_by_id_or_slug(pool: &SqlitePool, key: &str) -> Result<Self, Error> {
         info!("read_by_id_or_slug");
-        match key.parse::<i64>(){
+        match key.parse::<i64>() {
             Ok(id) => Self::read(pool, id).await,
             Err(_) => Self::read_by_slug(pool, key).await,
         }
     }
 
-    pub async fn count_by_slug(pool: &SqlitePool, slug: &str) -> Result<i64, Error>{
+    pub async fn count_by_slug(pool: &SqlitePool, slug: &str) -> Result<i64, Error> {
         let sql = "SELECT count(*) FROM channels WHERE slug = $1";
         query(sql)
             .bind(slug)
@@ -273,7 +248,7 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
-    pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
+    pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error> {
         info!("read");
         let sql = "SELECT * FROM channels WHERE id = $1";
         query(sql)
@@ -284,7 +259,7 @@ impl Channel{
             .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
     }
 
-    pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+    pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error> {
         info!("read_all");
         let sql = "SELECT c.*, e.last_date FROM channels c \
                    LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
@@ -303,7 +278,7 @@ impl Channel{
     // channel list and the slug migration both need *all* channels, inactive
     // included (otherwise a deactivated channel could not be re-enabled from
     // the UI and would never get its slug backfilled).
-    pub async fn read_active(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+    pub async fn read_active(pool: &SqlitePool) -> Result<Vec<Self>, Error> {
         info!("read_active");
         let sql = "SELECT c.*, e.last_date FROM channels c \
                    LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
@@ -345,7 +320,7 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
-    pub async fn update(pool: &SqlitePool, channel: &UpdateChannel) -> Result<Self, Error>{
+    pub async fn update(pool: &SqlitePool, channel: &UpdateChannel) -> Result<Self, Error> {
         info!("update");
         debug!("{:?}", channel);
         if channel.max < 1 {
@@ -379,7 +354,7 @@ impl Channel{
             .map_err(|e| e.into())
     }
 
-    pub async fn update_image(pool: &SqlitePool, id: i64, url: &str) -> Result<Self, Error>{
+    pub async fn update_image(pool: &SqlitePool, id: i64, url: &str) -> Result<Self, Error> {
         info!("update_image");
         let channel = Self::read(pool, id).await?;
         Self::refresh_image_inner(pool, &channel, url).await
@@ -395,7 +370,7 @@ impl Channel{
         pool: &SqlitePool,
         channel: &Channel,
         url: &str,
-    ) -> Result<Self, Error>{
+    ) -> Result<Self, Error> {
         let ytinfo = YTInfo::new(url).await?;
         let mut image = channel.image.clone();
         if !ytinfo.image.is_empty() {
@@ -405,10 +380,7 @@ impl Channel{
                 // Cache write failure: keep the previously stored image and
                 // log; the refresh itself must not fail the operation
                 // (channel-image-cache: "keep the old file, never blank it").
-                Err(e) => warn!(
-                    "Cant cache image for channel {}: {}",
-                    channel.id, e
-                ),
+                Err(e) => warn!("Cant cache image for channel {}: {}", channel.id, e),
             }
         }
         let updated_at = Utc::now();
@@ -426,17 +398,14 @@ impl Channel{
     // Worker-facing image refresh during a channel sync. Best-effort by
     // convention: the caller logs a failure instead of failing the whole sync,
     // and the previous stored image is kept (refresh_image_inner semantics).
-    pub async fn refresh_cached_image(
-        pool: &SqlitePool,
-        channel: &Channel,
-    ) -> Result<(), Error> {
+    pub async fn refresh_cached_image(pool: &SqlitePool, channel: &Channel) -> Result<(), Error> {
         info!("refresh_cached_image");
         Self::refresh_image_inner(pool, channel, &channel.url)
             .await
             .map(|_| ())
     }
 
-    pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
+    pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error> {
         info!("delete");
         let mut tx = pool.begin().await?;
         PlaylistItem::purge_for_channel(&mut tx, id).await?;
@@ -454,14 +423,14 @@ impl Channel{
         Ok(channel)
     }
 
-    pub async fn migrate_slugs(pool: &SqlitePool, audio_folder: &str) -> Result<(), Error>{
+    pub async fn migrate_slugs(pool: &SqlitePool, audio_folder: &str) -> Result<(), Error> {
         info!("migrate_slugs");
         let channels = Self::read_all(pool).await?;
-        for channel in channels.as_slice(){
-            if channel.slug.is_empty(){
+        for channel in channels.as_slice() {
+            if channel.slug.is_empty() {
                 let base_slug = slugify(&channel.title);
                 let mut slug = Self::unique_slug(pool, &base_slug).await;
-                if slug.is_empty(){
+                if slug.is_empty() {
                     slug = format!("channel-{}", channel.id);
                 }
                 let sql = "UPDATE channels SET slug = $1 WHERE id = $2";
@@ -475,14 +444,20 @@ impl Channel{
             }
         }
         let channels = Self::read_all(pool).await?;
-        for channel in channels.as_slice(){
-            if channel.slug.is_empty(){
+        for channel in channels.as_slice() {
+            if channel.slug.is_empty() {
                 continue;
             }
             let from = format!("{audio_folder}/{}", channel.id);
             let to = format!("{audio_folder}/{}", channel.slug);
-            let from_exists = tokio::fs::metadata(&from).await.map(|_| true).unwrap_or(false);
-            let to_exists = tokio::fs::metadata(&to).await.map(|_| true).unwrap_or(false);
+            let from_exists = tokio::fs::metadata(&from)
+                .await
+                .map(|_| true)
+                .unwrap_or(false);
+            let to_exists = tokio::fs::metadata(&to)
+                .await
+                .map(|_| true)
+                .unwrap_or(false);
             if from_exists && !to_exists {
                 tokio::fs::rename(&from, &to)
                     .await
@@ -518,7 +493,6 @@ impl Channel{
     }
 
     pub async fn total(pool: &SqlitePool, channel_id: i64) -> i64 {
-
         let sql = "SELECT count(*) FROM episodes WHERE channel_id = $1";
         match query(sql)
             .bind(channel_id)
@@ -534,7 +508,7 @@ impl Channel{
         }
     }
 
-    pub async fn episode_exists(&self, pool: &SqlitePool, yt_id: &str) -> bool{
+    pub async fn episode_exists(&self, pool: &SqlitePool, yt_id: &str) -> bool {
         Episode::exists(pool, self.id, yt_id).await
     }
 
@@ -555,7 +529,7 @@ impl Channel{
         id: i64,
         ok: bool,
         error: Option<String>,
-    ) -> Result<(), Error>{
+    ) -> Result<(), Error> {
         let sql = "UPDATE channels SET last_sync_at = $1, last_sync_ok = $2, \
                    last_sync_error = $3 WHERE id = $4";
         query(sql)
@@ -573,10 +547,7 @@ impl Channel{
 #[cfg(test)]
 mod channel_pagination_tests {
     use super::*;
-    use sqlx::{
-        migrate::Migrator,
-        sqlite::SqlitePoolOptions,
-    };
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::path::Path;
 
     async fn memory_pool() -> SqlitePool {
@@ -650,11 +621,22 @@ mod channel_pagination_tests {
         let pool = memory_pool().await;
         let mut ids = Vec::new();
         for i in 1..=3 {
-            ids.push(insert_channel(&pool, &format!("https://example.com/c{i}"), &format!("Channel {i}")).await);
+            ids.push(
+                insert_channel(
+                    &pool,
+                    &format!("https://example.com/c{i}"),
+                    &format!("Channel {i}"),
+                )
+                .await,
+            );
         }
 
-        let page1 = Channel::read_with_pagination(&pool, 1, 2).await.expect("page 1");
-        let page2 = Channel::read_with_pagination(&pool, 2, 2).await.expect("page 2");
+        let page1 = Channel::read_with_pagination(&pool, 1, 2)
+            .await
+            .expect("page 1");
+        let page2 = Channel::read_with_pagination(&pool, 2, 2)
+            .await
+            .expect("page 2");
 
         assert_eq!(page1.len(), 2);
         assert_eq!(page2.len(), 1);
@@ -662,7 +644,13 @@ mod channel_pagination_tests {
         let ids1: std::collections::HashSet<i64> = page1.iter().map(|c| c.id).collect();
         let ids2: std::collections::HashSet<i64> = page2.iter().map(|c| c.id).collect();
         assert!(ids1.is_disjoint(&ids2), "pages must not overlap");
-        assert_eq!(ids1.union(&ids2).cloned().collect::<std::collections::HashSet<_>>().len(), 3);
+        assert_eq!(
+            ids1.union(&ids2)
+                .cloned()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
     }
 
     #[tokio::test]
@@ -672,8 +660,12 @@ mod channel_pagination_tests {
         insert_channel(&pool, "https://example.com/c2", "Channel 2").await;
 
         // page 0 and page -3 must behave as page 1, never a negative OFFSET.
-        let p0 = Channel::read_with_pagination(&pool, 0, 2).await.expect("page 0");
-        let pneg = Channel::read_with_pagination(&pool, -3, 2).await.expect("negative page");
+        let p0 = Channel::read_with_pagination(&pool, 0, 2)
+            .await
+            .expect("page 0");
+        let pneg = Channel::read_with_pagination(&pool, -3, 2)
+            .await
+            .expect("negative page");
         assert_eq!(p0.len(), 2);
         assert_eq!(pneg.len(), 2);
     }
@@ -681,16 +673,21 @@ mod channel_pagination_tests {
     #[tokio::test]
     async fn delete_removes_channel_playlist_items_and_reindexes() {
         let pool = memory_pool().await;
-        let removed_channel = insert_channel(&pool, "https://example.com/removed", "Removed Channel").await;
+        let removed_channel =
+            insert_channel(&pool, "https://example.com/removed", "Removed Channel").await;
         let kept_channel = insert_channel(&pool, "https://example.com/kept", "Kept Channel").await;
         let removed_first = insert_episode(&pool, removed_channel, "del111").await;
         let kept = insert_episode(&pool, kept_channel, "keep22").await;
         let removed_last = insert_episode(&pool, removed_channel, "del333").await;
         for episode_id in [removed_first, kept, removed_last] {
-            PlaylistItem::add(&pool, episode_id).await.expect("add playlist item");
+            PlaylistItem::add(&pool, episode_id)
+                .await
+                .expect("add playlist item");
         }
 
-        Channel::delete(&pool, removed_channel).await.expect("delete channel");
+        Channel::delete(&pool, removed_channel)
+            .await
+            .expect("delete channel");
 
         let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
         assert_eq!(items.len(), 1);
@@ -701,13 +698,17 @@ mod channel_pagination_tests {
     #[tokio::test]
     async fn delete_channel_without_playlist_items_leaves_playlist_unchanged() {
         let pool = memory_pool().await;
-        let removed_channel = insert_channel(&pool, "https://example.com/removed-empty", "Removed Empty").await;
-        let kept_channel = insert_channel(&pool, "https://example.com/kept-full", "Kept Full").await;
+        let removed_channel =
+            insert_channel(&pool, "https://example.com/removed-empty", "Removed Empty").await;
+        let kept_channel =
+            insert_channel(&pool, "https://example.com/kept-full", "Kept Full").await;
         insert_episode(&pool, removed_channel, "gone11").await;
         let kept = insert_episode(&pool, kept_channel, "stay22").await;
         PlaylistItem::add(&pool, kept).await.expect("add kept item");
 
-        Channel::delete(&pool, removed_channel).await.expect("delete channel");
+        Channel::delete(&pool, removed_channel)
+            .await
+            .expect("delete channel");
 
         let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
         assert_eq!(items.len(), 1);
@@ -715,5 +716,3 @@ mod channel_pagination_tests {
         assert_eq!(items[0].position, 0);
     }
 }
-
-

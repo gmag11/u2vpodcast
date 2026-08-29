@@ -73,5 +73,8 @@ fn no_recursive_from_impl_bodies() {
             );
         }
     }
-    assert!(checked > 0, "no From impls found to check; guard is vacuous");
+    assert!(
+        checked > 0,
+        "no From impls found to check; guard is vacuous"
+    );
 }

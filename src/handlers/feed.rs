@@ -51,7 +51,9 @@ async fn get_global_feed(data: Data<AppState>) -> impl Responder {
             );
             let link = format!("{url}/rss");
             let itunes = ITunesChannelExtensionBuilder::default()
-                .summary(Some("All episodes from all channels, newest first".to_string()))
+                .summary(Some(
+                    "All episodes from all channels, newest first".to_string(),
+                ))
                 .build();
             let channel_builder = ChannelBuilder::default()
                 .title("All Episodes")
@@ -248,8 +250,16 @@ mod tests {
     #[actix_web::test]
     async fn simulated_feeds_select_processed_media_and_fallbacks() {
         let (pool, channel_id, root) = fixture().await;
-        let episodes = Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap();
-        let by_id = |yt_id: &str| episodes.iter().find(|episode| episode.yt_id == yt_id).unwrap().id;
+        let episodes = Episode::read_episodes_for_channel(&pool, channel_id)
+            .await
+            .unwrap();
+        let by_id = |yt_id: &str| {
+            episodes
+                .iter()
+                .find(|episode| episode.yt_id == yt_id)
+                .unwrap()
+                .id
+        };
         SponsorBlockCache::upsert_success(
             &pool,
             by_id("processed"),
@@ -262,10 +272,16 @@ mod tests {
         .await
         .unwrap();
         SponsorBlockCache::upsert_success(
-            &pool, by_id("empty"), &[], "empty-hash", "empty-hash", None, None,
+            &pool,
+            by_id("empty"),
+            &[],
+            "empty-hash",
+            "empty-hash",
+            None,
+            None,
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
         SponsorBlockCache::upsert_success(
             &pool,
             by_id("missing"),
@@ -283,16 +299,36 @@ mod tests {
         )
         .unwrap();
 
-        let channel_episodes = Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap();
+        let channel_episodes = Episode::read_episodes_for_channel(&pool, channel_id)
+            .await
+            .unwrap();
         let items = channel_items(
-            "http://backend", &root, "channel_slug", channel_episodes, true,
+            "http://backend",
+            &root,
+            "channel_slug",
+            channel_episodes,
+            true,
         );
-        let processed = items.iter().find(|item| item.guid().unwrap().value() == "processed").unwrap();
-        assert!(processed.enclosure().unwrap().url().ends_with("/processed.sponsorblock.abcdef.mp3"));
+        let processed = items
+            .iter()
+            .find(|item| item.guid().unwrap().value() == "processed")
+            .unwrap();
+        assert!(processed
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.sponsorblock.abcdef.mp3"));
         assert_eq!(processed.itunes_ext().unwrap().duration(), Some("540"));
         for yt_id in ["empty", "missing"] {
-            let item = items.iter().find(|item| item.guid().unwrap().value() == yt_id).unwrap();
-            assert!(item.enclosure().unwrap().url().ends_with(&format!("/{yt_id}.mp3")));
+            let item = items
+                .iter()
+                .find(|item| item.guid().unwrap().value() == yt_id)
+                .unwrap();
+            assert!(item
+                .enclosure()
+                .unwrap()
+                .url()
+                .ends_with(&format!("/{yt_id}.mp3")));
             assert_eq!(item.itunes_ext().unwrap().duration(), Some("600"));
         }
 
@@ -303,21 +339,29 @@ mod tests {
             true,
         );
         assert_eq!(global.len(), 3);
-        assert!(global.iter().all(|item| item.title().unwrap().starts_with("Channel title: ")));
+        assert!(global
+            .iter()
+            .all(|item| item.title().unwrap().starts_with("Channel title: ")));
         assert_eq!(processed.guid().unwrap().value(), "processed");
 
         let disabled_channel = channel_items(
             "http://backend",
             &root,
             "channel_slug",
-            Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap(),
+            Episode::read_episodes_for_channel(&pool, channel_id)
+                .await
+                .unwrap(),
             false,
         );
         let disabled = disabled_channel
             .iter()
             .find(|item| item.guid().unwrap().value() == "processed")
             .unwrap();
-        assert!(disabled.enclosure().unwrap().url().ends_with("/processed.mp3"));
+        assert!(disabled
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.mp3"));
         assert_eq!(disabled.itunes_ext().unwrap().duration(), Some("600"));
 
         let disabled_global = global_items(
@@ -330,7 +374,11 @@ mod tests {
             .iter()
             .find(|item| item.guid().unwrap().value() == "processed")
             .unwrap();
-        assert!(disabled.enclosure().unwrap().url().ends_with("/processed.mp3"));
+        assert!(disabled
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.mp3"));
         assert_eq!(disabled.itunes_ext().unwrap().duration(), Some("600"));
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -1,55 +1,38 @@
 use actix_session::Session;
-use serde::{Serialize, Deserialize};
 use actix_web::{
-    Responder,
-    http::StatusCode,
-    web::{
-        Data,
-        Json,
-        self,
-    },
-    post,
     get,
+    http::StatusCode,
+    post,
+    web::{self, Data, Json},
+    Responder,
 };
-use tracing::{
-    info,
-    debug,
-    error,
-};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info};
 
 use super::{
-    AppState,
     super::{
+        models::{CResponse, Error, Param},
         utils::worker::do_the_work,
-        models::{
-            CResponse,
-            Error,
-            Param,
-        },
     },
+    AppState,
 };
 
 #[derive(Serialize, Deserialize)]
-struct KeyValue{
+struct KeyValue {
     key: String,
-    value: String
+    value: String,
 }
 
 // Guards against stacking manual full syncs (non-blocking-update-paths): the
 // scheduled worker loop is exempt and manages its own cadence.
-static SYNC_IN_PROGRESS: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static SYNC_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-pub fn api_options(cfg: &mut web::ServiceConfig){
-    cfg.service(update)
-        .service(post_options);
+pub fn api_options(cfg: &mut web::ServiceConfig) {
+    cfg.service(update).service(post_options);
 }
 
 #[get("/options/update/")]
-async fn update(
-    data: Data<AppState>,
-    session: Session,
-) -> impl Responder {
+async fn update(data: Data<AppState>, session: Session) -> impl Responder {
     info!("update");
     // Non-blocking: run the full refresh in the background and return
     // immediately. Completion is observable through per-channel sync status
@@ -81,20 +64,20 @@ async fn post_options(
 ) -> impl Responder {
     info!("post_options");
     let mut response_pairs = Vec::new();
-    for pair in pairs.into_inner().as_slice(){
+    for pair in pairs.into_inner().as_slice() {
         match Param::set(&data.pool, &pair.key, &pair.value).await {
             Ok(kv) => {
                 debug!("{:?}", kv);
-                let key = kv.get_key(); 
+                let key = kv.get_key();
                 let value = kv.get_value();
-                response_pairs.push(KeyValue{
+                response_pairs.push(KeyValue {
                     key: key.to_string(),
                     value: value.to_string(),
                 });
-            },
+            }
             Err(e) => {
                 error!("{:?}", e);
-                response_pairs.push(KeyValue{
+                response_pairs.push(KeyValue {
                     key: pair.key.clone(),
                     value: pair.value.clone(),
                 });
