@@ -61,8 +61,9 @@ async fn update(
         ));
     }
     let pool = data.pool.clone();
+    let config = data.config.clone();
     actix_web::rt::spawn(async move {
-        let result = do_the_work(&pool).await;
+        let result = do_the_work(&pool, &config).await;
         SYNC_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
         match result {
             Ok(()) => info!("Manual full sync finished"),

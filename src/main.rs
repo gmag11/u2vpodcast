@@ -308,6 +308,7 @@ async fn main() -> Result<(), Error> {
 
 
     let pool2 = pool.clone();
+    let worker_config = config.clone();
     spawn(async move{
         //let auth = HttpAuthentication::bearer(validator);
         loop {
@@ -317,7 +318,7 @@ async fn main() -> Result<(), Error> {
                 Err(e) => error!("{}", e),
             }
             info!("**** Finish updating yt-dlp ****");
-            match do_the_work(&pool2).await{
+            match do_the_work(&pool2, &worker_config).await{
                 Ok(_) => {},
                 Err(e) => {
                     error!("Error doing the work: {e}");

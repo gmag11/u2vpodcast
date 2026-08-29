@@ -63,27 +63,41 @@ export function parseDurationSeconds(raw: string | null | undefined): number | n
 	return parts.reduce((acc, p) => acc * 60 + p, 0);
 }
 
+function activeSponsorBlockSegments(episode: Episode | null | undefined) {
+	return episode?.sponsorblock_enabled === true ? episode.sponsorblock_segments : undefined;
+}
+
 export function sponsorBlockSkipTarget(
 	seconds: number,
 	segments: SponsorBlockSegment[] | null | undefined
 ): number {
-	const segment = segments?.find(({ start, end }) => seconds >= start && seconds < end);
-	return segment?.end ?? seconds;
+	const rejected = (segments ?? [])
+		.filter(({ start, end, rejected }) => rejected && Number.isFinite(start) && Number.isFinite(end) && end > start)
+		.sort((left, right) => left.start - right.start || left.end - right.end);
+	const merged: Array<{ start: number; end: number }> = [];
+	for (const segment of rejected) {
+		const previous = merged.at(-1);
+		if (previous && segment.start <= previous.end) previous.end = Math.max(previous.end, segment.end);
+		else merged.push({ start: segment.start, end: segment.end });
+	}
+	const interval = merged.find(({ start, end }) => seconds >= start && seconds < end);
+	return interval?.end ?? seconds;
 }
 
 export function sponsorBlockTimelineMarkers(
 	duration: number,
 	segments: SponsorBlockSegment[] | null | undefined
-): Array<{ left: number; width: number }> {
+): Array<{ left: number; width: number; category: string }> {
 	if (!Number.isFinite(duration) || duration <= 0) return [];
-	return (segments ?? []).flatMap(({ start, end }) => {
+	return (segments ?? []).flatMap(({ start, end, category }) => {
 		const clampedStart = Math.min(Math.max(start, 0), duration);
 		const clampedEnd = Math.min(Math.max(end, 0), duration);
 		if (!Number.isFinite(start) || !Number.isFinite(end) || clampedEnd <= clampedStart) return [];
 		return [
 			{
 				left: (clampedStart / duration) * 100,
-				width: ((clampedEnd - clampedStart) / duration) * 100
+				width: ((clampedEnd - clampedStart) / duration) * 100,
+				category
 			}
 		];
 	});
@@ -279,7 +293,7 @@ export const usePlayerStore = defineStore('player', () => {
 		if (audio) {
 			const target = sponsorBlockSkipTarget(
 				audio.currentTime,
-				currentEpisode.value?.sponsorblock_segments
+				activeSponsorBlockSegments(currentEpisode.value)
 			);
 			if (target !== audio.currentTime) audio.currentTime = target;
 			currentTime.value = target;
@@ -368,7 +382,7 @@ export const usePlayerStore = defineStore('player', () => {
 			return;
 		}
 		trace('resume: seek attempt', { target: resumeTarget, at: el.currentTime });
-		const target = sponsorBlockSkipTarget(resumeTarget, current.sponsorblock_segments);
+		const target = sponsorBlockSkipTarget(resumeTarget, activeSponsorBlockSegments(current));
 		el.currentTime = target;
 		currentTime.value = target;
 	}
@@ -890,7 +904,7 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function seek(seconds: number) {
 		if (!audio) return;
-		const target = sponsorBlockSkipTarget(seconds, currentEpisode.value?.sponsorblock_segments);
+		const target = sponsorBlockSkipTarget(seconds, activeSponsorBlockSegments(currentEpisode.value));
 		audio.currentTime = target;
 		currentTime.value = target;
 	}
@@ -901,18 +915,26 @@ export const usePlayerStore = defineStore('player', () => {
 		if (!audio || !currentEpisode.value) return;
 		const max = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
 		const requested = Math.min(Math.max(audio.currentTime + delta, 0), max);
-		const next = sponsorBlockSkipTarget(requested, currentEpisode.value.sponsorblock_segments);
+		const next = sponsorBlockSkipTarget(requested, activeSponsorBlockSegments(currentEpisode.value));
 		audio.currentTime = next;
 		currentTime.value = next;
 	}
 
 	function applySponsorBlockSnapshot(episode: Episode) {
 		if (currentEpisode.value?.id !== episode.id) return;
-		if (currentEpisode.value.sponsorblock_hash === episode.sponsorblock_hash) return;
+		const enabled = episode.sponsorblock_enabled === true;
+		const segments = enabled ? (episode.sponsorblock_segments ?? []) : [];
+		const hash = enabled ? (episode.sponsorblock_hash ?? null) : null;
+		if (
+			currentEpisode.value.sponsorblock_enabled === enabled &&
+			currentEpisode.value.sponsorblock_hash === hash &&
+			JSON.stringify(currentEpisode.value.sponsorblock_segments ?? []) === JSON.stringify(segments)
+		) return;
 		currentEpisode.value = {
 			...currentEpisode.value,
-			sponsorblock_segments: episode.sponsorblock_segments,
-			sponsorblock_hash: episode.sponsorblock_hash
+			sponsorblock_enabled: enabled,
+			sponsorblock_segments: segments,
+			sponsorblock_hash: hash
 		};
 		persistQueue();
 	}

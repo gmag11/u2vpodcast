@@ -25,6 +25,7 @@ pub use config::{
     images_dir,
     ytdlp_path,
     cookies_file,
+    SUPPORTED_SPONSORBLOCK_CATEGORIES,
 };
 pub use param::Param;
 pub use response::{
@@ -49,7 +50,7 @@ pub use episode::{
     EpisodeProgress,
 };
 pub use playlist::PlaylistItem;
-pub use sponsorblock::{SponsorBlockCache, SponsorBlockSegment};
+pub use sponsorblock::{EpisodeSponsorBlockSegment, SponsorBlockCache, SponsorBlockSegment};
 pub use appstate::AppState;
 pub use user::{
     User,

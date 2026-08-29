@@ -1,4 +1,4 @@
-use super::{Error, PlaylistItem, SponsorBlockSegment};
+use super::{Error, EpisodeSponsorBlockSegment, PlaylistItem, SponsorBlockSegment};
 use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,9 @@ pub struct Episode {
     pub listened_at: Option<DateTime<Utc>>,
     pub favorite: bool,
     #[serde(default)]
-    pub sponsorblock_segments: Vec<SponsorBlockSegment>,
+    pub sponsorblock_enabled: bool,
+    #[serde(default)]
+    pub sponsorblock_segments: Vec<EpisodeSponsorBlockSegment>,
     #[serde(default)]
     pub sponsorblock_hash: Option<String>,
     #[serde(skip)]
@@ -65,16 +67,34 @@ fn get_default_empty() -> String {
 }
 
 impl Episode {
-    pub fn selected_media(&self, channel_dir: &Path) -> SelectedEpisodeMedia {
-        if let (Some(filename), Some(duration)) = (
-            self.sponsorblock_processed_filename.as_deref(),
-            self.sponsorblock_processed_duration,
-        ) {
-            if channel_dir.join(filename).is_file() {
-                return SelectedEpisodeMedia {
-                    filename: filename.to_string(),
-                    duration: duration.round().max(0.0).to_string(),
-                };
+    pub fn apply_sponsorblock_config(&mut self, enabled: bool, rejected_categories: &[String]) {
+        self.sponsorblock_enabled = enabled;
+        if !enabled {
+            self.sponsorblock_segments.clear();
+            self.sponsorblock_hash = None;
+            return;
+        }
+        for segment in &mut self.sponsorblock_segments {
+            segment.rejected = rejected_categories.contains(&segment.category);
+        }
+    }
+
+    pub fn selected_media(
+        &self,
+        channel_dir: &Path,
+        sponsorblock_enabled: bool,
+    ) -> SelectedEpisodeMedia {
+        if sponsorblock_enabled {
+            if let (Some(filename), Some(duration)) = (
+                self.sponsorblock_processed_filename.as_deref(),
+                self.sponsorblock_processed_duration,
+            ) {
+                if channel_dir.join(filename).is_file() {
+                    return SelectedEpisodeMedia {
+                        filename: filename.to_string(),
+                        duration: duration.round().max(0.0).to_string(),
+                    };
+                }
             }
         }
         SelectedEpisodeMedia {
@@ -85,13 +105,16 @@ impl Episode {
 
     fn sponsorblock_fields(
         row: &SqliteRow,
-    ) -> (Vec<SponsorBlockSegment>, Option<String>, Option<String>, Option<f64>) {
+    ) -> (Vec<EpisodeSponsorBlockSegment>, Option<String>, Option<String>, Option<f64>) {
         let segments = row
             .try_get::<Option<String>, _>("sponsorblock_segments_json")
             .ok()
             .flatten()
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
+            .and_then(|json| serde_json::from_str::<Vec<SponsorBlockSegment>>(&json).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|segment| segment.for_api(false))
+            .collect();
         let hash = row.try_get("sponsorblock_hash").unwrap_or(None);
         let filename = row.try_get("sponsorblock_processed_filename").unwrap_or(None);
         let duration = row.try_get("sponsorblock_processed_duration").unwrap_or(None);
@@ -117,6 +140,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
             sponsorblock_processed_filename: filename,
@@ -145,6 +169,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
             sponsorblock_processed_filename: filename,
@@ -178,6 +203,7 @@ impl Episode {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
             sponsorblock_processed_filename: None,
@@ -613,6 +639,7 @@ mod episode_update_tests {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
             sponsorblock_processed_filename: None,
@@ -623,7 +650,30 @@ mod episode_update_tests {
     }
 
     #[test]
-    fn selected_media_requires_an_existing_processed_file() {
+    fn sponsorblock_api_projection_uses_current_configuration_and_suppresses_disabled_data() {
+        let mut episode = episode_struct(1, "video-id");
+        episode.sponsorblock_hash = Some("snapshot".to_string());
+        episode.sponsorblock_segments = vec![
+            SponsorBlockSegment::new(10.0, 20.0, "sponsor").for_api(false),
+            SponsorBlockSegment::new(15.0, 25.0, "intro").for_api(false),
+        ];
+
+        episode.apply_sponsorblock_config(true, &["sponsor".to_string()]);
+        assert!(episode.sponsorblock_enabled);
+        assert!(episode.sponsorblock_segments[0].rejected);
+        assert!(!episode.sponsorblock_segments[1].rejected);
+
+        episode.apply_sponsorblock_config(true, &[]);
+        assert!(episode.sponsorblock_segments.iter().all(|segment| !segment.rejected));
+
+        episode.apply_sponsorblock_config(false, &["sponsor".to_string()]);
+        assert!(!episode.sponsorblock_enabled);
+        assert!(episode.sponsorblock_segments.is_empty());
+        assert!(episode.sponsorblock_hash.is_none());
+    }
+
+    #[test]
+    fn selected_media_requires_enablement_and_an_existing_processed_file() {
         let channel_dir = std::env::temp_dir().join(format!(
             "u2vpodcast-selected-media-{}",
             rand::random::<u64>()
@@ -632,7 +682,7 @@ mod episode_update_tests {
         let mut episode = episode_struct(1, "video-id");
 
         assert_eq!(
-            episode.selected_media(&channel_dir),
+            episode.selected_media(&channel_dir, true),
             SelectedEpisodeMedia {
                 filename: "video-id.mp3".to_string(),
                 duration: "00:10:00".to_string(),
@@ -640,12 +690,12 @@ mod episode_update_tests {
         );
 
         episode.sponsorblock_hash = Some("empty-hash".to_string());
-        assert_eq!(episode.selected_media(&channel_dir).filename, "video-id.mp3");
+        assert_eq!(episode.selected_media(&channel_dir, true).filename, "video-id.mp3");
 
         episode.sponsorblock_processed_filename =
             Some("video-id.sponsorblock.abcdef.mp3".to_string());
         episode.sponsorblock_processed_duration = Some(539.6);
-        assert_eq!(episode.selected_media(&channel_dir).filename, "video-id.mp3");
+        assert_eq!(episode.selected_media(&channel_dir, true).filename, "video-id.mp3");
 
         std::fs::write(
             channel_dir.join("video-id.sponsorblock.abcdef.mp3"),
@@ -653,12 +703,14 @@ mod episode_update_tests {
         )
         .expect("write processed fixture");
         assert_eq!(
-            episode.selected_media(&channel_dir),
+            episode.selected_media(&channel_dir, true),
             SelectedEpisodeMedia {
                 filename: "video-id.sponsorblock.abcdef.mp3".to_string(),
                 duration: "540".to_string(),
             }
         );
+        assert_eq!(episode.selected_media(&channel_dir, false).filename, "video-id.mp3");
+        assert_eq!(episode.selected_media(&channel_dir, false).duration, "00:10:00");
         std::fs::remove_dir_all(channel_dir).expect("remove fixture directory");
     }
 

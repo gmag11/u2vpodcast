@@ -26,6 +26,7 @@ use std::time::Duration;
 use super::super::models::{
     Error,
     Channel,
+    Config,
     Episode,
     PlaylistItem,
     Ytdlp,
@@ -67,7 +68,7 @@ impl Drop for ChannelSyncGuard {
     }
 }
 
-pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
+pub async fn do_the_work(pool: &SqlitePool, config: &Config) -> Result<(), Error>{
     let channels = Channel::read_active(pool).await?;
     for channel in channels.as_slice(){
         info!("Processing: {}", channel.url);
@@ -77,8 +78,9 @@ pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
         let pool = pool.clone();
         let url_for_task = channel.url.clone();
         let channel_id = channel.id;
+        let config = config.clone();
         match tokio::spawn(async move {
-            if let Err(e) = update_channel(&pool, channel_id).await {
+            if let Err(e) = update_channel(&pool, channel_id, &config).await {
                 error!("Cant process channel: {url_for_task}. Error: {e}");
             }
         }).await {
@@ -89,7 +91,11 @@ pub async fn do_the_work(pool: &SqlitePool) -> Result<(), Error>{
     Ok(())
 }
 
-pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+pub async fn update_channel(
+    pool: &SqlitePool,
+    channel_id: i64,
+    config: &Config,
+) -> Result<(), Error>{
     let _guard = match ChannelSyncGuard::acquire(channel_id) {
         Some(guard) => guard,
         None => {
@@ -97,7 +103,7 @@ pub async fn update_channel(pool: &SqlitePool, channel_id: i64) -> Result<(), Er
             return Ok(());
         }
     };
-    let (ok, message) = match update_channel_inner(pool, channel_id).await {
+    let (ok, message) = match update_channel_inner(pool, channel_id, config).await {
         Ok(()) => (true, None),
         Err(e) => (false, Some(error_message(e))),
     };
@@ -113,7 +119,11 @@ fn error_message(e: Error) -> String {
     e.to_string()
 }
 
-async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), Error>{
+async fn update_channel_inner(
+    pool: &SqlitePool,
+    channel_id: i64,
+    config: &Config,
+) -> Result<(), Error>{
     let channel = Channel::read(pool, channel_id).await?;
     let ytdlp = Ytdlp::new(ytdlp_path(), cookies_file());
     let folder = audios_dir();
@@ -124,7 +134,9 @@ async fn update_channel_inner(pool: &SqlitePool, channel_id: i64) -> Result<(), 
         &channel,
         folder,
         &window_ids,
+        config.sponsorblock_enabled,
         &SponsorBlockClient::default(),
+        &config.sponsorblock_rejected_categories,
     )
     .await?;
     // Remove transient/orphan files left by interrupted runs (`.part`,
@@ -329,12 +341,23 @@ async fn reconcile_sponsorblock_window(
     channel: &Channel,
     folder: &str,
     window_ids: &HashSet<String>,
+    sponsorblock_enabled: bool,
     client: &SponsorBlockClient,
+    rejected_categories: &[String],
 ) -> Result<(), Error> {
+    if !sponsorblock_enabled {
+        return Ok(());
+    }
     let episodes = Episode::read_episodes_for_channel(pool, channel.id).await?;
     let channel_dir = Path::new(folder).join(&channel.slug);
     for episode in episodes_in_window(&episodes, window_ids) {
-        if let Err(error) = reconcile_episode(pool, client, episode, &channel_dir).await {
+        if let Err(error) = reconcile_episode(
+            pool,
+            client,
+            episode,
+            &channel_dir,
+            rejected_categories,
+        ).await {
             error!(
                 "Cant reconcile SponsorBlock data for episode {}: {}",
                 episode.yt_id, error
@@ -1011,6 +1034,7 @@ mod eviction_tests {
             old_id,
             &[],
             "old-hash",
+            "old-hash",
             Some("old.sponsorblock.active.mp3"),
             Some(500.0),
         )
@@ -1020,6 +1044,7 @@ mod eviction_tests {
             &pool,
             new_id,
             &[],
+            "new-hash",
             "new-hash",
             Some("new.sponsorblock.active.mp3"),
             Some(500.0),
@@ -1093,7 +1118,9 @@ mod eviction_tests {
             &channel,
             &root.to_string_lossy(),
             &window_ids,
+            true,
             &client,
+            &["sponsor".to_string()],
         )
         .await
         .expect("mixed reconciliation completes");
@@ -1104,6 +1131,50 @@ mod eviction_tests {
             .unwrap()
             .expect("later episode persisted");
         assert!(successful.segments.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn disabled_sponsorblock_window_makes_no_request_or_state_change() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let episode_id = insert_episode(&pool, channel_id, "disabled", Utc::now(), false).await;
+        SponsorBlockCache::upsert_success(
+            &pool,
+            episode_id,
+            &[],
+            "snapshot",
+            "processing",
+            Some("disabled.sponsorblock.processing.mp3"),
+            Some(500.0),
+        )
+        .await
+        .unwrap();
+        let before = SponsorBlockCache::read(&pool, episode_id).await.unwrap().unwrap();
+        let channel = Channel::read(&pool, channel_id).await.unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "u2vpodcast-worker-disabled-{}",
+            rand::random::<u64>()
+        ));
+        let channel_dir = root.join(&channel.slug);
+        std::fs::create_dir_all(&channel_dir).unwrap();
+        let derivative = channel_dir.join("disabled.sponsorblock.processing.mp3");
+        std::fs::write(&derivative, b"active").unwrap();
+
+        reconcile_sponsorblock_window(
+            &pool,
+            &channel,
+            &root.to_string_lossy(),
+            &HashSet::from(["disabled".to_string()]),
+            false,
+            &SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(10)),
+            &["sponsor".to_string()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(SponsorBlockCache::read(&pool, episode_id).await.unwrap(), Some(before));
+        assert_eq!(std::fs::read(&derivative).unwrap(), b"active");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

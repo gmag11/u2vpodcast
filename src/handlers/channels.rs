@@ -69,9 +69,10 @@ async fn create(
     match Channel::new(&data.pool, channel.into_inner()).await{
             Ok(channel) => {
                 let pool = data.pool.clone();
+                let config = data.config.clone();
                 let id = channel.id;
                 actix_web::rt::spawn(async move{
-                    if let Err(e) = refresh_channel(&pool, id).await{
+                    if let Err(e) = refresh_channel(&pool, id, &config).await{
                         error!("Cant refresh new channel {}: {}", id, e);
                     }
                 });
@@ -96,9 +97,10 @@ async fn update_episodes(
     match Channel::read_by_id_or_slug(&data.pool, &key).await{
         Ok(channel) => {
             let pool = data.pool.clone();
+            let config = data.config.clone();
             let id = channel.id;
             actix_web::rt::spawn(async move{
-                if let Err(e) = refresh_channel(&pool, id).await{
+                if let Err(e) = refresh_channel(&pool, id, &config).await{
                     error!("Cant refresh channel {}: {}", id, e);
                 }
             });

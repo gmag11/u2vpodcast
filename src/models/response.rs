@@ -42,11 +42,19 @@ impl CResponse {
     }
 
     pub fn ko(status_code: StatusCode, session: Session) -> HttpResponse{
+        Self::ko_with_message(status_code, status_code.as_str(), session)
+    }
+
+    pub fn ko_with_message(
+        status_code: StatusCode,
+        message: &str,
+        session: Session,
+    ) -> HttpResponse {
         let user = from_session(session).ok();
         let response = CustomResponse::<Value>{
             status: status_code.is_success(),
             status_code: status_code.as_u16(),
-            message: status_code.as_str().to_string(),
+            message: message.to_string(),
             user,
             data: None::<Value>,
         };

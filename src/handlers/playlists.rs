@@ -41,7 +41,15 @@ async fn read(
 ) -> HttpResponse {
     info!("read playlist");
     match PlaylistItem::read_episodes_with_channels(&data.pool).await {
-        Ok(episodes) => CResponse::ok(session, episodes),
+        Ok(mut episodes) => {
+            for episode in &mut episodes {
+                episode.apply_sponsorblock_config(
+                    data.config.sponsorblock_enabled,
+                    &data.config.sponsorblock_rejected_categories,
+                );
+            }
+            CResponse::ok(session, episodes)
+        },
         Err(e) => {
             error!("Error reading playlist: {e}");
             CResponse::ko(e.status_code(), session)

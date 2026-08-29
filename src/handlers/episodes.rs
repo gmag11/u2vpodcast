@@ -45,6 +45,10 @@ async fn read_with_pagination(
                 debug!("{:?}", episodes);
                 for episode in episodes.iter_mut(){
                     episode.channel_slug = channel.slug.clone();
+                    episode.apply_sponsorblock_config(
+                        data.config.sponsorblock_enabled,
+                        &data.config.sponsorblock_rejected_categories,
+                    );
                 }
                 Ok(CResponse::ok(session, episodes))
             },
@@ -67,7 +71,15 @@ async fn read_all(
 ) -> impl Responder{
     info!("read_all");
     match Episode::read_all_with_channels(&data.pool).await{
-        Ok(episodes) => Ok(CResponse::ok(session, episodes)),
+        Ok(mut episodes) => {
+            for episode in &mut episodes {
+                episode.apply_sponsorblock_config(
+                    data.config.sponsorblock_enabled,
+                    &data.config.sponsorblock_rejected_categories,
+                );
+            }
+            Ok(CResponse::ok(session, episodes))
+        },
         Err(e) => {
             error!("{e}");
             Err(e)
@@ -163,11 +175,20 @@ async fn refresh_sponsorblock(
     session: Session,
     yt_id: Path<String>,
 ) -> actix_web::HttpResponse {
+    if !data.config.sponsorblock_enabled {
+        return CResponse::ko_with_message(
+            actix_web::http::StatusCode::CONFLICT,
+            "SponsorBlock is disabled",
+            session,
+        );
+    }
     match refresh_sponsorblock_episode(
         &data.pool,
         &SponsorBlockClient::default(),
         FsPath::new(audios_dir()),
         &yt_id.into_inner(),
+        data.config.sponsorblock_enabled,
+        &data.config.sponsorblock_rejected_categories,
     )
     .await
     {
@@ -184,11 +205,21 @@ async fn refresh_sponsorblock_episode(
     client: &SponsorBlockClient,
     audio_root: &FsPath,
     yt_id: &str,
+    sponsorblock_enabled: bool,
+    rejected_categories: &[String],
 ) -> Result<Episode, super::super::models::Error> {
+    if !sponsorblock_enabled {
+        return Err(super::super::models::Error::new_with_status_code(
+            "SponsorBlock is disabled",
+            actix_web::http::StatusCode::CONFLICT,
+        ));
+    }
     let episode = Episode::read_by_yt_id_with_channel(pool, yt_id).await?;
     let channel_dir = audio_root.join(&episode.channel_slug);
-    reconcile_episode(pool, client, &episode, &channel_dir).await?;
-    Episode::read_by_yt_id_with_channel(pool, yt_id).await
+    reconcile_episode(pool, client, &episode, &channel_dir, rejected_categories).await?;
+    let mut episode = Episode::read_by_yt_id_with_channel(pool, yt_id).await?;
+    episode.apply_sponsorblock_config(true, rejected_categories);
+    Ok(episode)
 }
 
 #[cfg(test)]
@@ -263,11 +294,19 @@ mod tests {
         let (pool, root) = fixture().await;
         let client = SponsorBlockClient::new(&empty_snapshot_server(), Duration::from_secs(1));
 
-        let refreshed = refresh_sponsorblock_episode(&pool, &client, &root, "old-favorite")
+        let refreshed = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "old-favorite",
+            true,
+            &["sponsor".to_string()],
+        )
             .await
             .unwrap();
 
         assert!(refreshed.favorite);
+        assert!(refreshed.sponsorblock_enabled);
         assert!(refreshed.sponsorblock_segments.is_empty());
         assert!(SponsorBlockCache::read(&pool, refreshed.id).await.unwrap().is_some());
         std::fs::remove_dir_all(root).unwrap();
@@ -278,11 +317,48 @@ mod tests {
         let (pool, root) = fixture().await;
         let client = SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(50));
 
-        let error = refresh_sponsorblock_episode(&pool, &client, &root, "unknown")
+        let error = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "unknown",
+            true,
+            &["sponsor".to_string()],
+        )
             .await
             .unwrap_err();
 
         assert_eq!(error.status_code(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn disabled_manual_refresh_stops_before_lookup_or_client_access() {
+        let (pool, root) = fixture().await;
+        let client = SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(10));
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sponsorblock_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let error = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "old-favorite",
+            false,
+            &["sponsor".to_string()],
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::CONFLICT);
+        assert!(error.to_string().contains("disabled"));
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sponsorblock_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before);
         std::fs::remove_dir_all(root).unwrap();
     }
 }
