@@ -1,29 +1,29 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use serde::{de::Deserializer, Deserialize, Serialize};
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::process::Command;
-use serde::{
-    Serialize,
-    Deserialize,
-    de::Deserializer,
-};
-use tracing::{
-    info,
-    debug,
-};
+use tracing::{debug, info};
 // `timestamp_opt` / `Utc` are used only by the `#[cfg(test)]` network smoke
 // tests; gated on test builds so the release build stays warning-free.
-#[cfg(test)]
-use chrono::{Utc, TimeZone};
 use super::Error;
 use crate::utils::throttle::with_youtube_slot;
+#[cfg(test)]
+use crate::utils::throttle::with_youtube_slot_on;
+#[cfg(test)]
+use chrono::{TimeZone, Utc};
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use tokio::sync::Semaphore;
 
-pub struct Ytdlp{
+pub struct Ytdlp {
     path: String,
     cookies: String,
     runner: Arc<dyn CommandRunner>,
+    /// Test-only throttle override: a dedicated slot and cooldown that isolate
+    /// timing assertions from the process-wide throttle (which other tests may
+    /// initialize with a different cooldown).
+    #[cfg(test)]
+    throttle: Option<(Arc<Semaphore>, Duration)>,
 }
 
 struct CommandOutput {
@@ -48,7 +48,7 @@ impl CommandRunner for ProcessCommandRunner {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct YtVideo{
+pub struct YtVideo {
     pub id: String,
     pub title: String,
     #[serde(default, deserialize_with = "string_or_default")]
@@ -83,12 +83,14 @@ where
 }
 
 impl Ytdlp {
-    pub fn new(path: &str, cookies: &str) -> Self{
+    pub fn new(path: &str, cookies: &str) -> Self {
         info!("new");
-        Self{
+        Self {
             path: path.to_string(),
             cookies: cookies.to_string(),
             runner: Arc::new(ProcessCommandRunner),
+            #[cfg(test)]
+            throttle: None,
         }
     }
 
@@ -98,9 +100,41 @@ impl Ytdlp {
             path: path.to_string(),
             cookies: cookies.to_string(),
             runner,
+            throttle: None,
         }
     }
 
+    #[cfg(test)]
+    fn with_runner_and_throttle(
+        path: &str,
+        cookies: &str,
+        runner: Arc<dyn CommandRunner>,
+        slot: Arc<Semaphore>,
+        cooldown: Duration,
+    ) -> Self {
+        Self {
+            path: path.to_string(),
+            cookies: cookies.to_string(),
+            runner,
+            throttle: Some((slot, cooldown)),
+        }
+    }
+
+    /// Run `work` under the process-wide YouTube throttle, or under a dedicated
+    /// test slot when one was injected via `with_runner_and_throttle`.
+    async fn run_throttled<T, F, Fut>(&self, work: F) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        #[cfg(test)]
+        {
+            if let Some((slot, cooldown)) = &self.throttle {
+                return with_youtube_slot_on(slot.clone(), *cooldown, work).await;
+            }
+        }
+        with_youtube_slot(work).await
+    }
 
     // Runs a yt-dlp command streaming its stderr to the DEBUG log (so long
     // silent runs are observable: progress lines like `[youtube] Extracting
@@ -117,26 +151,37 @@ impl Ytdlp {
             vec!["--cookies", self.cookies.as_str()]
         }
     }
-    pub async fn list_videos(&self, url: &str, want: usize) -> Result<Vec<YtVideo>, Error>{
+    pub async fn list_videos(&self, url: &str, want: usize) -> Result<Vec<YtVideo>, Error> {
         info!("list_videos");
         // Flat, bounded listing: the channel `/videos` tab is newest-first, so
         // the first `want` flat entries are "the most recent `want` videos".
         // `--playlist-items` caps the pages yt-dlp walks; the worker further
         // selects the `max`-sized window (scalable-channel-listing).
         let spec = format!("1:{want}");
-        let mut args = vec!["--flat-playlist", "--dump-json",
-            "--playlist-items", &spec, "--js-runtimes", "node",
-            "--js-runtimes", "deno"];
+        let mut args = vec![
+            "--flat-playlist",
+            "--dump-json",
+            "--playlist-items",
+            &spec,
+            "--js-runtimes",
+            "node",
+            "--js-runtimes",
+            "deno",
+        ];
         args.extend(self.cookies_args());
         args.push(url);
         // yt-dlp listing is a YouTube connection: it runs through the shared
         // throttle so it serializes with downloads, the update check, and
         // metadata/image fetches (youtube-throttling). stderr is streamed to
         // the DEBUG log so a long listing stays observable.
-        let stdout = with_youtube_slot(move || async move {
-            self.runner.run(&self.path, &args).await.map(|output| output.stdout)
-        })
-        .await?;
+        let stdout = self
+            .run_throttled(move || async move {
+                self.runner
+                    .run(&self.path, &args)
+                    .await
+                    .map(|output| output.stdout)
+            })
+            .await?;
         let ytvideos = parse_dump_output(&stdout)?;
         info!(
             "Listed {} flat candidates for {} (requested {})",
@@ -147,24 +192,38 @@ impl Ytdlp {
         Ok(ytvideos)
     }
 
-    pub async fn download(&self, id: &str, output: &str) -> Result<(bool, YtVideo), Error>{
+    pub async fn download(&self, id: &str, output: &str) -> Result<(bool, YtVideo), Error> {
         let url = format!("https://www.youtube.com/watch?v={}", id);
-        let mut args = vec!["-f", "ba", "-x", "--audio-format", "mp3",
-            "--audio-quality", "160K",
-            "-o", output, "--print-json", "--js-runtimes", "node",
-            "--js-runtimes", "deno", "--retries", "10",
-            "--retry-sleep", "5"];
+        let mut args = vec![
+            "-f",
+            "ba",
+            "-x",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "160K",
+            "-o",
+            output,
+            "--print-json",
+            "--js-runtimes",
+            "node",
+            "--js-runtimes",
+            "deno",
+            "--retries",
+            "10",
+            "--retry-sleep",
+            "5",
+        ];
         args.extend(self.cookies_args());
         args.push(&url);
         // One run carries both the download and the full episode metadata
         // (`--print-json`): no separate extraction pass, still under the
         // single YouTube throttle (scalable-channel-listing). stderr is
         // streamed to the DEBUG log (progress during downloads).
-        let download_output = with_youtube_slot(move || async move {
-            self.runner.run(&self.path, &args).await
-        })
-        .await
-        .map_err(|e| Error::default(&e.to_string()))?;
+        let download_output = self
+            .run_throttled(move || async move { self.runner.run(&self.path, &args).await })
+            .await
+            .map_err(|e| Error::default(&e.to_string()))?;
         let mut videos = parse_dump_output(&download_output.stdout)?;
         let info = match videos.pop() {
             Some(video) => video,
@@ -180,26 +239,44 @@ impl Ytdlp {
 
     pub async fn metadata(&self, id: &str) -> Result<YtVideo, Error> {
         let url = format!("https://www.youtube.com/watch?v={}", id);
-        let mut args = vec!["--skip-download", "--print-json", "--js-runtimes", "node",
-            "--js-runtimes", "deno", "--retries", "10", "--retry-sleep", "5"];
+        let mut args = vec![
+            "--skip-download",
+            "--print-json",
+            "--js-runtimes",
+            "node",
+            "--js-runtimes",
+            "deno",
+            "--retries",
+            "10",
+            "--retry-sleep",
+            "5",
+        ];
         args.extend(self.cookies_args());
         args.push(&url);
-        let output = with_youtube_slot(move || async move {
-            self.runner.run(&self.path, &args).await
-        })
-        .await
-        .map_err(|e| Error::default(&e.to_string()))?;
+        let output = self
+            .run_throttled(move || async move { self.runner.run(&self.path, &args).await })
+            .await
+            .map_err(|e| Error::default(&e.to_string()))?;
         let mut videos = parse_dump_output(&output.stdout)?;
-        videos.pop().ok_or_else(|| Error::default(&format!(
-            "yt-dlp produced no metadata for {url} (exit {:?})",
-            output.code
-        )))
+        videos.pop().ok_or_else(|| {
+            Error::default(&format!(
+                "yt-dlp produced no metadata for {url} (exit {:?})",
+                output.code
+            ))
+        })
     }
 
-    pub async fn auto_update() -> Result<(), Error>{
+    pub async fn auto_update() -> Result<(), Error> {
         let python3 = "python3";
-        let args = vec!["-m", "pip", "install", "--user", "--upgrade",
-            "--break-system-packages", "yt-dlp[default]"];
+        let args = vec![
+            "-m",
+            "pip",
+            "install",
+            "--user",
+            "--upgrade",
+            "--break-system-packages",
+            "yt-dlp[default]",
+        ];
         // Async process wait (non-blocking-update-paths): the pip run can take
         // tens of seconds; a synchronous `std::process::Command::wait()` here
         // would pin a tokio worker thread for the whole time.
@@ -208,7 +285,10 @@ impl Ytdlp {
         // GitHub, but every yt-dlp execution passes through the same slot so a
         // future update channel cannot bypass the throttle).
         let status = with_youtube_slot(|| async move {
-            ProcessCommandRunner.run(python3, &args).await.map(|output| output.success)
+            ProcessCommandRunner
+                .run(python3, &args)
+                .await
+                .map(|output| output.success)
         })
         // Only Send types cross the slot (io::Error / ExitStatus); the crate
         // `Error` (non-Send) is rebuilt after the cooldown releases.
@@ -222,16 +302,9 @@ impl Ytdlp {
     }
 }
 
-async fn run_streamed(
-    path: &str,
-    args: &[&str],
-) -> Result<CommandOutput, std::io::Error> {
+async fn run_streamed(path: &str, args: &[&str]) -> Result<CommandOutput, std::io::Error> {
     use std::process::Stdio;
-    use tokio::io::{
-        AsyncBufReadExt,
-        AsyncReadExt,
-        BufReader,
-    };
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
     let mut child = Command::new(path)
         .args(args)
@@ -352,7 +425,6 @@ mod flat_listing_tests {
         for (offset, candidate) in selection.window.iter().enumerate() {
             assert_eq!(candidate.id, format!("vid_{offset}"));
         }
-
     }
 
     #[test]
@@ -434,19 +506,25 @@ mod download_args_tests {
     #[tokio::test]
     async fn download_requests_constant_bitrate_mp3() {
         crate::utils::throttle::init_throttle(Duration::ZERO);
-        let runner = Arc::new(ArgumentsRunner { args: Mutex::new(Vec::new()) });
+        let runner = Arc::new(ArgumentsRunner {
+            args: Mutex::new(Vec::new()),
+        });
         let ytdlp = Ytdlp::with_runner("mock-yt-dlp", "", runner.clone());
 
         ytdlp.download("video-id", "audio.mp3").await.unwrap();
 
         let args = runner.args.lock().unwrap();
-        assert!(args.windows(2).any(|pair| pair == ["--audio-quality", "160K"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--audio-quality", "160K"]));
     }
 
     #[tokio::test]
     async fn metadata_probe_skips_media_download() {
         crate::utils::throttle::init_throttle(Duration::ZERO);
-        let runner = Arc::new(ArgumentsRunner { args: Mutex::new(Vec::new()) });
+        let runner = Arc::new(ArgumentsRunner {
+            args: Mutex::new(Vec::new()),
+        });
         let ytdlp = Ytdlp::with_runner("mock-yt-dlp", "", runner.clone());
 
         let metadata = ytdlp.metadata("video-id").await.unwrap();
@@ -461,11 +539,11 @@ mod download_args_tests {
 #[cfg(test)]
 mod throttle_youtubedl_integration {
     use super::*;
-    use crate::utils::throttle::init_throttle;
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::{Duration, Instant},
     };
+    use tokio::sync::Semaphore;
 
     struct RecordingRunner {
         active: AtomicUsize,
@@ -503,12 +581,17 @@ mod throttle_youtubedl_integration {
 
     #[tokio::test]
     async fn concurrent_downloads_are_sequential_and_respect_cooldown() {
-        init_throttle(Duration::from_millis(30));
+        // Dedicated slot + cooldown: the process-wide throttle is
+        // first-call-wins and other tests may initialize it with a different
+        // cooldown, so this timing assertion must not depend on global state.
+        let slot = Arc::new(Semaphore::new(1));
         let runner = Arc::new(RecordingRunner::new());
-        let ytdlp = Arc::new(Ytdlp::with_runner(
+        let ytdlp = Arc::new(Ytdlp::with_runner_and_throttle(
             "mock-yt-dlp",
             "",
             runner.clone(),
+            slot,
+            Duration::from_millis(30),
         ));
         let mut handles = Vec::new();
         for i in 0..4 {
@@ -549,70 +632,72 @@ mod throttle_youtubedl_integration {
 }
 
 #[test]
-    fn null_string_fields_default_to_empty() {
-        // yt-dlp flat entries emit explicit `null` for optional strings.
-        let line = br#"{"id":"n1","title":"T","description":null,"thumbnail":null,"original_url":null,"webpage_url":"https://x","upload_date":null,"timestamp":null,"duration_string":null,"release_date":null,"live_status":null}"#;
-        let videos = parse_dump_output(line).expect("null fields must not fail the parse");
-        assert_eq!(videos.len(), 1);
-        assert_eq!(videos[0].description, "");
-        assert_eq!(videos[0].duration_string, "");
-        assert_eq!(videos[0].release_date, "");
-        assert_eq!(videos[0].live_status, "");
-        assert_eq!(videos[0].webpage_url, "https://x");
-    }
+fn null_string_fields_default_to_empty() {
+    // yt-dlp flat entries emit explicit `null` for optional strings.
+    let line = br#"{"id":"n1","title":"T","description":null,"thumbnail":null,"original_url":null,"webpage_url":"https://x","upload_date":null,"timestamp":null,"duration_string":null,"release_date":null,"live_status":null}"#;
+    let videos = parse_dump_output(line).expect("null fields must not fail the parse");
+    assert_eq!(videos.len(), 1);
+    assert_eq!(videos[0].description, "");
+    assert_eq!(videos[0].duration_string, "");
+    assert_eq!(videos[0].release_date, "");
+    assert_eq!(videos[0].live_status, "");
+    assert_eq!(videos[0].webpage_url, "https://x");
+}
 
-    #[test]
-    fn real_atareao_flat_listing_parses() {
-        // Fixture captured from `yt-dlp --flat-playlist --dump-json
-        // --playlist-items 1:12 https://www.youtube.com/@atareao/videos`
-        // (2026.08.19) — the exact shape that broke parsing: explicit
-        // `"live_status": null` / `"timestamp": null` plus absent
-        // description/date fields.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/atareao_flat_first.jsonl");
-        let bytes = std::fs::read(path).expect("fixture file");
-        let videos = parse_dump_output(&bytes).expect("real flat listing must parse");
-        assert_eq!(videos.len(), 12);
-        assert!(videos.iter().all(|v| v.live_status.is_empty()));
-        assert!(videos.iter().all(|v| v.timestamp.is_none()));
-        assert!(videos.iter().all(|v| v.id.len() == 11), "yt video ids are 11 chars");
-        assert!(!videos[0].title.is_empty());
-        assert_eq!(videos[0].id, "FuxbDWsB6so");
-    }
+#[test]
+fn real_atareao_flat_listing_parses() {
+    // Fixture captured from `yt-dlp --flat-playlist --dump-json
+    // --playlist-items 1:12 https://www.youtube.com/@atareao/videos`
+    // (2026.08.19) — the exact shape that broke parsing: explicit
+    // `"live_status": null` / `"timestamp": null` plus absent
+    // description/date fields.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/atareao_flat_first.jsonl");
+    let bytes = std::fs::read(path).expect("fixture file");
+    let videos = parse_dump_output(&bytes).expect("real flat listing must parse");
+    assert_eq!(videos.len(), 12);
+    assert!(videos.iter().all(|v| v.live_status.is_empty()));
+    assert!(videos.iter().all(|v| v.timestamp.is_none()));
+    assert!(
+        videos.iter().all(|v| v.id.len() == 11),
+        "yt video ids are 11 chars"
+    );
+    assert!(!videos[0].title.is_empty());
+    assert_eq!(videos[0].id, "FuxbDWsB6so");
+}
 
-    #[tokio::test]
-    async fn test_e(){
+#[tokio::test]
+async fn test_e() {
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     // Old date: the "error" channel yields no parseable videos.
     let _old = Utc.timestamp_opt(0, 0).unwrap();
     let salida = ytdlp.list_videos("error", 5).await;
-    match salida{
+    match salida {
         Ok(videos) => {
             assert!(videos.is_empty());
-        },
+        }
         Err(e) => {
             println!("{:?}", e);
         }
     }
 }
 #[tokio::test]
-async fn test_0(){
+async fn test_0() {
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     // Recent date: expect no/very few videos on this channel.
     let salida = ytdlp.list_videos("atareao", 5).await;
-    match salida{
+    match salida {
         Ok(videos) => {
             assert!(videos.is_empty());
-        },
+        }
         Err(e) => {
             println!("{:?}", e);
         }
     }
 }
 #[tokio::test]
-async fn test_ytdlp(){
+async fn test_ytdlp() {
     let ytdlp = Ytdlp::new("yt-dlp", "cookies.txt");
     let salida = ytdlp.download("mWoJw5qD0eI", "/tmp/test.mp3").await;
     println!("{:?}", salida);
 }
-

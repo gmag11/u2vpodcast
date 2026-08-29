@@ -43,10 +43,17 @@ async fn get_global_feed(data: Data<AppState>) -> impl Responder {
     let url = &data.config.url;
     match Episode::read_all_with_channels(&data.pool).await {
         Ok(episodes) => {
-            let items = global_items(url, FsPath::new(audios_dir()), episodes);
+            let items = global_items(
+                url,
+                FsPath::new(audios_dir()),
+                episodes,
+                data.config.sponsorblock_enabled,
+            );
             let link = format!("{url}/rss");
             let itunes = ITunesChannelExtensionBuilder::default()
-                .summary(Some("All episodes from all channels, newest first".to_string()))
+                .summary(Some(
+                    "All episodes from all channels, newest first".to_string(),
+                ))
                 .build();
             let channel_builder = ChannelBuilder::default()
                 .title("All Episodes")
@@ -94,7 +101,13 @@ async fn build_feed(data: &Data<AppState>, channel: Channel) -> HttpResponse {
     let url = &data.config.url;
     match Episode::read_episodes_for_channel(&data.pool, channel.id).await {
         Ok(episodes) => {
-            let items = channel_items(url, FsPath::new(audios_dir()), &channel.slug, episodes);
+            let items = channel_items(
+                url,
+                FsPath::new(audios_dir()),
+                &channel.slug,
+                episodes,
+                data.config.sponsorblock_enabled,
+            );
             let link = format!("{url}/rss");
             let itunes = ITunesChannelExtensionBuilder::default()
                 .image(Some(channel.image))
@@ -118,8 +131,15 @@ async fn build_feed(data: &Data<AppState>, channel: Channel) -> HttpResponse {
     }
 }
 
-fn episode_item(url: &str, audio_root: &FsPath, slug: &str, episode: Episode, title: String) -> rss::Item {
-    let selected = episode.selected_media(&audio_root.join(slug));
+fn episode_item(
+    url: &str,
+    audio_root: &FsPath,
+    slug: &str,
+    episode: Episode,
+    title: String,
+    sponsorblock_enabled: bool,
+) -> rss::Item {
+    let selected = episode.selected_media(&audio_root.join(slug), sponsorblock_enabled);
     let enclosure_url = format!("{url}/media/{slug}/{}", selected.filename);
     let description = format!("{}\n\n{}", episode.webpage_url, episode.description);
     let itunes = ITunesItemExtensionBuilder::default()
@@ -143,17 +163,28 @@ fn episode_item(url: &str, audio_root: &FsPath, slug: &str, episode: Episode, ti
         .build()
 }
 
-fn channel_items(url: &str, audio_root: &FsPath, slug: &str, episodes: Vec<Episode>) -> Vec<rss::Item> {
+fn channel_items(
+    url: &str,
+    audio_root: &FsPath,
+    slug: &str,
+    episodes: Vec<Episode>,
+    sponsorblock_enabled: bool,
+) -> Vec<rss::Item> {
     episodes
         .into_iter()
         .map(|episode| {
             let title = episode.title.clone();
-            episode_item(url, audio_root, slug, episode, title)
+            episode_item(url, audio_root, slug, episode, title, sponsorblock_enabled)
         })
         .collect()
 }
 
-fn global_items(url: &str, audio_root: &FsPath, episodes: Vec<Episode>) -> Vec<rss::Item> {
+fn global_items(
+    url: &str,
+    audio_root: &FsPath,
+    episodes: Vec<Episode>,
+    sponsorblock_enabled: bool,
+) -> Vec<rss::Item> {
     episodes
         .into_iter()
         .filter(|episode| !episode.channel_slug.is_empty())
@@ -164,7 +195,7 @@ fn global_items(url: &str, audio_root: &FsPath, episodes: Vec<Episode>) -> Vec<r
             } else {
                 format!("{}: {}", episode.channel_title, episode.title)
             };
-            episode_item(url, audio_root, &slug, episode, title)
+            episode_item(url, audio_root, &slug, episode, title, sponsorblock_enabled)
         })
         .collect()
 }
@@ -219,25 +250,43 @@ mod tests {
     #[actix_web::test]
     async fn simulated_feeds_select_processed_media_and_fallbacks() {
         let (pool, channel_id, root) = fixture().await;
-        let episodes = Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap();
-        let by_id = |yt_id: &str| episodes.iter().find(|episode| episode.yt_id == yt_id).unwrap().id;
+        let episodes = Episode::read_episodes_for_channel(&pool, channel_id)
+            .await
+            .unwrap();
+        let by_id = |yt_id: &str| {
+            episodes
+                .iter()
+                .find(|episode| episode.yt_id == yt_id)
+                .unwrap()
+                .id
+        };
         SponsorBlockCache::upsert_success(
             &pool,
             by_id("processed"),
             &[],
+            "processed-hash",
             "processed-hash",
             Some("processed.sponsorblock.abcdef.mp3"),
             Some(540.0),
         )
         .await
         .unwrap();
-        SponsorBlockCache::upsert_success(&pool, by_id("empty"), &[], "empty-hash", None, None)
-            .await
-            .unwrap();
+        SponsorBlockCache::upsert_success(
+            &pool,
+            by_id("empty"),
+            &[],
+            "empty-hash",
+            "empty-hash",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         SponsorBlockCache::upsert_success(
             &pool,
             by_id("missing"),
             &[],
+            "missing-hash",
             "missing-hash",
             Some("missing.sponsorblock.abcdef.mp3"),
             Some(500.0),
@@ -250,14 +299,36 @@ mod tests {
         )
         .unwrap();
 
-        let channel_episodes = Episode::read_episodes_for_channel(&pool, channel_id).await.unwrap();
-        let items = channel_items("http://backend", &root, "channel_slug", channel_episodes);
-        let processed = items.iter().find(|item| item.guid().unwrap().value() == "processed").unwrap();
-        assert!(processed.enclosure().unwrap().url().ends_with("/processed.sponsorblock.abcdef.mp3"));
+        let channel_episodes = Episode::read_episodes_for_channel(&pool, channel_id)
+            .await
+            .unwrap();
+        let items = channel_items(
+            "http://backend",
+            &root,
+            "channel_slug",
+            channel_episodes,
+            true,
+        );
+        let processed = items
+            .iter()
+            .find(|item| item.guid().unwrap().value() == "processed")
+            .unwrap();
+        assert!(processed
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.sponsorblock.abcdef.mp3"));
         assert_eq!(processed.itunes_ext().unwrap().duration(), Some("540"));
         for yt_id in ["empty", "missing"] {
-            let item = items.iter().find(|item| item.guid().unwrap().value() == yt_id).unwrap();
-            assert!(item.enclosure().unwrap().url().ends_with(&format!("/{yt_id}.mp3")));
+            let item = items
+                .iter()
+                .find(|item| item.guid().unwrap().value() == yt_id)
+                .unwrap();
+            assert!(item
+                .enclosure()
+                .unwrap()
+                .url()
+                .ends_with(&format!("/{yt_id}.mp3")));
             assert_eq!(item.itunes_ext().unwrap().duration(), Some("600"));
         }
 
@@ -265,10 +336,50 @@ mod tests {
             "http://backend",
             &root,
             Episode::read_all_with_channels(&pool).await.unwrap(),
+            true,
         );
         assert_eq!(global.len(), 3);
-        assert!(global.iter().all(|item| item.title().unwrap().starts_with("Channel title: ")));
+        assert!(global
+            .iter()
+            .all(|item| item.title().unwrap().starts_with("Channel title: ")));
         assert_eq!(processed.guid().unwrap().value(), "processed");
+
+        let disabled_channel = channel_items(
+            "http://backend",
+            &root,
+            "channel_slug",
+            Episode::read_episodes_for_channel(&pool, channel_id)
+                .await
+                .unwrap(),
+            false,
+        );
+        let disabled = disabled_channel
+            .iter()
+            .find(|item| item.guid().unwrap().value() == "processed")
+            .unwrap();
+        assert!(disabled
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.mp3"));
+        assert_eq!(disabled.itunes_ext().unwrap().duration(), Some("600"));
+
+        let disabled_global = global_items(
+            "http://backend",
+            &root,
+            Episode::read_all_with_channels(&pool).await.unwrap(),
+            false,
+        );
+        let disabled = disabled_global
+            .iter()
+            .find(|item| item.guid().unwrap().value() == "processed")
+            .unwrap();
+        assert!(disabled
+            .enclosure()
+            .unwrap()
+            .url()
+            .ends_with("/processed.mp3"));
+        assert_eq!(disabled.itunes_ext().unwrap().duration(), Some("600"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

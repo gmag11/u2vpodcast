@@ -281,7 +281,9 @@ describe('PlaylistView inline reordering', () => {
 		await emitDrop(wrapper, [episode(2), episode(3), episode(1)]);
 		const playAllButton = wrapper.get('[data-testid="playlist-play-all"]');
 		expect(playAllButton.attributes('aria-label')).toBe('Play all');
-		expect(playAllButton.get('span').classes()).toEqual(expect.arrayContaining(['hidden', 'sm:inline']));
+		expect(playAllButton.get('span').classes()).toEqual(
+			expect.arrayContaining(['hidden', 'sm:inline'])
+		);
 		await playAllButton.trigger('click');
 		expect(play).toHaveBeenCalledOnce();
 		const [firstEpisode, queue, options] = play.mock.calls[0];

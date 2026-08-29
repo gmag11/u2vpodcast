@@ -124,7 +124,7 @@
 	const sponsorBlockMarkers = computed(() =>
 		sponsorBlockTimelineMarkers(
 			timelineDuration.value,
-			liveEpisode.value.sponsorblock_segments
+			liveEpisode.value.sponsorblock_enabled === true ? liveEpisode.value.sponsorblock_segments : []
 		)
 	);
 	const titleScrollActive = computed(() => isPlaying.value && titleScrollDistance.value > 0);
@@ -476,6 +476,7 @@
 						<span>{{ $t('playlist.originalLink') }}</span>
 					</a>
 					<button
+						v-if="props.episode.sponsorblock_enabled === true"
 						type="button"
 						role="menuitem"
 						class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-high focus:bg-surface-high focus:outline-none disabled:opacity-50"
@@ -694,11 +695,16 @@
 			aria-hidden="true"
 			data-testid="episode-progress"
 		>
-			<div class="absolute inset-y-0 left-0 bg-success" :style="{ width: `${progressRatio}%` }"></div>
+			<div
+				class="absolute inset-y-0 left-0 bg-success"
+				:style="{ width: `${progressRatio}%` }"
+			></div>
 			<div
 				v-for="(marker, index) in sponsorBlockMarkers"
 				:key="index"
-				class="absolute inset-y-0 z-10 bg-sponsorblock"
+				class="absolute inset-y-0 z-10"
+				:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+				:data-category="marker.category"
 				data-testid="episode-sponsorblock-segment"
 				:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
 			></div>

@@ -117,6 +117,7 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		sponsorblock_enabled: true,
 		sponsorblock_segments: [],
 		sponsorblock_hash: null,
 		created_at: now,
@@ -134,34 +135,43 @@ describe('SponsorBlock playback', () => {
 		setActivePinia(createPinia());
 	});
 
-	it('resolves only positions inside an interval', () => {
-		const segments = [{ start: 120, end: 150 }];
+	it('skips only the complete union of rejected overlapping intervals', () => {
+		const segments = [
+			{ start: 120, end: 150, category: 'sponsor', rejected: true },
+			{ start: 145, end: 170, category: 'intro', rejected: true },
+			{ start: 125, end: 180, category: 'selfpromo', rejected: false }
+		];
 		expect(sponsorBlockSkipTarget(119.9, segments)).toBe(119.9);
-		expect(sponsorBlockSkipTarget(120, segments)).toBe(150);
-		expect(sponsorBlockSkipTarget(149.9, segments)).toBe(150);
-		expect(sponsorBlockSkipTarget(150, segments)).toBe(150);
+		expect(sponsorBlockSkipTarget(120, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(160, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(170, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(175, segments)).toBe(175);
+		expect(sponsorBlockSkipTarget(125, [segments[2]])).toBe(125);
+		expect(sponsorBlockSkipTarget(125, [])).toBe(125);
 	});
 
 	it('maps clamped segments onto the original timeline', () => {
 		expect(
 			sponsorBlockTimelineMarkers(200, [
-				{ start: -10, end: 20 },
-				{ start: 60, end: 120 },
-				{ start: 190, end: 220 },
-				{ start: 150, end: 140 }
+				{ start: -10, end: 20, category: 'sponsor', rejected: true },
+				{ start: 60, end: 120, category: 'intro', rejected: false },
+				{ start: 190, end: 220, category: 'outro', rejected: true },
+				{ start: 150, end: 140, category: 'sponsor', rejected: true }
 			])
 		).toEqual([
-			{ left: 0, width: 10 },
-			{ left: 30, width: 30 },
-			{ left: 95, width: 5 }
+			{ left: 0, width: 10, category: 'sponsor' },
+			{ left: 30, width: 30, category: 'intro' },
+			{ left: 95, width: 5, category: 'outro' }
 		]);
-		expect(sponsorBlockTimelineMarkers(0, [{ start: 1, end: 2 }])).toEqual([]);
+		expect(
+			sponsorBlockTimelineMarkers(0, [{ start: 1, end: 2, category: 'sponsor', rejected: true }])
+		).toEqual([]);
 	});
 
 	it('skips on timeupdate and explicit seek using the original timeline', async () => {
 		const player = usePlayerStore();
 		const item = episode(1);
-		item.sponsorblock_segments = [{ start: 120, end: 150 }];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
 		item.sponsorblock_hash = 'hash-a';
 		await player.play(item);
 		const audio = MockAudioElement.instances[0];
@@ -175,24 +185,58 @@ describe('SponsorBlock playback', () => {
 		expect(player.currentTime).toBe(150);
 	});
 
-	it('applies a changed snapshot without reloading the source', async () => {
+	it('uses rejected intervals for resume and relative seeks but bypasses them when disabled', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.position_seconds = 125;
+		item.sponsorblock_segments = [
+			{ start: 120, end: 150, category: 'sponsor', rejected: true },
+			{ start: 100, end: 180, category: 'intro', rejected: false }
+		];
+		await player.play(item);
+		const audio = MockAudioElement.instances[0];
+		expect(audio.currentTime).toBe(150);
+
+		audio.duration = 600;
+		audio.currentTime = 110;
+		player.seekRelative(15);
+		expect(audio.currentTime).toBe(150);
+
+		player.applySponsorBlockSnapshot({ ...item, sponsorblock_enabled: false });
+		audio.currentTime = 125;
+		audio.emit('timeupdate');
+		expect(audio.currentTime).toBe(125);
+	});
+
+	it('applies visible, rejection, and disabled snapshots without reloading the source', async () => {
 		const player = usePlayerStore();
 		const item = episode(1);
 		item.sponsorblock_hash = 'hash-a';
+		item.sponsorblock_segments = [{ start: 10, end: 20, category: 'intro', rejected: false }];
 		await player.play(item);
 		const audio = MockAudioElement.instances[0];
 		const source = audio.src;
 		const loadCalls = audio.load.mock.calls.length;
+
 		player.applySponsorBlockSnapshot({
 			...item,
 			sponsorblock_hash: 'hash-b',
-			sponsorblock_segments: [{ start: 10, end: 20 }]
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: false }]
 		});
-		expect(player.currentEpisode?.sponsorblock_hash).toBe('hash-b');
-		expect(audio.src).toBe(source);
-		expect(audio.load).toHaveBeenCalledTimes(loadCalls);
+		expect(player.currentEpisode?.sponsorblock_segments?.[0].end).toBe(25);
 
-		player.applySponsorBlockSnapshot({ ...item, sponsorblock_hash: 'hash-b' });
+		player.applySponsorBlockSnapshot({
+			...item,
+			sponsorblock_hash: 'hash-b',
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: true }]
+		});
+		expect(player.currentEpisode?.sponsorblock_segments?.[0].rejected).toBe(true);
+
+		player.applySponsorBlockSnapshot({ ...item, sponsorblock_enabled: false });
+		expect(player.currentEpisode?.sponsorblock_enabled).toBe(false);
+		expect(player.currentEpisode?.sponsorblock_segments).toEqual([]);
+		expect(player.currentEpisode?.sponsorblock_hash).toBeNull();
+		expect(audio.src).toBe(source);
 		expect(audio.load).toHaveBeenCalledTimes(loadCalls);
 	});
 });

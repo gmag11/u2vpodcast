@@ -7,7 +7,7 @@ title: u2vpodcast
 # does not affect them either way.
 url: http://localhost:6996
 port: 6996
-sleep_time: 1
+sleep_time: 4
 per_page: 3
 # Session signing key. MUST be exactly 64 characters (64 bytes); a shorter
 # value makes the server panic at startup (the cookie crate Key::from requires
@@ -30,3 +30,25 @@ with_authentication: true
 # Defaults to INFO if omitted. The RUST_LOG environment variable, when set,
 # takes precedence over this value.
 log_level: INFO
+
+# SponsorBlock is fully opt-in. When false (the default), the application makes
+# no SponsorBlock requests, performs no reconciliation or media processing,
+# exposes no SponsorBlock data or refresh action, skips no playback intervals,
+# renders no markers, and always selects original media in feeds. Existing
+# installations that want the previous behavior must set this to true.
+sponsorblock_enabled: false
+# Categories removed from derived feed audio and skipped by the web player when
+# SponsorBlock is enabled. Defaults to [sponsor] when omitted. Supported values:
+# sponsor, selfpromo, interaction, intro, outro, preview, music_offtopic, filler.
+# Use [] to reject nothing while still displaying every supported category as a
+# timeline marker. Changes are loaded on restart; API policy updates immediately,
+# while derived media is updated by the next synchronization or manual refresh.
+sponsorblock_rejected_categories:
+  - sponsor
+  - selfpromo
+  - interaction
+  - intro
+  - outro
+  - preview
+  - music_offtopic
+  - filler

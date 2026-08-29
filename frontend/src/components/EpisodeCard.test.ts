@@ -55,6 +55,7 @@ function episode(overrides: Partial<Episode> = {}): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now,
 		...overrides
@@ -327,7 +328,7 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		const refreshed = {
 			...ep,
 			sponsorblock_hash: 'hash-b',
-			sponsorblock_segments: [{ start: 10, end: 20 }]
+			sponsorblock_segments: [{ start: 10, end: 20, category: 'intro', rejected: false }]
 		};
 		vi.mocked(api.refreshEpisodeSponsorBlock).mockResolvedValueOnce({
 			ok: true,
@@ -345,7 +346,9 @@ describe('EpisodeCard mobile playlist presentation', () => {
 
 		expect(api.refreshEpisodeSponsorBlock).toHaveBeenCalledWith('yt7');
 		expect(player.currentEpisode?.sponsorblock_hash).toBe('hash-b');
-		expect(player.currentEpisode?.sponsorblock_segments).toEqual([{ start: 10, end: 20 }]);
+		expect(player.currentEpisode?.sponsorblock_segments).toEqual([
+			{ start: 10, end: 20, category: 'intro', rejected: false }
+		]);
 		expect(useNotificationStore().current?.message).toBe('SponsorBlock segments refreshed');
 	});
 
@@ -447,16 +450,34 @@ describe('EpisodeCard playback indicators', () => {
 		expect(wrapper.find('[data-testid="episode-progress"]').exists()).toBe(false);
 	});
 
-	it('shows SponsorBlock segments without playback progress', () => {
+	it('shows all enabled SponsorBlock categories with category-aware colors', () => {
 		const wrapper = mountCard(
 			episode({
 				position_seconds: 0,
-				sponsorblock_segments: [{ start: 900, end: 1800 }]
+				sponsorblock_segments: [
+					{ start: 900, end: 1800, category: 'sponsor', rejected: true },
+					{ start: 1200, end: 2100, category: 'intro', rejected: false }
+				]
 			})
 		);
-		const marker = wrapper.get('[data-testid="episode-sponsorblock-segment"]');
-		expect(marker.attributes('style')).toContain('left: 25%');
-		expect(marker.attributes('style')).toContain('width: 25%');
+		const markers = wrapper.findAll('[data-testid="episode-sponsorblock-segment"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].classes()).toContain('bg-sponsorblock');
+		expect(markers[1].classes()).toContain('bg-sponsorblock-other');
+		expect(markers[0].attributes('style')).toContain('left: 25%');
+		expect(markers[0].attributes('style')).toContain('width: 25%');
+	});
+
+	it('hides markers and the refresh action when SponsorBlock is disabled', async () => {
+		const wrapper = mountPlaylistCard(
+			episode({
+				sponsorblock_enabled: false,
+				sponsorblock_segments: [{ start: 900, end: 1800, category: 'sponsor', rejected: true }]
+			})
+		);
+		expect(wrapper.find('[data-testid="episode-sponsorblock-segment"]').exists()).toBe(false);
+		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
+		expect(wrapper.find('[data-testid="playlist-refresh-sponsorblock"]').exists()).toBe(false);
 	});
 });
 

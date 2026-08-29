@@ -1,53 +1,40 @@
-use actix_web::{
-    Responder,
-    HttpResponse,
-    get,
-    put,
-    post,
-    web::{
-        Path,
-        Data,
-        Json,
-    },
-};
 use actix_session::Session;
-use serde::Deserialize;
-use tracing::{
-    info,
-    error,
-    debug,
+use actix_web::{
+    get, post, put,
+    web::{Data, Json, Path},
+    HttpResponse, Responder,
 };
+use serde::Deserialize;
+use tracing::{debug, error, info};
 
 use super::{
+    super::models::{audios_dir, CResponse, Channel, Episode, EpisodeProgress},
     AppState,
-    super::models::{
-        Channel,
-        Episode,
-        EpisodeProgress,
-        CResponse,
-        audios_dir,
-    },
 };
-    use crate::utils::sponsorblock::{reconcile_episode, SponsorBlockClient};
-    use std::path::Path as FsPath;
+use crate::utils::sponsorblock::{reconcile_episode, SponsorBlockClient};
+use std::path::Path as FsPath;
 
 #[get("/channels/{channel}/episodes/")]
 async fn read_with_pagination(
     data: Data<AppState>,
     session: Session,
-    path: Path<String>
-) -> impl Responder{
+    path: Path<String>,
+) -> impl Responder {
     info!("read_api_channels");
     let key = path.into_inner();
-    match Channel::read_by_id_or_slug(&data.pool, &key).await{
-        Ok(channel) => match Episode::read_episodes_for_channel(&data.pool, channel.id).await{
+    match Channel::read_by_id_or_slug(&data.pool, &key).await {
+        Ok(channel) => match Episode::read_episodes_for_channel(&data.pool, channel.id).await {
             Ok(mut episodes) => {
                 debug!("{:?}", episodes);
-                for episode in episodes.iter_mut(){
+                for episode in episodes.iter_mut() {
                     episode.channel_slug = channel.slug.clone();
+                    episode.apply_sponsorblock_config(
+                        data.config.sponsorblock_enabled,
+                        &data.config.sponsorblock_rejected_categories,
+                    );
                 }
                 Ok(CResponse::ok(session, episodes))
-            },
+            }
             Err(e) => {
                 error!("{e}");
                 Err(e)
@@ -61,13 +48,18 @@ async fn read_with_pagination(
 }
 
 #[get("/episodes/")]
-async fn read_all(
-    data: Data<AppState>,
-    session: Session,
-) -> impl Responder{
+async fn read_all(data: Data<AppState>, session: Session) -> impl Responder {
     info!("read_all");
-    match Episode::read_all_with_channels(&data.pool).await{
-        Ok(episodes) => Ok(CResponse::ok(session, episodes)),
+    match Episode::read_all_with_channels(&data.pool).await {
+        Ok(mut episodes) => {
+            for episode in &mut episodes {
+                episode.apply_sponsorblock_config(
+                    data.config.sponsorblock_enabled,
+                    &data.config.sponsorblock_rejected_categories,
+                );
+            }
+            Ok(CResponse::ok(session, episodes))
+        }
         Err(e) => {
             error!("{e}");
             Err(e)
@@ -93,11 +85,11 @@ async fn read_progress(
     yt_id: Path<String>,
 ) -> actix_web::HttpResponse {
     info!("read_progress");
-    match Episode::read_progress_by_yt_id(&data.pool, &yt_id.into_inner()).await{
+    match Episode::read_progress_by_yt_id(&data.pool, &yt_id.into_inner()).await {
         Ok(progress) => {
             let progress: EpisodeProgress = progress;
             CResponse::ok(session, progress)
-        },
+        }
         Err(e) => {
             // A missing episode is 404; any other failure (e.g. a real
             // database error) surfaces its own status instead of being masked.
@@ -123,7 +115,9 @@ async fn update_progress(
         &yt_id.into_inner(),
         position_seconds,
         body.listened,
-    ).await{
+    )
+    .await
+    {
         // The request is fire-and-forget: the 204 status alone confirms the
         // write; no response body is needed.
         Ok(_) => HttpResponse::NoContent().finish(),
@@ -146,7 +140,9 @@ async fn update_favorite(
         &data.pool,
         &yt_id.into_inner(),
         body.into_inner().favorite,
-    ).await{
+    )
+    .await
+    {
         // Fire-and-forget like the progress write: the 204 alone confirms the
         // write; a missing episode surfaces its 404 through the error status.
         Ok(_) => HttpResponse::NoContent().finish(),
@@ -163,11 +159,20 @@ async fn refresh_sponsorblock(
     session: Session,
     yt_id: Path<String>,
 ) -> actix_web::HttpResponse {
+    if !data.config.sponsorblock_enabled {
+        return CResponse::ko_with_message(
+            actix_web::http::StatusCode::CONFLICT,
+            "SponsorBlock is disabled",
+            session,
+        );
+    }
     match refresh_sponsorblock_episode(
         &data.pool,
         &SponsorBlockClient::default(),
         FsPath::new(audios_dir()),
         &yt_id.into_inner(),
+        data.config.sponsorblock_enabled,
+        &data.config.sponsorblock_rejected_categories,
     )
     .await
     {
@@ -184,11 +189,21 @@ async fn refresh_sponsorblock_episode(
     client: &SponsorBlockClient,
     audio_root: &FsPath,
     yt_id: &str,
+    sponsorblock_enabled: bool,
+    rejected_categories: &[String],
 ) -> Result<Episode, super::super::models::Error> {
+    if !sponsorblock_enabled {
+        return Err(super::super::models::Error::new_with_status_code(
+            "SponsorBlock is disabled",
+            actix_web::http::StatusCode::CONFLICT,
+        ));
+    }
     let episode = Episode::read_by_yt_id_with_channel(pool, yt_id).await?;
     let channel_dir = audio_root.join(&episode.channel_slug);
-    reconcile_episode(pool, client, &episode, &channel_dir).await?;
-    Episode::read_by_yt_id_with_channel(pool, yt_id).await
+    reconcile_episode(pool, client, &episode, &channel_dir, rejected_categories).await?;
+    let mut episode = Episode::read_by_yt_id_with_channel(pool, yt_id).await?;
+    episode.apply_sponsorblock_config(true, rejected_categories);
+    Ok(episode)
 }
 
 #[cfg(test)]
@@ -252,7 +267,9 @@ mod tests {
             let read = stream.read(&mut request).unwrap();
             assert!(String::from_utf8_lossy(&request[..read]).contains("videoID=old-favorite"));
             stream
-                .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                )
                 .unwrap();
         });
         format!("http://{address}")
@@ -263,13 +280,24 @@ mod tests {
         let (pool, root) = fixture().await;
         let client = SponsorBlockClient::new(&empty_snapshot_server(), Duration::from_secs(1));
 
-        let refreshed = refresh_sponsorblock_episode(&pool, &client, &root, "old-favorite")
-            .await
-            .unwrap();
+        let refreshed = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "old-favorite",
+            true,
+            &["sponsor".to_string()],
+        )
+        .await
+        .unwrap();
 
         assert!(refreshed.favorite);
+        assert!(refreshed.sponsorblock_enabled);
         assert!(refreshed.sponsorblock_segments.is_empty());
-        assert!(SponsorBlockCache::read(&pool, refreshed.id).await.unwrap().is_some());
+        assert!(SponsorBlockCache::read(&pool, refreshed.id)
+            .await
+            .unwrap()
+            .is_some());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -278,11 +306,48 @@ mod tests {
         let (pool, root) = fixture().await;
         let client = SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(50));
 
-        let error = refresh_sponsorblock_episode(&pool, &client, &root, "unknown")
-            .await
-            .unwrap_err();
+        let error = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "unknown",
+            true,
+            &["sponsor".to_string()],
+        )
+        .await
+        .unwrap_err();
 
         assert_eq!(error.status_code(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn disabled_manual_refresh_stops_before_lookup_or_client_access() {
+        let (pool, root) = fixture().await;
+        let client = SponsorBlockClient::new("http://127.0.0.1:1", Duration::from_millis(10));
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sponsorblock_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let error = refresh_sponsorblock_episode(
+            &pool,
+            &client,
+            &root,
+            "old-favorite",
+            false,
+            &["sponsor".to_string()],
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.status_code(), StatusCode::CONFLICT);
+        assert!(error.to_string().contains("disabled"));
+        let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sponsorblock_cache")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

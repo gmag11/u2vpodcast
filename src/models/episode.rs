@@ -1,4 +1,4 @@
-use super::{Error, PlaylistItem, SponsorBlockSegment};
+use super::{EpisodeSponsorBlockSegment, Error, PlaylistItem, SponsorBlockSegment};
 use actix_web::http::StatusCode;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,9 @@ pub struct Episode {
     pub listened_at: Option<DateTime<Utc>>,
     pub favorite: bool,
     #[serde(default)]
-    pub sponsorblock_segments: Vec<SponsorBlockSegment>,
+    pub sponsorblock_enabled: bool,
+    #[serde(default)]
+    pub sponsorblock_segments: Vec<EpisodeSponsorBlockSegment>,
     #[serde(default)]
     pub sponsorblock_hash: Option<String>,
     #[serde(skip)]
@@ -65,16 +67,34 @@ fn get_default_empty() -> String {
 }
 
 impl Episode {
-    pub fn selected_media(&self, channel_dir: &Path) -> SelectedEpisodeMedia {
-        if let (Some(filename), Some(duration)) = (
-            self.sponsorblock_processed_filename.as_deref(),
-            self.sponsorblock_processed_duration,
-        ) {
-            if channel_dir.join(filename).is_file() {
-                return SelectedEpisodeMedia {
-                    filename: filename.to_string(),
-                    duration: duration.round().max(0.0).to_string(),
-                };
+    pub fn apply_sponsorblock_config(&mut self, enabled: bool, rejected_categories: &[String]) {
+        self.sponsorblock_enabled = enabled;
+        if !enabled {
+            self.sponsorblock_segments.clear();
+            self.sponsorblock_hash = None;
+            return;
+        }
+        for segment in &mut self.sponsorblock_segments {
+            segment.rejected = rejected_categories.contains(&segment.category);
+        }
+    }
+
+    pub fn selected_media(
+        &self,
+        channel_dir: &Path,
+        sponsorblock_enabled: bool,
+    ) -> SelectedEpisodeMedia {
+        if sponsorblock_enabled {
+            if let (Some(filename), Some(duration)) = (
+                self.sponsorblock_processed_filename.as_deref(),
+                self.sponsorblock_processed_duration,
+            ) {
+                if channel_dir.join(filename).is_file() {
+                    return SelectedEpisodeMedia {
+                        filename: filename.to_string(),
+                        duration: duration.round().max(0.0).to_string(),
+                    };
+                }
             }
         }
         SelectedEpisodeMedia {
@@ -85,16 +105,28 @@ impl Episode {
 
     fn sponsorblock_fields(
         row: &SqliteRow,
-    ) -> (Vec<SponsorBlockSegment>, Option<String>, Option<String>, Option<f64>) {
+    ) -> (
+        Vec<EpisodeSponsorBlockSegment>,
+        Option<String>,
+        Option<String>,
+        Option<f64>,
+    ) {
         let segments = row
             .try_get::<Option<String>, _>("sponsorblock_segments_json")
             .ok()
             .flatten()
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
+            .and_then(|json| serde_json::from_str::<Vec<SponsorBlockSegment>>(&json).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|segment| segment.for_api(false))
+            .collect();
         let hash = row.try_get("sponsorblock_hash").unwrap_or(None);
-        let filename = row.try_get("sponsorblock_processed_filename").unwrap_or(None);
-        let duration = row.try_get("sponsorblock_processed_duration").unwrap_or(None);
+        let filename = row
+            .try_get("sponsorblock_processed_filename")
+            .unwrap_or(None);
+        let duration = row
+            .try_get("sponsorblock_processed_duration")
+            .unwrap_or(None);
         (segments, hash, filename, duration)
     }
 
@@ -117,6 +149,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
             sponsorblock_processed_filename: filename,
@@ -145,6 +178,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
             sponsorblock_processed_filename: filename,
@@ -155,10 +189,18 @@ impl Episode {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(pool: &SqlitePool, channel_id: i64, title: &str,
-            description: &str, yt_id: &str, webpage_url: &str,
-            published_at: &DateTime<Utc>, duration: &str, image: &str,
-            listen: bool) -> Result<Self, Error>{
+    pub async fn new(
+        pool: &SqlitePool,
+        channel_id: i64,
+        title: &str,
+        description: &str,
+        yt_id: &str,
+        webpage_url: &str,
+        published_at: &DateTime<Utc>,
+        duration: &str,
+        image: &str,
+        listen: bool,
+    ) -> Result<Self, Error> {
         info!("new");
         let created_at = Utc::now();
         let updated_at = created_at;
@@ -178,6 +220,7 @@ impl Episode {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
             sponsorblock_processed_filename: None,
@@ -188,10 +231,7 @@ impl Episode {
         episode.save(pool).await
     }
 
-    pub async fn create(
-        pool: &SqlitePool,
-        episode: &Self,
-    ) -> Result<Episode, Error> {
+    pub async fn create(pool: &SqlitePool, episode: &Self) -> Result<Episode, Error> {
         let sql = "INSERT INTO episodes (channel_id, title, description, yt_id,
                    webpage_url, published_at, duration, image, listen,
                    position_seconds, listened_at, favorite, created_at,
@@ -219,7 +259,7 @@ impl Episode {
             .map_err(|e| e.into())
     }
 
-    pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
+    pub async fn read(pool: &SqlitePool, id: i64) -> Result<Self, Error> {
         info!("read");
         let sql = "SELECT e.*, sc.segments_json AS sponsorblock_segments_json, \
                   sc.snapshot_hash AS sponsorblock_hash, \
@@ -235,7 +275,10 @@ impl Episode {
             .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
     }
 
-    pub async fn read_episodes_for_channel(pool: &SqlitePool, channel_id: i64) -> Result<Vec<Self>, Error>{
+    pub async fn read_episodes_for_channel(
+        pool: &SqlitePool,
+        channel_id: i64,
+    ) -> Result<Vec<Self>, Error> {
         info!("read_all");
         let sql = "SELECT e.*, sc.segments_json AS sponsorblock_segments_json, \
                   sc.snapshot_hash AS sponsorblock_hash, \
@@ -254,7 +297,7 @@ impl Episode {
     // variant of the same query, following the `#[allow(unused)]` precedent
     // used on other optional model helpers.
     #[allow(dead_code)]
-    pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+    pub async fn read_all(pool: &SqlitePool) -> Result<Vec<Self>, Error> {
         info!("read_all");
         let sql = "SELECT e.*, sc.segments_json AS sponsorblock_segments_json, \
                   sc.snapshot_hash AS sponsorblock_hash, \
@@ -269,7 +312,7 @@ impl Episode {
             .map_err(|e| e.into())
     }
 
-    pub async fn read_all_with_channels(pool: &SqlitePool) -> Result<Vec<Self>, Error>{
+    pub async fn read_all_with_channels(pool: &SqlitePool) -> Result<Vec<Self>, Error> {
         info!("read_all_with_channels");
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, COALESCE(c.title, '') AS channel_title, \
                   sc.segments_json AS sponsorblock_segments_json, \
@@ -286,10 +329,7 @@ impl Episode {
             .map_err(|e| e.into())
     }
 
-    pub async fn read_by_yt_id_with_channel(
-        pool: &SqlitePool,
-        yt_id: &str,
-    ) -> Result<Self, Error> {
+    pub async fn read_by_yt_id_with_channel(pool: &SqlitePool, yt_id: &str) -> Result<Self, Error> {
         let sql = "SELECT e.*, COALESCE(c.slug, '') AS channel_slug, COALESCE(c.title, '') AS channel_title, \
                           sc.segments_json AS sponsorblock_segments_json, sc.snapshot_hash AS sponsorblock_hash, \
                           sc.processed_filename AS sponsorblock_processed_filename, \
@@ -338,7 +378,6 @@ impl Episode {
             }
         }
     }
-
 
     #[allow(unused)]
     pub async fn read_with_pagination(
@@ -514,9 +553,7 @@ impl Episode {
             })
             .fetch_optional(pool)
             .await?
-            .ok_or_else(|| {
-                Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND)
-            })
+            .ok_or_else(|| Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND))
     }
 
     pub async fn remove(pool: &SqlitePool, id: i64) -> Result<Episode, Error> {
@@ -533,14 +570,13 @@ impl Episode {
         Ok(episode)
     }
 
-
-    pub async fn save(&mut self, pool: &SqlitePool) -> Result<Self, Error>{
+    pub async fn save(&mut self, pool: &SqlitePool) -> Result<Self, Error> {
         info!("save");
         if self.id > -1 {
             let saved = Self::update(pool, self).await?;
             self.updated_at = saved.updated_at;
             Ok(saved)
-        }else{
+        } else {
             let saved = Self::create(pool, self).await?;
             self.id = saved.id;
             Ok(saved)
@@ -551,10 +587,7 @@ impl Episode {
 #[cfg(test)]
 mod episode_update_tests {
     use super::*;
-    use sqlx::{
-        sqlite::SqlitePoolOptions,
-        migrate::Migrator,
-    };
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::path::Path;
 
     async fn memory_pool() -> SqlitePool {
@@ -613,6 +646,7 @@ mod episode_update_tests {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
             sponsorblock_processed_filename: None,
@@ -623,7 +657,33 @@ mod episode_update_tests {
     }
 
     #[test]
-    fn selected_media_requires_an_existing_processed_file() {
+    fn sponsorblock_api_projection_uses_current_configuration_and_suppresses_disabled_data() {
+        let mut episode = episode_struct(1, "video-id");
+        episode.sponsorblock_hash = Some("snapshot".to_string());
+        episode.sponsorblock_segments = vec![
+            SponsorBlockSegment::new(10.0, 20.0, "sponsor").for_api(false),
+            SponsorBlockSegment::new(15.0, 25.0, "intro").for_api(false),
+        ];
+
+        episode.apply_sponsorblock_config(true, &["sponsor".to_string()]);
+        assert!(episode.sponsorblock_enabled);
+        assert!(episode.sponsorblock_segments[0].rejected);
+        assert!(!episode.sponsorblock_segments[1].rejected);
+
+        episode.apply_sponsorblock_config(true, &[]);
+        assert!(episode
+            .sponsorblock_segments
+            .iter()
+            .all(|segment| !segment.rejected));
+
+        episode.apply_sponsorblock_config(false, &["sponsor".to_string()]);
+        assert!(!episode.sponsorblock_enabled);
+        assert!(episode.sponsorblock_segments.is_empty());
+        assert!(episode.sponsorblock_hash.is_none());
+    }
+
+    #[test]
+    fn selected_media_requires_enablement_and_an_existing_processed_file() {
         let channel_dir = std::env::temp_dir().join(format!(
             "u2vpodcast-selected-media-{}",
             rand::random::<u64>()
@@ -632,7 +692,7 @@ mod episode_update_tests {
         let mut episode = episode_struct(1, "video-id");
 
         assert_eq!(
-            episode.selected_media(&channel_dir),
+            episode.selected_media(&channel_dir, true),
             SelectedEpisodeMedia {
                 filename: "video-id.mp3".to_string(),
                 duration: "00:10:00".to_string(),
@@ -640,12 +700,18 @@ mod episode_update_tests {
         );
 
         episode.sponsorblock_hash = Some("empty-hash".to_string());
-        assert_eq!(episode.selected_media(&channel_dir).filename, "video-id.mp3");
+        assert_eq!(
+            episode.selected_media(&channel_dir, true).filename,
+            "video-id.mp3"
+        );
 
         episode.sponsorblock_processed_filename =
             Some("video-id.sponsorblock.abcdef.mp3".to_string());
         episode.sponsorblock_processed_duration = Some(539.6);
-        assert_eq!(episode.selected_media(&channel_dir).filename, "video-id.mp3");
+        assert_eq!(
+            episode.selected_media(&channel_dir, true).filename,
+            "video-id.mp3"
+        );
 
         std::fs::write(
             channel_dir.join("video-id.sponsorblock.abcdef.mp3"),
@@ -653,11 +719,19 @@ mod episode_update_tests {
         )
         .expect("write processed fixture");
         assert_eq!(
-            episode.selected_media(&channel_dir),
+            episode.selected_media(&channel_dir, true),
             SelectedEpisodeMedia {
                 filename: "video-id.sponsorblock.abcdef.mp3".to_string(),
                 duration: "540".to_string(),
             }
+        );
+        assert_eq!(
+            episode.selected_media(&channel_dir, false).filename,
+            "video-id.mp3"
+        );
+        assert_eq!(
+            episode.selected_media(&channel_dir, false).duration,
+            "00:10:00"
         );
         std::fs::remove_dir_all(channel_dir).expect("remove fixture directory");
     }
@@ -676,7 +750,10 @@ mod episode_update_tests {
         update.title = "episode aaa111 (updated)".to_string();
         let saved = update.save(&pool).await.expect("save must succeed");
 
-        assert_eq!(saved.id, saved_1.id, "the returned row must be the updated episode");
+        assert_eq!(
+            saved.id, saved_1.id,
+            "the returned row must be the updated episode"
+        );
         assert_eq!(saved.title, "episode aaa111 (updated)");
 
         let count: i64 = query("SELECT count(*) FROM episodes WHERE title = $1")
@@ -728,14 +805,24 @@ mod episode_update_tests {
             .await
             .expect("create last");
         for episode in [&first, &middle, &last] {
-            PlaylistItem::add(&pool, episode.id).await.expect("add playlist item");
+            PlaylistItem::add(&pool, episode.id)
+                .await
+                .expect("add playlist item");
         }
 
-        Episode::remove(&pool, middle.id).await.expect("remove episode");
+        Episode::remove(&pool, middle.id)
+            .await
+            .expect("remove episode");
 
         let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
-        assert_eq!(items.iter().map(|item| item.episode_id).collect::<Vec<_>>(), vec![first.id, last.id]);
-        assert_eq!(items.iter().map(|item| item.position).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(
+            items.iter().map(|item| item.episode_id).collect::<Vec<_>>(),
+            vec![first.id, last.id]
+        );
+        assert_eq!(
+            items.iter().map(|item| item.position).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[tokio::test]
@@ -748,9 +835,13 @@ mod episode_update_tests {
         let removed = Episode::create(&pool, &episode_struct(channel_id, "gone22"))
             .await
             .expect("create removed");
-        PlaylistItem::add(&pool, kept.id).await.expect("add kept item");
+        PlaylistItem::add(&pool, kept.id)
+            .await
+            .expect("add kept item");
 
-        Episode::remove(&pool, removed.id).await.expect("remove episode");
+        Episode::remove(&pool, removed.id)
+            .await
+            .expect("remove episode");
 
         let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
         assert_eq!(items.len(), 1);
@@ -774,7 +865,10 @@ mod episode_update_tests {
         assert_eq!(updated.id, saved.id);
         assert_eq!(updated.yt_id, "ddd444");
         assert_eq!(updated.position_seconds, 1300);
-        assert!(!updated.listen, "position-only update must not mark listened");
+        assert!(
+            !updated.listen,
+            "position-only update must not mark listened"
+        );
         assert!(
             updated.listened_at.is_none(),
             "position-only update must leave listened_at empty"
@@ -826,8 +920,7 @@ mod episode_update_tests {
     #[tokio::test]
     async fn progress_update_for_unknown_yt_id_errors() {
         let pool = memory_pool().await;
-        let result = Episode::update_progress_by_yt_id(&pool, "unknown_yt_id_zzz", 10, false)
-            .await;
+        let result = Episode::update_progress_by_yt_id(&pool, "unknown_yt_id_zzz", 10, false).await;
         let err = result.expect_err("unknown episode must produce an error");
         assert_eq!(
             err.status_code(),
@@ -847,7 +940,10 @@ mod episode_update_tests {
             .await
             .expect("mark must succeed");
         let first_listened_at = first.listened_at;
-        assert!(first_listened_at.is_some(), "must record the completion time");
+        assert!(
+            first_listened_at.is_some(),
+            "must record the completion time"
+        );
 
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
@@ -925,5 +1021,3 @@ mod episode_update_tests {
         assert!(missing.is_err(), "unknown episode must 404");
     }
 }
-
-

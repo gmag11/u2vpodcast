@@ -1,10 +1,21 @@
-use std::path::Path;
 use serde::Deserialize;
+use std::{collections::HashSet, path::Path};
 use tokio::fs::read_to_string;
-use tracing::{info, debug};
+use tracing::{debug, info};
+
+pub const SUPPORTED_SPONSORBLOCK_CATEGORIES: [&str; 8] = [
+    "sponsor",
+    "selfpromo",
+    "interaction",
+    "intro",
+    "outro",
+    "preview",
+    "music_offtopic",
+    "filler",
+];
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config{
+pub struct Config {
     pub production: bool,
     pub url: String,
     pub port: u16,
@@ -23,6 +34,14 @@ pub struct Config{
     pub db_pool_max_connections: u32,
     #[serde(default = "default_cooldown_seconds")]
     pub cooldown_seconds: u64,
+    #[serde(default)]
+    pub sponsorblock_enabled: bool,
+    #[serde(default = "default_sponsorblock_rejected_categories")]
+    pub sponsorblock_rejected_categories: Vec<String>,
+}
+
+fn default_sponsorblock_rejected_categories() -> Vec<String> {
+    vec!["sponsor".to_string()]
 }
 
 fn default_cooldown_seconds() -> u64 {
@@ -91,6 +110,34 @@ pub fn cookies_file() -> &'static str {
 }
 
 impl Config {
+    fn from_yaml(content: &str) -> Result<Self, String> {
+        let config: Self = serde_yaml::from_str(content)
+            .map_err(|error| format!("Can't process config file `config.yml`: {error}"))?;
+        config.validate()
+    }
+
+    fn validate(mut self) -> Result<Self, String> {
+        let configured = self
+            .sponsorblock_rejected_categories
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        if let Some(invalid) = configured
+            .iter()
+            .find(|category| !SUPPORTED_SPONSORBLOCK_CATEGORIES.contains(category))
+        {
+            return Err(format!(
+                "invalid SponsorBlock category `{invalid}` in `sponsorblock_rejected_categories`"
+            ));
+        }
+        self.sponsorblock_rejected_categories = SUPPORTED_SPONSORBLOCK_CATEGORIES
+            .iter()
+            .filter(|category| configured.contains(**category))
+            .map(|category| (*category).to_string())
+            .collect();
+        Ok(self)
+    }
+
     pub fn admin_credentials_present(&self) -> bool {
         let username = self
             .admin_username
@@ -111,7 +158,67 @@ impl Config {
             .await
             .expect("Can't read config file `config.yml`");
         debug!("Content: {content}");
-        serde_yaml::from_str(&content)
-            .expect("Can't process config file `config.yml`")
+        Self::from_yaml(&content).unwrap_or_else(|error| panic!("{error}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn yaml(extra: &str) -> String {
+        format!(
+            "production: false\nurl: http://localhost:6996\nport: 6996\nsleep_time: 1\nper_page: 3\nsecret_key: {}\n{extra}",
+            "x".repeat(64)
+        )
+    }
+
+    #[test]
+    fn sponsorblock_defaults_to_disabled_and_sponsor_only() {
+        let config = Config::from_yaml(&yaml("")).unwrap();
+        assert!(!config.sponsorblock_enabled);
+        assert_eq!(config.sponsorblock_rejected_categories, ["sponsor"]);
+    }
+
+    #[test]
+    fn sponsorblock_accepts_enabled_empty_and_normalized_categories() {
+        let empty = Config::from_yaml(&yaml(
+            "sponsorblock_enabled: true\nsponsorblock_rejected_categories: []\n",
+        ))
+        .unwrap();
+        assert!(empty.sponsorblock_enabled);
+        assert!(empty.sponsorblock_rejected_categories.is_empty());
+
+        let normalized = Config::from_yaml(&yaml(
+            "sponsorblock_enabled: true\nsponsorblock_rejected_categories: [intro, sponsor, intro]\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            normalized.sponsorblock_rejected_categories,
+            ["sponsor", "intro"]
+        );
+    }
+
+    #[test]
+    fn sponsorblock_disabled_selection_is_valid_but_does_not_enable_it() {
+        let config = Config::from_yaml(&yaml(
+            "sponsorblock_enabled: false\nsponsorblock_rejected_categories: [outro]\n",
+        ))
+        .unwrap();
+        assert!(!config.sponsorblock_enabled);
+        assert_eq!(config.sponsorblock_rejected_categories, ["outro"]);
+    }
+
+    #[test]
+    fn checked_in_sample_config_parses() {
+        Config::from_yaml(include_str!("../../config.yml")).expect("sample config must parse");
+    }
+
+    #[test]
+    fn sponsorblock_rejects_unknown_categories() {
+        let error =
+            Config::from_yaml(&yaml("sponsorblock_rejected_categories: [sponser]\n")).unwrap_err();
+        assert!(error.contains("sponser"));
+        assert!(error.contains("invalid SponsorBlock category"));
     }
 }

@@ -30,7 +30,10 @@
 		const episode = player.currentEpisode;
 		if (!episode) return [];
 		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
-		return sponsorBlockTimelineMarkers(duration, episode.sponsorblock_segments);
+		return sponsorBlockTimelineMarkers(
+			duration,
+			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
+		);
 	});
 
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -258,7 +261,9 @@
 						<div
 							v-for="(marker, index) in sponsorBlockMarkers"
 							:key="index"
-							class="absolute inset-y-0 z-10 bg-sponsorblock"
+							class="absolute inset-y-0 z-10"
+							:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+							:data-category="marker.category"
 							data-testid="player-sponsorblock-segment"
 							:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
 						></div>
