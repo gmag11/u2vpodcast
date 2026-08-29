@@ -33,6 +33,7 @@
 	const editingChannel = ref<Channel | null>(null);
 	const pendingDelete = ref<Channel | null>(null);
 	const refreshingSlug = ref<string | null>(null);
+	const saving = ref(false);
 
 	const SORT_KEY = 'channel-sort';
 
@@ -145,27 +146,32 @@
 	}
 
 	async function saveChannel(channel: Channel) {
-		if (channel.id > 0) {
-			const result = await api.updateChannel(channel.slug, channel);
-			if (result.ok) {
-				const idx = channels.value.findIndex((c) => c.id === channel.id);
-				// Apply the server response so fields the backend rejected or
-				// normalized (e.g. empty title -> 400) are never flashed as saved.
-				if (idx >= 0 && result.data) channels.value[idx] = result.data;
-				notification.show(t('channels.updated'), 'success');
+		saving.value = true;
+		try {
+			if (channel.id > 0) {
+				const result = await api.updateChannel(channel.slug, channel);
+				if (result.ok) {
+					const idx = channels.value.findIndex((c) => c.id === channel.id);
+					// Apply the server response so fields the backend rejected or
+					// normalized (e.g. empty title -> 400) are never flashed as saved.
+					if (idx >= 0 && result.data) channels.value[idx] = result.data;
+					notification.show(t('channels.updated'), 'success');
+				} else {
+					notification.show(t('channels.updateFailed'), 'error');
+				}
 			} else {
-				notification.show(t('channels.updateFailed'), 'error');
+				const result = await api.createChannel(channel);
+				if (result.ok && result.data) {
+					channels.value = [...channels.value, result.data];
+					notification.show(t('channels.created'), 'success');
+				} else {
+					notification.show(t('channels.createFailed'), 'error');
+				}
 			}
-		} else {
-			const result = await api.createChannel(channel);
-			if (result.ok && result.data) {
-				channels.value = [...channels.value, result.data];
-				notification.show(t('channels.created'), 'success');
-			} else {
-				notification.show(t('channels.createFailed'), 'error');
-			}
+			showAddDialog.value = false;
+		} finally {
+			saving.value = false;
 		}
-		showAddDialog.value = false;
 	}
 
 	async function deletePendingChannel() {
@@ -279,7 +285,12 @@
 		/>
 	</main>
 
-	<AddChannelDialog v-model:open="showAddDialog" :channel="editingChannel" @save="saveChannel" />
+	<AddChannelDialog
+		v-model:open="showAddDialog"
+		:channel="editingChannel"
+		:saving="saving"
+		@save="saveChannel"
+	/>
 
 	<ConfirmDialog
 		v-model:open="showConfirmDialog"
