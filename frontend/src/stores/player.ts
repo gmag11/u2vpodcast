@@ -262,7 +262,14 @@ export const usePlayerStore = defineStore('player', () => {
 		const known = channelSpeedBySlug.value[episode.channel_slug];
 		const next = known ?? episode.playback_speed ?? 1.0;
 		speed.value = next;
-		if (audio) audio.playbackRate = next;
+		if (audio) {
+			// Browsers reset playbackRate to defaultPlaybackRate when load()
+			// runs (fire-and-forget retargets), so both properties must carry
+			// the channel's saved value: playbackRate is the live rate,
+			// defaultPlaybackRate is what a subsequent load() resets to.
+			audio.defaultPlaybackRate = next;
+			audio.playbackRate = next;
+		}
 		publishMediaPositionState();
 	}
 
@@ -745,10 +752,6 @@ export const usePlayerStore = defineStore('player', () => {
 		}
 		currentEpisode.value = episode;
 		stopped.value = false;
-		// The source is about to retarget: re-apply the new episode's channel
-		// speed so the element's persisted playbackRate never leaks the
-		// previous channel's rate into this episode (per-channel-playback-speed).
-		applyChannelSpeed(episode);
 		publishMediaMetadata(episode);
 		publishMediaPlaybackState('paused');
 		// Playback is (re)starting on this episode: any previous finalize no
@@ -766,6 +769,12 @@ export const usePlayerStore = defineStore('player', () => {
 			currentTime.value = 0;
 			await meta;
 		}
+		// load() above resets the element's playbackRate to defaultPlaybackRate:
+		// the channel speed must be (re)applied only after any reload, right
+		// before playback starts, so the saved rate is actually audible and the
+		// previous channel's rate can never leak into the new episode
+		// (per-channel-playback-speed).
+		applyChannelSpeed(episode);
 		await seekResumeOnPlay(el);
 	}
 
@@ -995,10 +1004,6 @@ export const usePlayerStore = defineStore('player', () => {
 			// Playback is restarting: a previous finalize no longer protects
 			// the episode's completion position from live saves.
 			finalizedEpisodeId = null;
-			// A restored-queue restart loads the source outside `loadEpisode`, so
-			// the channel's saved speed is (re)applied here too: the element's
-			// playbackRate must reflect the episode's channel before playback.
-			applyChannelSpeed(currentEpisode.value);
 			// After a reload/restore the shared element may have been created
 			// with an empty source: (re)load the current episode before playing.
 			const reloading = !el.src || el.src === '';
@@ -1010,6 +1015,11 @@ export const usePlayerStore = defineStore('player', () => {
 				el.load();
 				await meta;
 			}
+			// load() above (and every real load()) resets playbackRate: re-apply
+			// the channel's saved speed after any reload and before play, so a
+			// restored-queue restart starts at the right rate
+			// (per-channel-playback-speed).
+			applyChannelSpeed(currentEpisode.value);
 			if (wasStopped) {
 				// Replaying a stopped episode follows the same resume policy as
 				// a fresh `play()` (playback-progress).

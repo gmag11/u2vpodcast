@@ -27,6 +27,8 @@ class MockAudioElement {
 	volume = 1;
 	muted = false;
 	playbackRate = 1;
+	// A real media element keeps the rate a load() should reset back to.
+	defaultPlaybackRate = 1;
 	paused = true;
 	preload = 'metadata';
 
@@ -38,7 +40,9 @@ class MockAudioElement {
 	pause = vi.fn(() => {
 		this.paused = true;
 	});
-	load = vi.fn();
+	load = vi.fn(() => {
+		this.playbackRate = this.defaultPlaybackRate;
+	});
 
 	addEventListener(event: string, listener: () => void) {
 		(this.listeners[event] ??= []).push(listener);

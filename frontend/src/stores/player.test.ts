@@ -51,6 +51,8 @@ class MockAudioElement {
 	volume = 1;
 	muted = false;
 	playbackRate = 1;
+	// A real media element keeps the rate a load() should reset back to.
+	defaultPlaybackRate = 1;
 	paused = true;
 	preload = 'metadata';
 
@@ -80,10 +82,12 @@ class MockAudioElement {
 	});
 
 	load = vi.fn(() => {
-		// a real media element resets the playhead and duration on load() and
-		// reports its metadata once parsed
+		// a real media element resets the playhead, duration and playback
+		// rate (to defaultPlaybackRate) on load() and reports its metadata
+		// once parsed
 		this.currentTime = 0;
 		this.duration = 0;
+		this.playbackRate = this.defaultPlaybackRate;
 		this.emit('loadedmetadata');
 	});
 
@@ -1864,6 +1868,22 @@ describe('player store per-channel playback speed', () => {
 		player.setSpeed(1.35);
 		expect(player.speed).toBe(1.35);
 		await vi.waitFor(() => expect(api.setChannelPlaybackSpeed).toHaveBeenCalledWith('b', 1.35));
+	});
+
+	it('applies the rate to the element when a second episode starts', async () => {
+		const player = usePlayerStore();
+		const first = channelEpisode(1, 'a', 2);
+		const second = channelEpisode(2, 'b', 1.35);
+		await player.play(first, [first]);
+		const audio = MockAudioElement.instances[0];
+		expect(audio.playbackRate).toBe(2);
+
+		// starting a second episode retargets the source (load() resets the
+		// element's rate): the store state updates AND the element must really
+		// play at the new channel's speed
+		await player.play(second, [second]);
+		expect(player.speed).toBe(1.35);
+		expect(audio.playbackRate).toBe(1.35);
 	});
 
 	it('clamps the speed to the supported range', async () => {
