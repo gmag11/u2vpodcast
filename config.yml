@@ -7,7 +7,7 @@ title: u2vpodcast
 # does not affect them either way.
 url: http://localhost:6996
 port: 6996
-sleep_time: 1
+sleep_time: 4
 per_page: 3
 # Session signing key. MUST be exactly 64 characters (64 bytes); a shorter
 # value makes the server panic at startup (the cookie crate Key::from requires
