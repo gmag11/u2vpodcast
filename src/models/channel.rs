@@ -29,7 +29,14 @@ pub struct Channel {
     pub last_sync_at: Option<DateTime<Utc>>,
     pub last_sync_ok: Option<bool>,
     pub last_sync_error: Option<String>,
+    pub playback_speed: f64,
 }
+
+// Supported playback rate range for the per-channel speed (shared with the
+// player UI; values outside are rejected by `set_playback_speed`). The
+// boundary is enforced at the API so the stored value is always usable.
+pub const PLAYBACK_SPEED_MIN: f64 = 0.5;
+pub const PLAYBACK_SPEED_MAX: f64 = 3.0;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NewChannel {
@@ -91,6 +98,7 @@ impl Channel {
             last_sync_at: row.try_get("last_sync_at").unwrap_or(None),
             last_sync_ok: row.try_get("last_sync_ok").unwrap_or(None),
             last_sync_error: row.try_get("last_sync_error").unwrap_or(None),
+            playback_speed: row.try_get("playback_speed").unwrap_or(1.0),
         }
     }
 
@@ -542,6 +550,36 @@ impl Channel {
             .map_err(|e| Error::default(&e.to_string()))?;
         Ok(())
     }
+
+    // Updates the channel's saved playback speed. Validation lives here so
+    // every caller (HTTP handler, future callers) gets the same boundary:
+    // non-finite values and values outside the supported range are rejected
+    // with a client error; an unknown slug answers not-found
+    // (per-channel-playback-speed).
+    pub async fn set_playback_speed(
+        pool: &SqlitePool,
+        slug: &str,
+        speed: f64,
+    ) -> Result<Self, Error> {
+        info!("set_playback_speed");
+        if !speed.is_finite() || !(PLAYBACK_SPEED_MIN..=PLAYBACK_SPEED_MAX).contains(&speed) {
+            return Err(Error::new_with_status_code(
+                "playback_speed must be a finite number between 0.5 and 3.0",
+                StatusCode::BAD_REQUEST,
+            ));
+        }
+        // Normalize to two decimals so the stored value is unambiguous
+        // (floats like 1.7000000000000002 never reach the database).
+        let rounded = (speed * 100.0).round() / 100.0;
+        let sql = "UPDATE channels SET playback_speed = $1 WHERE slug = $2 RETURNING *";
+        query(sql)
+            .bind(rounded)
+            .bind(slug)
+            .map(Self::from_row)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| Error::new_with_status_code(&e.to_string(), StatusCode::NOT_FOUND))
+    }
 }
 
 #[cfg(test)]
@@ -714,5 +752,111 @@ mod channel_pagination_tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].episode_id, kept);
         assert_eq!(items[0].position, 0);
+    }
+}
+
+#[cfg(test)]
+mod playback_speed_tests {
+    use super::*;
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
+    use std::path::Path;
+
+    async fn memory_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        Migrator::new(migrations)
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_channel(pool: &SqlitePool, url: &str, title: &str) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind(url)
+        .bind(title)
+        .bind(slugify(title))
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(now)
+        .bind(5i64)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert channel")
+    }
+
+    #[tokio::test]
+    async fn new_channels_default_to_speed_one() {
+        let pool = memory_pool().await;
+        let id = insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
+
+        let channel = Channel::read(&pool, id).await.expect("read channel");
+        assert_eq!(channel.playback_speed, 1.0);
+    }
+
+    #[tokio::test]
+    async fn valid_speed_is_rounded_and_persisted() {
+        let pool = memory_pool().await;
+        let id = insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
+        let slug = Channel::read(&pool, id).await.expect("read channel").slug;
+
+        let updated = Channel::set_playback_speed(&pool, &slug, 1.35)
+            .await
+            .expect("set speed");
+        assert_eq!(updated.playback_speed, 1.35);
+
+        // Rounding: 1.349 → 1.35, and 1.7 stores exactly 1.7 (no float
+        // artifacts like 1.7000000000000002 in the database).
+        let rounded = Channel::set_playback_speed(&pool, &slug, 1.349)
+            .await
+            .expect("set speed");
+        assert_eq!(rounded.playback_speed, 1.35);
+
+        let plain = Channel::set_playback_speed(&pool, &slug, 1.7)
+            .await
+            .expect("set speed");
+        assert_eq!(plain.playback_speed, 1.7);
+        assert_eq!((plain.playback_speed * 10.0).round(), 17.0);
+    }
+
+    #[tokio::test]
+    async fn out_of_range_speeds_are_rejected_and_stored_value_is_untouched() {
+        let pool = memory_pool().await;
+        let id = insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
+        let slug = Channel::read(&pool, id).await.expect("read channel").slug;
+
+        for speed in [0.2, 0.0, -1.0, 3.1, 4.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = Channel::set_playback_speed(&pool, &slug, speed)
+                .await
+                .expect_err("must reject");
+            assert_eq!(error.status_code(), StatusCode::BAD_REQUEST, "speed {speed}");
+        }
+
+        let channel = Channel::read(&pool, id).await.expect("read channel");
+        assert_eq!(channel.playback_speed, 1.0);
+    }
+
+    #[tokio::test]
+    async fn unknown_slug_answers_not_found() {
+        let pool = memory_pool().await;
+        let error = Channel::set_playback_speed(&pool, "no-such-channel", 1.5)
+            .await
+            .expect_err("must not find the channel");
+        assert_eq!(error.status_code(), StatusCode::NOT_FOUND);
     }
 }

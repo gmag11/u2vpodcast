@@ -162,6 +162,18 @@ impl Config {
     }
 }
 
+// Minimal valid config for tests that need an `AppState` (handlers require
+// one even when they only touch the pool). Test-only, so it lives here next
+// to the same YAML helper the config tests use.
+#[cfg(test)]
+pub(crate) fn test_config() -> Config {
+    let yaml = format!(
+        "production: false\nurl: http://localhost:6996\nport: 6996\nsleep_time: 1\nper_page: 3\nsecret_key: {}\n",
+        "x".repeat(64)
+    );
+    Config::from_yaml(&yaml).expect("test config must parse")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

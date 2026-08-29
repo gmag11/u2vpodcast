@@ -17,6 +17,7 @@ function episode(id: number, favorite: boolean): Episode {
 		channel_id: 1,
 		channel_slug: 'c',
 		channel_title: 'Channel',
+		playback_speed: 1,
 		title: `Episode ${id}`,
 		description: '',
 		yt_id: `yt${id}`,

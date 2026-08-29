@@ -58,6 +58,7 @@
 			active: active.value,
 			description: props.channel?.description ?? '',
 			image: props.channel?.image ?? '',
+			playback_speed: props.channel?.playback_speed ?? 1,
 			first: first.value ? new Date(first.value) : new Date(),
 			max: Math.max(1, Number(max.value) || 5),
 			created_at: props.channel?.created_at ?? new Date(),

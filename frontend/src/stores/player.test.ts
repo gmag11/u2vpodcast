@@ -26,6 +26,9 @@ vi.mock('@/lib/api/client', () => ({
 		),
 		reorderPlaylist: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		setChannelPlaybackSpeed: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
 		)
 	}
 }));
@@ -164,6 +167,7 @@ function episode(id: number, listen = false): Episode {
 		channel_id: 1,
 		channel_slug: 'c',
 		channel_title: 'Channel',
+		playback_speed: 1,
 		title: `Episode ${id}`,
 		description: '',
 		yt_id: `yt${id}`,
@@ -1761,5 +1765,132 @@ describe('player store system media controls', () => {
 		expect(player.playing).toBe(true);
 		expect(session.handlers.get('play')).toBeTypeOf('function');
 		expect(session.metadata?.title).toBe('Episode 1');
+	});
+});
+
+describe('player store per-channel playback speed', () => {
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
+		localStorage.clear();
+		vi.clearAllMocks();
+		setActivePinia(createPinia());
+	});
+
+	function channelEpisode(id: number, slug: string, speed: number): Episode {
+		return {
+			...episode(id),
+			channel_slug: slug,
+			channel_title: `Channel ${slug}`,
+			playback_speed: speed
+		};
+	}
+
+	it('starts playback at the channel saved speed from the episode payload', async () => {
+		const player = usePlayerStore();
+		const items = [channelEpisode(1, 'a', 1.35), channelEpisode(2, 'a', 1.35)];
+		await player.play(items[0], items);
+		const audio = MockAudioElement.instances[0];
+		expect(player.speed).toBe(1.35);
+		expect(audio.playbackRate).toBe(1.35);
+	});
+
+	it('starts at 1x when the channel has no saved speed', async () => {
+		const player = usePlayerStore();
+		const items = [episode(1), episode(2)];
+		await player.play(items[0], items);
+		const audio = MockAudioElement.instances[0];
+		expect(player.speed).toBe(1);
+		expect(audio.playbackRate).toBe(1);
+	});
+
+	it('auto-advance into a different channel applies the new channel speed', async () => {
+		const player = usePlayerStore();
+		const items = [channelEpisode(1, 'a', 2), channelEpisode(2, 'b', 1.35)];
+		await player.play(items[0], items);
+		const audio = MockAudioElement.instances[0];
+		expect(player.speed).toBe(2);
+
+		// the first episode ends; the queue advances to channel b
+		audio.emit('ended');
+		await vi.waitFor(() => expect(player.currentEpisode?.id).toBe(2));
+		expect(player.speed).toBe(1.35);
+		expect(audio.playbackRate).toBe(1.35);
+	});
+
+	it('manual skip into a different channel applies its speed and never carries over the old rate', async () => {
+		const player = usePlayerStore();
+		const items = [channelEpisode(1, 'a', 2), channelEpisode(2, 'b', 1.35)];
+		await player.play(items[0], items);
+		const audio = MockAudioElement.instances[0];
+
+		await player.skipNext();
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.speed).toBe(1.35);
+		expect(audio.playbackRate).toBe(1.35);
+
+		// the previous control returns to channel a: its 2x comes back and the
+		// 1.35x from channel b is not carried over
+		await player.playPrevious();
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.speed).toBe(2);
+		expect(audio.playbackRate).toBe(2);
+	});
+
+	it('same-channel skip keeps the channel speed', async () => {
+		const player = usePlayerStore();
+		const items = [channelEpisode(1, 'a', 1.35), channelEpisode(2, 'a', 1.35)];
+		await player.play(items[0], items);
+		await player.skipNext();
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.speed).toBe(1.35);
+	});
+
+	it('setSpeed rounds, applies, and saves the value per channel', async () => {
+		const player = usePlayerStore();
+		const items = [channelEpisode(1, 'a', 1)];
+		await player.play(items[0], items);
+		const audio = MockAudioElement.instances[0];
+
+		player.setSpeed(1.7000000000000002);
+		expect(player.speed).toBe(1.7);
+		expect(audio.playbackRate).toBe(1.7);
+		await vi.waitFor(() => expect(api.setChannelPlaybackSpeed).toHaveBeenCalledWith('a', 1.7));
+
+		// a different channel keeps its own independent value
+		const itemsB = [channelEpisode(2, 'b', 2)];
+		await player.play(itemsB[0], itemsB);
+		player.setSpeed(1.35);
+		expect(player.speed).toBe(1.35);
+		await vi.waitFor(() => expect(api.setChannelPlaybackSpeed).toHaveBeenCalledWith('b', 1.35));
+	});
+
+	it('clamps the speed to the supported range', async () => {
+		const player = usePlayerStore();
+		await player.play(episode(1), [episode(1)]);
+		player.setSpeed(10);
+		expect(player.speed).toBe(3);
+		player.setSpeed(0.1);
+		expect(player.speed).toBe(0.5);
+	});
+
+	it('persists channel speeds with the queue and restores them on reload', async () => {
+		const player = usePlayerStore();
+		const items = [episode(1), episode(2)];
+		await player.play(items[0], items);
+		player.setSpeed(1.7);
+
+		const stored = JSON.parse(localStorage.getItem('u2vpodcast.up-next.v1') ?? '{}');
+		expect(stored.channelSpeedBySlug).toEqual({ c: 1.7 });
+
+		// a reload boots a fresh store over the same payload; resuming starts
+		// at the persisted channel speed (the restored episode's own payload
+		// value must not override the saved map)
+		const reloaded = usePlayerStore(createPinia());
+		await reloaded.togglePlay();
+		const audio = MockAudioElement.instances[0];
+		expect(reloaded.speed).toBe(1.7);
+		expect(audio.playbackRate).toBe(1.7);
 	});
 });

@@ -18,6 +18,11 @@ export const RESUME_POSITION_S = 30;
 const RESUME_DURATION_RATIO = 0.95;
 // Keyboard and default system-media seek step (playback-progress shortcuts).
 const KEYBOARD_SEEK_STEP = 15;
+// Per-channel playback speed (per-channel-playback-speed): the stepper and
+// the update API both work in half-tenth (0.05) steps within this range.
+export const SPEED_MIN = 0.5;
+export const SPEED_MAX = 3.0;
+export const SPEED_STEP = 0.05;
 
 const MEDIA_SESSION_ACTIONS: MediaSessionAction[] = [
 	'play',
@@ -150,6 +155,10 @@ export const usePlayerStore = defineStore('player', () => {
 	// authoritative value is tracked per id and every copy observes it,
 	// independent of where the episode was played from (playback-progress).
 	const progressByEpisode = ref<Record<number, EpisodeProgress>>({});
+	// Saved playback speed per channel slug (per-channel-playback-speed),
+	// seeded from episode payloads and persisted with the queue so a reloaded
+	// session starts episodes at the right rate.
+	const channelSpeedBySlug = ref<Record<string, number>>({});
 
 	let audio: HTMLAudioElement | null = null;
 	let mediaSessionRegistered = false;
@@ -223,12 +232,47 @@ export const usePlayerStore = defineStore('player', () => {
 		recordProgress(episode, progress);
 	}
 
+	// Records the channel's saved speed from any episode that carries one, so
+	// the per-channel map stays fresh without an extra request
+	// (per-channel-playback-speed). Only fills unknown entries: an existing
+	// entry reflects this session's (potentially newer) knowledge — e.g. a
+	// speed the user just saved — and must not be clobbered by a stale value
+	// carried on an episode fetched before that change.
+	function seedChannelSpeed(episode: Episode) {
+		if (!episode.channel_slug || episode.playback_speed == null) return;
+		if (channelSpeedBySlug.value[episode.channel_slug] != null) return;
+		channelSpeedBySlug.value = {
+			...channelSpeedBySlug.value,
+			[episode.channel_slug]: episode.playback_speed
+		};
+	}
+
+	// Applies the saved speed of the episode's channel to the shared element.
+	// `audio.playbackRate` is a persistent property that survives `src`
+	// changes, so it MUST be rewritten on every episode load: this runs on
+	// every source-load path (play, end-of-episode auto-advance, manual skip,
+	// restored-queue restart) so a cross-channel switch loads and applies the
+	// NEW channel's value and never inherits the previous channel's rate.
+	// Resolution order: this session's known map entry first (it reflects the
+	// latest user action, e.g. after a reload the persisted map beats the
+	// restored episode's payload), then the episode's own payload value, then
+	// the 1.0 default.
+	function applyChannelSpeed(episode: Episode) {
+		seedChannelSpeed(episode);
+		const known = channelSpeedBySlug.value[episode.channel_slug];
+		const next = known ?? episode.playback_speed ?? 1.0;
+		speed.value = next;
+		if (audio) audio.playbackRate = next;
+		publishMediaPositionState();
+	}
+
 	// Records the progress already carried by a freshly fetched episode list
 	// (the episode endpoints include `position_seconds`/`listen`/`listened_at`),
 	// so resume works without a per-play request. Live entries from this
 	// session are kept.
 	function seedProgress(episodes: Episode[]) {
 		for (const episode of episodes) {
+			seedChannelSpeed(episode);
 			if (episode.id == null || episode.yt_id == null) continue;
 			if (progressByEpisode.value[episode.id] != null) continue;
 			progressByEpisode.value = {
@@ -251,7 +295,8 @@ export const usePlayerStore = defineStore('player', () => {
 			currentEpisode: currentEpisode.value,
 			seedOrder: seedOrder.value,
 			shuffle: shuffle.value,
-			repeat: repeat.value
+			repeat: repeat.value,
+			channelSpeedBySlug: channelSpeedBySlug.value
 		});
 	}
 
@@ -273,6 +318,7 @@ export const usePlayerStore = defineStore('player', () => {
 			currentEpisode.value = stored.currentEpisode;
 			shuffle.value = stored.shuffle;
 			repeat.value = stored.repeat;
+			channelSpeedBySlug.value = stored.channelSpeedBySlug;
 		}
 	}
 
@@ -699,6 +745,10 @@ export const usePlayerStore = defineStore('player', () => {
 		}
 		currentEpisode.value = episode;
 		stopped.value = false;
+		// The source is about to retarget: re-apply the new episode's channel
+		// speed so the element's persisted playbackRate never leaks the
+		// previous channel's rate into this episode (per-channel-playback-speed).
+		applyChannelSpeed(episode);
 		publishMediaMetadata(episode);
 		publishMediaPlaybackState('paused');
 		// Playback is (re)starting on this episode: any previous finalize no
@@ -945,6 +995,10 @@ export const usePlayerStore = defineStore('player', () => {
 			// Playback is restarting: a previous finalize no longer protects
 			// the episode's completion position from live saves.
 			finalizedEpisodeId = null;
+			// A restored-queue restart loads the source outside `loadEpisode`, so
+			// the channel's saved speed is (re)applied here too: the element's
+			// playbackRate must reflect the episode's channel before playback.
+			applyChannelSpeed(currentEpisode.value);
 			// After a reload/restore the shared element may have been created
 			// with an empty source: (re)load the current episode before playing.
 			const reloading = !el.src || el.src === '';
@@ -1164,10 +1218,30 @@ export const usePlayerStore = defineStore('player', () => {
 		if (audio) audio.muted = muted.value;
 	}
 
+	// Applies the rate immediately and, with an episode loaded, makes the
+	// value the channel's saved speed: the local per-channel map is upserted
+	// and the change is persisted server-side fire-and-forget (mirroring
+	// persistProgress), so every other episode of the channel starts here
+	// (per-channel-playback-speed).
 	function setSpeed(value: number) {
-		speed.value = value;
-		if (audio) audio.playbackRate = value;
+		const clamped = Math.min(SPEED_MAX, Math.max(SPEED_MIN, value));
+		const next = Math.round(clamped * 100) / 100;
+		speed.value = next;
+		if (audio) audio.playbackRate = next;
 		publishMediaPositionState();
+		const episode = currentEpisode.value;
+		if (episode && episode.channel_slug) {
+			channelSpeedBySlug.value = {
+				...channelSpeedBySlug.value,
+				[episode.channel_slug]: next
+			};
+			api.setChannelPlaybackSpeed(episode.channel_slug, next).catch((err) => {
+				console.error('Failed to save channel playback speed', err);
+			});
+		}
+		// Keep the persisted queue's speed map current so a reload restores
+		// the latest per-channel values.
+		persistQueue();
 	}
 
 	const progress = computed(() =>

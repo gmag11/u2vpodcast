@@ -51,6 +51,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                 .service(channels::update_episodes)
                                 .service(channels::refresh_image)
                                 .service(channels::update)
+                                .service(channels::update_playback_speed)
                                 .service(channels::delete)
                                 .service(config::get_config),
                         ),

@@ -58,6 +58,7 @@ function episode(overrides: Partial<Episode> = {}): Episode {
 		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now,
+		playback_speed: 1,
 		...overrides
 	};
 }

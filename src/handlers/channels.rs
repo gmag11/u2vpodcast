@@ -221,3 +221,177 @@ async fn delete(data: Data<AppState>, session: Session, path: Path<String>) -> i
         }
     }
 }
+
+#[derive(Deserialize)]
+struct PlaybackSpeedBody {
+    playback_speed: f64,
+}
+
+#[put("/channels/{channel}/playback_speed/")]
+async fn update_playback_speed(
+    data: Data<AppState>,
+    session: Session,
+    path: Path<String>,
+    body: Json<PlaybackSpeedBody>,
+) -> actix_web::HttpResponse {
+    info!("update_playback_speed");
+    match Channel::set_playback_speed(&data.pool, &path.into_inner(), body.into_inner().playback_speed).await {
+        // Fire-and-forget like the progress write: the 204 alone confirms the
+        // write, and the error status (400 invalid value / 404 unknown
+        // channel) is surfaced through the response line (per-channel-playback-speed).
+        Ok(_) => actix_web::HttpResponse::NoContent().finish(),
+        Err(e) => {
+            error!("Error updating playback speed: {e}");
+            CResponse::ko(e.status_code(), session)
+        }
+    }
+}
+
+#[cfg(test)]
+mod handler_tests {
+    use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+    use actix_web::cookie::Key;
+    use actix_web::test;
+    use actix_web::{web, App};
+    use chrono::Utc;
+    use sqlx::query;
+    use sqlx::sqlite::SqliteRow;
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions, Row};
+    use std::path::Path;
+
+    use super::*;
+    use crate::models::config::test_config;
+
+    async fn memory_pool() -> sqlx::Pool<sqlx::Sqlite> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        Migrator::new(migrations)
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn insert_channel(pool: &sqlx::Pool<sqlx::Sqlite>, slug: &str) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO channels (url, title, slug, active, description, image, \
+             first, max, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+        )
+        .bind(format!("https://example.com/{slug}"))
+        .bind(slug)
+        .bind(slug)
+        .bind(true)
+        .bind("")
+        .bind("")
+        .bind(now)
+        .bind(5i64)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert channel")
+    }
+
+    #[actix_web::test]
+    async fn updates_playback_speed_with_204_and_persists() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool, "c1").await;
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config: test_config(),
+                    pool: pool.clone(),
+                }))
+                .wrap(
+                    SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        .cookie_secure(false)
+                        .build(),
+                )
+                .service(web::scope("/api/1.0").service(update_playback_speed)),
+        )
+        .await;
+
+        let request = test::TestRequest::put()
+            .uri("/api/1.0/channels/c1/playback_speed/")
+            .set_json(serde_json::json!({ "playback_speed": 1.35 }))
+            .to_request();
+        let response = test::call_service(&app, request).await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::NO_CONTENT);
+
+        let stored: f64 = query("SELECT playback_speed FROM channels WHERE id = $1")
+            .bind(channel_id)
+            .map(|row: SqliteRow| row.get(0))
+            .fetch_one(&pool)
+            .await
+            .expect("read stored speed");
+        assert_eq!(stored, 1.35);
+    }
+
+    #[actix_web::test]
+    async fn rejects_out_of_range_speeds_with_400() {
+        let pool = memory_pool().await;
+        insert_channel(&pool, "c1").await;
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config: test_config(),
+                    pool: pool.clone(),
+                }))
+                .wrap(
+                    SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        .cookie_secure(false)
+                        .build(),
+                )
+                .service(web::scope("/api/1.0").service(update_playback_speed)),
+        )
+        .await;
+
+        for speed in [0.2, 4.0] {
+            let request = test::TestRequest::put()
+                .uri("/api/1.0/channels/c1/playback_speed/")
+                .set_json(serde_json::json!({ "playback_speed": speed }))
+                .to_request();
+            let response = test::call_service(&app, request).await;
+            assert_eq!(
+                response.status(),
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "speed {speed}"
+            );
+        }
+    }
+
+    #[actix_web::test]
+    async fn unknown_channel_answers_404() {
+        let pool = memory_pool().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config: test_config(),
+                    pool: pool.clone(),
+                }))
+                .wrap(
+                    SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        .cookie_secure(false)
+                        .build(),
+                )
+                .service(web::scope("/api/1.0").service(update_playback_speed)),
+        )
+        .await;
+
+        let request = test::TestRequest::put()
+            .uri("/api/1.0/channels/missing-channel/playback_speed/")
+            .set_json(serde_json::json!({ "playback_speed": 1.5 }))
+            .to_request();
+        let response = test::call_service(&app, request).await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+}
