@@ -45,3 +45,10 @@ sponsorblock_enabled: false
 # while derived media is updated by the next synchronization or manual refresh.
 sponsorblock_rejected_categories:
   - sponsor
+  - selfpromo
+  - interaction
+  - intro
+  - outro
+  - preview
+  - music_offtopic
+  - filler
