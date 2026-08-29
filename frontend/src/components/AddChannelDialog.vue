@@ -6,10 +6,17 @@
 	import AppInput from '@/components/AppInput.vue';
 	import AppToggle from '@/components/AppToggle.vue';
 
-	const props = defineProps<{
-		open: boolean;
-		channel?: Channel | null;
-	}>();
+	const props = withDefaults(
+		defineProps<{
+			open: boolean;
+			channel?: Channel | null;
+			saving?: boolean;
+		}>(),
+		{
+			channel: null,
+			saving: false
+		}
+	);
 	const emit = defineEmits<{
 		(e: 'update:open', value: boolean): void;
 		(e: 'save', channel: Channel): void;
@@ -129,10 +136,39 @@
 			</div>
 
 			<div class="mt-2 flex flex-col gap-3">
-				<AppButton type="submit" class="w-full py-2.5">
-					{{ isEditing ? $t('channels.saveChanges') : $t('channels.createChannel') }}
+				<AppButton type="submit" class="w-full py-2.5" :disabled="saving">
+					<svg
+						v-if="saving"
+						class="h-5 w-5 animate-spin text-current"
+						viewBox="0 0 24 24"
+						fill="none"
+						aria-hidden="true"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="4"
+						></circle>
+						<path
+							class="opacity-75"
+							fill="currentColor"
+							d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+						></path>
+					</svg>
+					<span v-else>{{
+						isEditing ? $t('channels.saveChanges') : $t('channels.createChannel')
+					}}</span>
 				</AppButton>
-				<AppButton type="button" variant="ghost" class="w-full py-2 text-sm" @click="handleCancel">
+				<AppButton
+					type="button"
+					variant="ghost"
+					class="w-full py-2 text-sm"
+					:disabled="saving"
+					@click="handleCancel"
+				>
 					{{ $t('common.cancel') }}
 				</AppButton>
 			</div>
