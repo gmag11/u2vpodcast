@@ -92,6 +92,20 @@ impl Drop for YoutubeGuard {
     }
 }
 
+/// Run `work` under a specific slot and cooldown. Used by tests to isolate
+/// timing assertions from the process-wide slot (and by [`with_youtube_slot`]
+/// for the global one).
+pub async fn with_youtube_slot_on<T, F, Fut>(slot: Arc<Semaphore>, cooldown: Duration, work: F) -> T
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let guard = YoutubeGuard::acquire_on(slot, cooldown).await;
+    let result = work().await;
+    guard.cooldown_and_release().await;
+    result
+}
+
 /// Run `work` under the process-wide YouTube throttle: acquire the slot, run
 /// `work`, then enforce the cooldown (success or error) and release. `work` is
 /// a closure returning a future so the slot is acquired before the connection
@@ -101,10 +115,7 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
-    let guard = YoutubeGuard::acquire().await;
-    let result = work().await;
-    guard.cooldown_and_release().await;
-    result
+    with_youtube_slot_on(global_slot(), cooldown_duration(), work).await
 }
 
 #[cfg(test)]

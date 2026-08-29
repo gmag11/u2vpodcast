@@ -7,12 +7,23 @@ use tracing::{debug, info};
 use super::Error;
 use crate::utils::throttle::with_youtube_slot;
 #[cfg(test)]
+use crate::utils::throttle::with_youtube_slot_on;
+#[cfg(test)]
 use chrono::{TimeZone, Utc};
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use tokio::sync::Semaphore;
 
 pub struct Ytdlp {
     path: String,
     cookies: String,
     runner: Arc<dyn CommandRunner>,
+    /// Test-only throttle override: a dedicated slot and cooldown that isolate
+    /// timing assertions from the process-wide throttle (which other tests may
+    /// initialize with a different cooldown).
+    #[cfg(test)]
+    throttle: Option<(Arc<Semaphore>, Duration)>,
 }
 
 struct CommandOutput {
@@ -78,6 +89,8 @@ impl Ytdlp {
             path: path.to_string(),
             cookies: cookies.to_string(),
             runner: Arc::new(ProcessCommandRunner),
+            #[cfg(test)]
+            throttle: None,
         }
     }
 
@@ -87,7 +100,40 @@ impl Ytdlp {
             path: path.to_string(),
             cookies: cookies.to_string(),
             runner,
+            throttle: None,
         }
+    }
+
+    #[cfg(test)]
+    fn with_runner_and_throttle(
+        path: &str,
+        cookies: &str,
+        runner: Arc<dyn CommandRunner>,
+        slot: Arc<Semaphore>,
+        cooldown: Duration,
+    ) -> Self {
+        Self {
+            path: path.to_string(),
+            cookies: cookies.to_string(),
+            runner,
+            throttle: Some((slot, cooldown)),
+        }
+    }
+
+    /// Run `work` under the process-wide YouTube throttle, or under a dedicated
+    /// test slot when one was injected via `with_runner_and_throttle`.
+    async fn run_throttled<T, F, Fut>(&self, work: F) -> T
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        #[cfg(test)]
+        {
+            if let Some((slot, cooldown)) = &self.throttle {
+                return with_youtube_slot_on(slot.clone(), *cooldown, work).await;
+            }
+        }
+        with_youtube_slot(work).await
     }
 
     // Runs a yt-dlp command streaming its stderr to the DEBUG log (so long
@@ -128,13 +174,14 @@ impl Ytdlp {
         // throttle so it serializes with downloads, the update check, and
         // metadata/image fetches (youtube-throttling). stderr is streamed to
         // the DEBUG log so a long listing stays observable.
-        let stdout = with_youtube_slot(move || async move {
-            self.runner
-                .run(&self.path, &args)
-                .await
-                .map(|output| output.stdout)
-        })
-        .await?;
+        let stdout = self
+            .run_throttled(move || async move {
+                self.runner
+                    .run(&self.path, &args)
+                    .await
+                    .map(|output| output.stdout)
+            })
+            .await?;
         let ytvideos = parse_dump_output(&stdout)?;
         info!(
             "Listed {} flat candidates for {} (requested {})",
@@ -173,10 +220,10 @@ impl Ytdlp {
         // (`--print-json`): no separate extraction pass, still under the
         // single YouTube throttle (scalable-channel-listing). stderr is
         // streamed to the DEBUG log (progress during downloads).
-        let download_output =
-            with_youtube_slot(move || async move { self.runner.run(&self.path, &args).await })
-                .await
-                .map_err(|e| Error::default(&e.to_string()))?;
+        let download_output = self
+            .run_throttled(move || async move { self.runner.run(&self.path, &args).await })
+            .await
+            .map_err(|e| Error::default(&e.to_string()))?;
         let mut videos = parse_dump_output(&download_output.stdout)?;
         let info = match videos.pop() {
             Some(video) => video,
@@ -206,10 +253,10 @@ impl Ytdlp {
         ];
         args.extend(self.cookies_args());
         args.push(&url);
-        let output =
-            with_youtube_slot(move || async move { self.runner.run(&self.path, &args).await })
-                .await
-                .map_err(|e| Error::default(&e.to_string()))?;
+        let output = self
+            .run_throttled(move || async move { self.runner.run(&self.path, &args).await })
+            .await
+            .map_err(|e| Error::default(&e.to_string()))?;
         let mut videos = parse_dump_output(&output.stdout)?;
         videos.pop().ok_or_else(|| {
             Error::default(&format!(
@@ -492,11 +539,11 @@ mod download_args_tests {
 #[cfg(test)]
 mod throttle_youtubedl_integration {
     use super::*;
-    use crate::utils::throttle::init_throttle;
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::{Duration, Instant},
     };
+    use tokio::sync::Semaphore;
 
     struct RecordingRunner {
         active: AtomicUsize,
@@ -534,9 +581,18 @@ mod throttle_youtubedl_integration {
 
     #[tokio::test]
     async fn concurrent_downloads_are_sequential_and_respect_cooldown() {
-        init_throttle(Duration::from_millis(30));
+        // Dedicated slot + cooldown: the process-wide throttle is
+        // first-call-wins and other tests may initialize it with a different
+        // cooldown, so this timing assertion must not depend on global state.
+        let slot = Arc::new(Semaphore::new(1));
         let runner = Arc::new(RecordingRunner::new());
-        let ytdlp = Arc::new(Ytdlp::with_runner("mock-yt-dlp", "", runner.clone()));
+        let ytdlp = Arc::new(Ytdlp::with_runner_and_throttle(
+            "mock-yt-dlp",
+            "",
+            runner.clone(),
+            slot,
+            Duration::from_millis(30),
+        ));
         let mut handles = Vec::new();
         for i in 0..4 {
             let ytdlp = std::sync::Arc::clone(&ytdlp);
