@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { onBeforeUnmount, ref, watch } from 'vue';
+	import { computed, onBeforeUnmount, ref, watch } from 'vue';
 	import {
 		PhGauge,
 		PhList,
@@ -15,13 +15,26 @@
 		PhStop,
 		PhX
 	} from '@phosphor-icons/vue';
-	import { usePlayerStore } from '@/stores/player';
+	import {
+		parseDurationSeconds,
+		sponsorBlockTimelineMarkers,
+		usePlayerStore
+	} from '@/stores/player';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
 	const queueOpen = ref(false);
 	const visible = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
+	const sponsorBlockMarkers = computed(() => {
+		const episode = player.currentEpisode;
+		if (!episode) return [];
+		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
+		return sponsorBlockTimelineMarkers(
+			duration,
+			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
+		);
+	});
 
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
 	let nextTimer: ReturnType<typeof setTimeout> | null = null;
@@ -240,10 +253,19 @@
 					:aria-valuemax="100"
 					@click="onSeek"
 				>
-					<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
+					<div class="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
 						<div
-							class="h-full rounded-full bg-accent-400 transition-[width] duration-150"
+							class="absolute inset-y-0 left-0 rounded-full bg-accent-400 transition-[width] duration-150"
 							:style="{ width: player.progress + '%' }"
+						></div>
+						<div
+							v-for="(marker, index) in sponsorBlockMarkers"
+							:key="index"
+							class="absolute inset-y-0 z-10"
+							:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+							:data-category="marker.category"
+							data-testid="player-sponsorblock-segment"
+							:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
 						></div>
 					</div>
 				</div>

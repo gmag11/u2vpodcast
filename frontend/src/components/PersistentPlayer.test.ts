@@ -65,6 +65,7 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now
 	};
@@ -133,6 +134,41 @@ describe('PersistentPlayer controls', () => {
 
 		const nextBtn = (await mountBar()).get('button[aria-label="Next"]');
 		expect((nextBtn.element as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('keeps every SponsorBlock category visible with the expected colors while paused', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_segments: [
+				{ start: 60, end: 120, category: 'sponsor', rejected: true },
+				{ start: 90, end: 150, category: 'intro', rejected: false }
+			]
+		};
+		const bar = await mountBar();
+
+		player.playing = false;
+		await flushPromises();
+
+		const markers = bar.findAll('[data-testid="player-sponsorblock-segment"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].classes()).toContain('bg-sponsorblock');
+		expect(markers[1].classes()).toContain('bg-sponsorblock-other');
+		expect(markers[0].attributes('style')).toContain('left: 10%');
+		expect(markers[0].attributes('style')).toContain('width: 10%');
+	});
+
+	it('renders no SponsorBlock markers when disabled', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_enabled: false,
+			sponsorblock_segments: [{ start: 60, end: 120, category: 'sponsor', rejected: true }]
+		};
+		const bar = await mountBar();
+		expect(bar.find('[data-testid="player-sponsorblock-segment"]').exists()).toBe(false);
 	});
 
 	it('previous restarts the current episode beyond 3 seconds', async () => {

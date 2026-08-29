@@ -8,10 +8,7 @@
 //! consecutive connections are at least `cooldown` apart — even when the
 //! previous holder failed.
 
-use std::sync::{
-    Arc,
-    OnceLock,
-};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -36,9 +33,7 @@ pub fn init_throttle(cooldown: Duration) {
 }
 
 fn global_slot() -> Arc<Semaphore> {
-    YT_SLOT
-        .get_or_init(|| Arc::new(Semaphore::new(1)))
-        .clone()
+    YT_SLOT.get_or_init(|| Arc::new(Semaphore::new(1))).clone()
 }
 
 pub fn cooldown_duration() -> Duration {
@@ -97,6 +92,20 @@ impl Drop for YoutubeGuard {
     }
 }
 
+/// Run `work` under a specific slot and cooldown. Used by tests to isolate
+/// timing assertions from the process-wide slot (and by [`with_youtube_slot`]
+/// for the global one).
+pub async fn with_youtube_slot_on<T, F, Fut>(slot: Arc<Semaphore>, cooldown: Duration, work: F) -> T
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let guard = YoutubeGuard::acquire_on(slot, cooldown).await;
+    let result = work().await;
+    guard.cooldown_and_release().await;
+    result
+}
+
 /// Run `work` under the process-wide YouTube throttle: acquire the slot, run
 /// `work`, then enforce the cooldown (success or error) and release. `work` is
 /// a closure returning a future so the slot is acquired before the connection
@@ -106,18 +115,15 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
-    let guard = YoutubeGuard::acquire().await;
-    let result = work().await;
-    guard.cooldown_and_release().await;
-    result
+    with_youtube_slot_on(global_slot(), cooldown_duration(), work).await
 }
 
 #[cfg(test)]
 mod throttle_tests {
     use super::*;
     use std::sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     };
     use tokio::sync::Barrier;
 
@@ -214,10 +220,18 @@ mod throttle_tests {
         // Give the task a moment to start waiting: it must NOT be in the slot
         // while the guard is held.
         tokio::time::sleep(Duration::from_millis(80)).await;
-        assert_eq!(slot_free.load(Ordering::SeqCst), 0, "waiter must wait for the holder");
+        assert_eq!(
+            slot_free.load(Ordering::SeqCst),
+            0,
+            "waiter must wait for the holder"
+        );
         guard.cooldown_and_release().await;
         task.await.expect("waiter task completed");
-        assert_eq!(slot_free.load(Ordering::SeqCst), 1, "waiter resumed after release");
+        assert_eq!(
+            slot_free.load(Ordering::SeqCst),
+            1,
+            "waiter resumed after release"
+        );
     }
 
     #[tokio::test]

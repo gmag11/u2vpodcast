@@ -1,36 +1,17 @@
-use chrono::{
-    DateTime,
-    Utc,
-};
+use chrono::{DateTime, Utc};
 use std::{
+    path::{Component, Path, PathBuf},
     time::UNIX_EPOCH,
-    path::{
-        Component,
-        Path,
-        PathBuf,
-    },
 };
 
 use actix_web::{
-    HttpRequest,
-    HttpResponse,
-    http::{
-        StatusCode,
-        Method,
-        header,
-    },
+    http::{header, Method, StatusCode},
     web::Path as WebPath,
+    HttpRequest, HttpResponse,
 };
-use tokio::io::{
-    AsyncReadExt,
-    AsyncSeekExt,
-    SeekFrom,
-};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio_util::io::ReaderStream;
-use tracing::{
-    info,
-    debug,
-};
+use tracing::{debug, info};
 
 use crate::models::audios_dir;
 
@@ -38,10 +19,12 @@ use crate::models::audios_dir;
 /// any path traversal component.
 fn resolve_media(relative: &str) -> Option<PathBuf> {
     let rel = Path::new(relative);
-    if rel
-        .components()
-        .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
-    {
+    if rel.components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return None;
     }
     Some(Path::new(audios_dir()).join(rel))
@@ -107,7 +90,8 @@ fn validators(meta: &std::fs::Metadata) -> (String, String) {
     let etag = format!(
         "\"{:x}-{:x}\"",
         meta.len(),
-        meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        meta.modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
@@ -183,7 +167,11 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
         if file.seek(SeekFrom::Start(start)).await.is_err() {
             return HttpResponse::InternalServerError().finish();
         }
-        debug!("media 206 {} {} bytes {start}-{end}/{total}", req.method(), relative);
+        debug!(
+            "media 206 {} {} bytes {start}-{end}/{total}",
+            req.method(),
+            relative
+        );
         return builder.streaming(ReaderStream::new(file.take(length)));
     }
 
@@ -229,4 +217,80 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
     };
     debug!("media 200 {} {total} bytes", req.method());
     builder.streaming(ReaderStream::new(file))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{body::to_bytes, test::TestRequest};
+
+    #[actix_web::test]
+    async fn serves_hash_versioned_mp3_with_full_head_range_and_conditional_requests() {
+        let slug = format!("sponsorblock_media_test_{}", rand::random::<u64>());
+        let relative = format!("{slug}/video.sponsorblock.abcdef0123456789.mp3");
+        let directory = Path::new(audios_dir()).join(&slug);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("video.sponsorblock.abcdef0123456789.mp3"),
+            b"0123456789",
+        )
+        .unwrap();
+
+        let get = serve_media(
+            TestRequest::get()
+                .uri(&format!("/media/{relative}"))
+                .to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(get.status(), StatusCode::OK);
+        let modified = get
+            .headers()
+            .get(header::LAST_MODIFIED)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            to_bytes(get.into_body()).await.unwrap(),
+            b"0123456789".as_slice()
+        );
+
+        let head = serve_media(
+            TestRequest::default()
+                .method(Method::HEAD)
+                .to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(head.status(), StatusCode::OK);
+        assert_eq!(head.headers().get(header::CONTENT_LENGTH).unwrap(), "10");
+
+        let range = serve_media(
+            TestRequest::get()
+                .insert_header((header::RANGE, "bytes=2-5"))
+                .to_http_request(),
+            WebPath::from(relative.clone()),
+        )
+        .await;
+        assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            range.headers().get(header::CONTENT_RANGE).unwrap(),
+            "bytes 2-5/10"
+        );
+        assert_eq!(
+            to_bytes(range.into_body()).await.unwrap(),
+            b"2345".as_slice()
+        );
+
+        let conditional = serve_media(
+            TestRequest::get()
+                .insert_header((header::IF_MODIFIED_SINCE, modified))
+                .to_http_request(),
+            WebPath::from(relative),
+        )
+        .await;
+        assert_eq!(conditional.status(), StatusCode::NOT_MODIFIED);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

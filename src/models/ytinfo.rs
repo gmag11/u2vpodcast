@@ -1,17 +1,11 @@
 use regex::Regex;
-use ureq::Agent;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::{info, warn};
+use ureq::Agent;
 
-use super::{
-    Error,
-    images_dir,
-};
-use crate::utils::throttle::{
-    YoutubeGuard,
-    with_youtube_slot,
-};
+use super::{images_dir, Error};
+use crate::utils::throttle::{with_youtube_slot, YoutubeGuard};
 
 // Upper bound for the metadata fetch so a hung upstream cannot stall blocking
 // threads (or the async workers waiting on them) indefinitely.
@@ -33,26 +27,23 @@ pub fn image_local_url(slug: &str) -> String {
     format!("/images/{slug}.jpg")
 }
 
-
-
 #[derive(Debug, Clone)]
-pub struct YTInfo{
+pub struct YTInfo {
     pub title: String,
     pub description: String,
     pub image: String,
 }
 
-impl YTInfo{
+impl YTInfo {
     pub fn default() -> Self {
-        Self{
+        Self {
             title: "".to_string(),
             description: "".to_string(),
             image: "".to_string(),
         }
     }
 
-    pub async fn new(url: &str) -> Result<Self, Error>{
-
+    pub async fn new(url: &str) -> Result<Self, Error> {
         // The upstream HTTP fetch is fully synchronous; run it on the blocking
         // thread pool so two slow/hung fetches can never stall the few tokio
         // worker threads that serve the whole API. The closure returns a plain
@@ -91,7 +82,7 @@ impl YTInfo{
         let description = get_metadata(&html, "og:description");
         let image = get_image(&html);
 
-        Ok(Self{
+        Ok(Self {
             title,
             description,
             image,
@@ -140,10 +131,7 @@ fn image_fetch_blocking(dest: &str, remote_url: &str) -> Result<ImageFetchOutcom
         }
     }
 
-    let mut resp = agent
-        .get(remote_url)
-        .call()
-        .map_err(|e| e.to_string())?;
+    let mut resp = agent.get(remote_url).call().map_err(|e| e.to_string())?;
     let bytes = resp
         .body_mut()
         .with_config()
@@ -217,9 +205,7 @@ async fn cache_image_in_dir(
 
     match outcome {
         ImageFetchOutcome::Skip => {
-            info!(
-                "Cached image for `{slug}` unchanged (probe size matches); skipping download"
-            );
+            info!("Cached image for `{slug}` unchanged (probe size matches); skipping download");
             Ok(Some(image_local_url(slug)))
         }
         ImageFetchOutcome::Bytes(bytes) => {
@@ -233,10 +219,7 @@ async fn cache_image_in_dir(
             tokio::fs::rename(&tmp, &dest)
                 .await
                 .map_err(|e| Error::default(&e.to_string()))?;
-            info!(
-                "Cached cover image for `{slug}` ({} bytes)",
-                bytes.len()
-            );
+            info!("Cached cover image for `{slug}` ({} bytes)", bytes.len());
             Ok(Some(image_local_url(slug)))
         }
     }
@@ -263,10 +246,7 @@ fn scan_metadata(re: &Regex, html: &str, key: &str) -> Option<String> {
             .map(|m| m.as_str())
             .unwrap_or_default();
         if prop.eq_ignore_ascii_case(key) {
-            if let Some(content) = caps
-                .name("content")
-                .or_else(|| caps.name("contents"))
-            {
+            if let Some(content) = caps.name("content").or_else(|| caps.name("contents")) {
                 return Some(content.as_str().to_string());
             }
         }
@@ -274,7 +254,7 @@ fn scan_metadata(re: &Regex, html: &str, key: &str) -> Option<String> {
     None
 }
 
-fn get_image(html: &str) -> String{
+fn get_image(html: &str) -> String {
     let image = get_metadata(html, "og:image");
     match image.find('?') {
         // og:image URLs carry size/quality query params; strip them.
@@ -283,10 +263,20 @@ fn get_image(html: &str) -> String{
     }
 }
 
-fn get_metadata(html: &str, metadata: &str) -> String{
-    scan_metadata(META_PROPERTY_FIRST.get_or_init(|| Regex::new(PROPERTY_FIRST).unwrap()), html, metadata)
-        .or_else(|| scan_metadata(META_CONTENT_FIRST.get_or_init(|| Regex::new(CONTENT_FIRST).unwrap()), html, metadata))
-        .unwrap_or_default()
+fn get_metadata(html: &str, metadata: &str) -> String {
+    scan_metadata(
+        META_PROPERTY_FIRST.get_or_init(|| Regex::new(PROPERTY_FIRST).unwrap()),
+        html,
+        metadata,
+    )
+    .or_else(|| {
+        scan_metadata(
+            META_CONTENT_FIRST.get_or_init(|| Regex::new(CONTENT_FIRST).unwrap()),
+            html,
+            metadata,
+        )
+    })
+    .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -324,7 +314,10 @@ mod metadata_parsing_tests {
 
     #[test]
     fn unclosed_meta_returns_empty() {
-        assert_eq!(get_metadata(r#"<meta property="og:title" content="broken"#, "og:title"), "");
+        assert_eq!(
+            get_metadata(r#"<meta property="og:title" content="broken"#, "og:title"),
+            ""
+        );
     }
 
     #[test]
@@ -335,7 +328,8 @@ mod metadata_parsing_tests {
 
     #[test]
     fn wrong_key_is_ignored() {
-        let html = r#"<meta property="og:title" content="T"><meta property="og:description" content="D">"#;
+        let html =
+            r#"<meta property="og:title" content="T"><meta property="og:description" content="D">"#;
         assert_eq!(get_metadata(html, "og:description"), "D");
     }
 
@@ -350,7 +344,6 @@ mod metadata_parsing_tests {
         let html = r#"<meta content="https://x/img.png" property="og:image">"#;
         assert_eq!(get_image(html), "https://x/img.png");
     }
-
 }
 
 #[cfg(test)]
@@ -559,7 +552,11 @@ mod image_cache_tests {
             .expect("second fetch must succeed");
         assert_eq!(local2, Some("/images/mi_canal.jpg".to_string()));
         assert_eq!(server.heads(), 2, "second refresh probes again");
-        assert_eq!(server.gets(), 1, "unchanged image must NOT be downloaded again");
+        assert_eq!(
+            server.gets(),
+            1,
+            "unchanged image must NOT be downloaded again"
+        );
         assert_eq!(std::fs::read(&path).unwrap(), file, "cached file untouched");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -587,7 +584,11 @@ mod image_cache_tests {
             .expect("refresh after size change");
         assert_eq!(local.as_deref(), Some("/images/otro_canal.jpg"));
         let path = dir.join("otro_canal.jpg");
-        assert_eq!(std::fs::read(&path).unwrap(), bigger, "cached file replaced");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bigger,
+            "cached file replaced"
+        );
         assert_eq!(server2.gets(), 1, "exactly one GET for the changed image");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -615,7 +616,11 @@ mod image_cache_tests {
             .await
             .expect("failed refresh must not surface an error");
         assert!(res.is_none(), "failed refresh signals no new local URL");
-        assert_eq!(std::fs::read(&path).unwrap(), before, "previous file persisted");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "previous file persisted"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -671,8 +676,6 @@ mod image_cache_tests {
     }
 }
 
-
-
 #[cfg(test)]
 mod metadata_throttle_tests {
     use super::*;
@@ -680,8 +683,8 @@ mod metadata_throttle_tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     };
     use std::time::Duration;
 
@@ -754,7 +757,7 @@ mod metadata_throttle_tests {
 }
 
 #[tokio::test]
-async fn test_info_channel(){
+async fn test_info_channel() {
     let url = "https://www.youtube.com/c/atareao";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
@@ -762,11 +765,14 @@ async fn test_info_channel(){
     // The robust parser must extract a non-empty title from real YouTube HTML
     // (youtube-scan-reliability); empty titles degrade to generic channel slugs.
     let info = ytinfo.unwrap();
-    assert!(!info.title.trim().is_empty(), "title must be parsed from real HTML");
+    assert!(
+        !info.title.trim().is_empty(),
+        "title must be parsed from real HTML"
+    );
 }
 
 #[tokio::test]
-async fn test_info_playlist(){
+async fn test_info_playlist() {
     let url = "https://www.youtube.com/playlist?list=PL3lTiK2rXrUFdTzriDsmNCG28T8u7bhEd";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
@@ -774,7 +780,7 @@ async fn test_info_playlist(){
 }
 
 #[tokio::test]
-async fn test_info_video(){
+async fn test_info_video() {
     let url = "https://www.youtube.com/watch?v=2A1abiQJAiM";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);

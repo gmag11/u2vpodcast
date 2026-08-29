@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { usePlayerStore, setRandomSource } from '@/stores/player';
+import {
+	sponsorBlockSkipTarget,
+	sponsorBlockTimelineMarkers,
+	usePlayerStore,
+	setRandomSource
+} from '@/stores/player';
 import type { Episode } from '@/types';
 import { api } from '@/lib/api/client';
 
@@ -112,10 +117,129 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		sponsorblock_enabled: true,
+		sponsorblock_segments: [],
+		sponsorblock_hash: null,
 		created_at: now,
 		updated_at: now
 	};
 }
+
+describe('SponsorBlock playback', () => {
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		MockAudioElement.instances.length = 0;
+		localStorage.clear();
+		vi.clearAllMocks();
+		setActivePinia(createPinia());
+	});
+
+	it('skips only the complete union of rejected overlapping intervals', () => {
+		const segments = [
+			{ start: 120, end: 150, category: 'sponsor', rejected: true },
+			{ start: 145, end: 170, category: 'intro', rejected: true },
+			{ start: 125, end: 180, category: 'selfpromo', rejected: false }
+		];
+		expect(sponsorBlockSkipTarget(119.9, segments)).toBe(119.9);
+		expect(sponsorBlockSkipTarget(120, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(160, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(170, segments)).toBe(170);
+		expect(sponsorBlockSkipTarget(175, segments)).toBe(175);
+		expect(sponsorBlockSkipTarget(125, [segments[2]])).toBe(125);
+		expect(sponsorBlockSkipTarget(125, [])).toBe(125);
+	});
+
+	it('maps clamped segments onto the original timeline', () => {
+		expect(
+			sponsorBlockTimelineMarkers(200, [
+				{ start: -10, end: 20, category: 'sponsor', rejected: true },
+				{ start: 60, end: 120, category: 'intro', rejected: false },
+				{ start: 190, end: 220, category: 'outro', rejected: true },
+				{ start: 150, end: 140, category: 'sponsor', rejected: true }
+			])
+		).toEqual([
+			{ left: 0, width: 10, category: 'sponsor' },
+			{ left: 30, width: 30, category: 'intro' },
+			{ left: 95, width: 5, category: 'outro' }
+		]);
+		expect(
+			sponsorBlockTimelineMarkers(0, [{ start: 1, end: 2, category: 'sponsor', rejected: true }])
+		).toEqual([]);
+	});
+
+	it('skips on timeupdate and explicit seek using the original timeline', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		item.sponsorblock_hash = 'hash-a';
+		await player.play(item);
+		const audio = MockAudioElement.instances[0];
+		audio.currentTime = 125;
+		audio.emit('timeupdate');
+		expect(audio.currentTime).toBe(150);
+		expect(player.currentTime).toBe(150);
+
+		player.seek(130);
+		expect(audio.currentTime).toBe(150);
+		expect(player.currentTime).toBe(150);
+	});
+
+	it('uses rejected intervals for resume and relative seeks but bypasses them when disabled', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.position_seconds = 125;
+		item.sponsorblock_segments = [
+			{ start: 120, end: 150, category: 'sponsor', rejected: true },
+			{ start: 100, end: 180, category: 'intro', rejected: false }
+		];
+		await player.play(item);
+		const audio = MockAudioElement.instances[0];
+		expect(audio.currentTime).toBe(150);
+
+		audio.duration = 600;
+		audio.currentTime = 110;
+		player.seekRelative(15);
+		expect(audio.currentTime).toBe(150);
+
+		player.applySponsorBlockSnapshot({ ...item, sponsorblock_enabled: false });
+		audio.currentTime = 125;
+		audio.emit('timeupdate');
+		expect(audio.currentTime).toBe(125);
+	});
+
+	it('applies visible, rejection, and disabled snapshots without reloading the source', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.sponsorblock_hash = 'hash-a';
+		item.sponsorblock_segments = [{ start: 10, end: 20, category: 'intro', rejected: false }];
+		await player.play(item);
+		const audio = MockAudioElement.instances[0];
+		const source = audio.src;
+		const loadCalls = audio.load.mock.calls.length;
+
+		player.applySponsorBlockSnapshot({
+			...item,
+			sponsorblock_hash: 'hash-b',
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: false }]
+		});
+		expect(player.currentEpisode?.sponsorblock_segments?.[0].end).toBe(25);
+
+		player.applySponsorBlockSnapshot({
+			...item,
+			sponsorblock_hash: 'hash-b',
+			sponsorblock_segments: [{ start: 10, end: 25, category: 'intro', rejected: true }]
+		});
+		expect(player.currentEpisode?.sponsorblock_segments?.[0].rejected).toBe(true);
+
+		player.applySponsorBlockSnapshot({ ...item, sponsorblock_enabled: false });
+		expect(player.currentEpisode?.sponsorblock_enabled).toBe(false);
+		expect(player.currentEpisode?.sponsorblock_segments).toEqual([]);
+		expect(player.currentEpisode?.sponsorblock_hash).toBeNull();
+		expect(audio.src).toBe(source);
+		expect(audio.load).toHaveBeenCalledTimes(loadCalls);
+	});
+});
 
 describe('player store queue', () => {
 	beforeEach(() => {

@@ -1,54 +1,24 @@
+mod handlers;
 mod models;
 mod utils;
-mod handlers;
 
 use sqlx::{
-    sqlite::{
-        SqlitePoolOptions,
-        SqliteConnectOptions,
-        SqliteJournalMode,
-    },
-    migrate::{
-        Migrator,
-    },
+    migrate::Migrator,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 
+use std::{env::var, path::PathBuf, str::FromStr};
 use tokio::{
     spawn,
-    time::{
-        sleep,
-        Duration,
-    },
+    time::{sleep, Duration},
 };
-use std::{
-    str::FromStr,
-    env::var,
-    path::PathBuf,
-};
-use tracing_subscriber::{
-    Layer,
-    EnvFilter,
-    layer::SubscriberExt,
-    util::SubscriberInitExt
-};
-use tracing::{
-    info,
-    error,
-};
+use tracing::{error, info};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
-use models::{
-    Error,
-    Config,
-    AppState,
-    User,
-    Ytdlp,
-    Channel,
-    audios_dir,
-    images_dir,
-};
-use utils::worker::do_the_work;
-use utils::throttle::init_throttle;
 use actix_files as af;
+use models::{audios_dir, images_dir, AppState, Channel, Config, Error, User, Ytdlp};
+use utils::throttle::init_throttle;
+use utils::worker::do_the_work;
 
 // Explicit origin allowlist for the production CORS policy. The configured
 // `config.url` is validated at startup and appended by the CORS builder;
@@ -130,24 +100,15 @@ fn cors_origins_for(config: &Config) -> Vec<String> {
     }
 }
 
-use actix_session::{
-    SessionMiddleware,
-    storage::CookieSessionStore,
-    config::PersistentSession,
-};
-use actix_web::{
-    http::header,
-    App,
-    HttpServer,
-    web::Data,
-    middleware::Logger,
-    cookie::{
-        Key,
-        SameSite,
-    },
-};
 use actix_cors::Cors;
-
+use actix_session::{config::PersistentSession, storage::CookieSessionStore, SessionMiddleware};
+use actix_web::{
+    cookie::{Key, SameSite},
+    http::header,
+    middleware::Logger,
+    web::Data,
+    App, HttpServer,
+};
 
 // Development-mode root directory. `CARGO_MANIFEST_DIR` only exists when the
 // process was started through Cargo; fall back to the current working
@@ -175,32 +136,27 @@ static MIGRATIONS_DIR: &str = "migrations";
 
 #[actix_web::main]
 async fn main() -> Result<(), Error> {
-
     let format = time::format_description::parse_borrowed::<2>(
         "[year]-[month padding:zero]-[day padding:zero]T[hour]:[minute]:[second]",
-    ).expect("Can't parse timer");
-    let offset_in_sec = chrono::Local::now()
-        .offset()
-        .local_minus_utc();
+    )
+    .expect("Can't parse timer");
+    let offset_in_sec = chrono::Local::now().offset().local_minus_utc();
     let time_offset = time::UtcOffset::from_whole_seconds(offset_in_sec).unwrap();
 
     let timer = tracing_subscriber::fmt::time::OffsetTime::new(time_offset, format);
     let config = Config::load().await;
-    let log_level = var("RUST_LOG")
-        .unwrap_or(config.log_level.clone());
+    let log_level = var("RUST_LOG").unwrap_or(config.log_level.clone());
     let log_layer = tracing_subscriber::fmt::layer()
         .compact()
         .with_timer(timer)
         //.with_thread_names(true)
         .with_filter(EnvFilter::from_str(&log_level).unwrap());
 
-    tracing_subscriber::registry()
-        .with(log_layer)
-        .init();
+    tracing_subscriber::registry().with(log_layer).init();
 
     info!("Log level: {log_level}");
 
-    let db_url = if var("RUST_ENV") == Ok("production".to_string()){
+    let db_url = if var("RUST_ENV") == Ok("production".to_string()) {
         std::env::current_exe()?
             .parent()
             .unwrap()
@@ -209,11 +165,8 @@ async fn main() -> Result<(), Error> {
             .to_str()
             .unwrap()
             .to_string()
-    }else{
-        dev_root()
-            .join(DDBB)
-            .to_string_lossy()
-            .into_owned()
+    } else {
+        dev_root().join(DDBB).to_string_lossy().into_owned()
     };
     info!("DB url: {db_url}");
     // WAL + busy timeout: concurrent readers are not blocked by the single
@@ -232,17 +185,18 @@ async fn main() -> Result<(), Error> {
         .await
         .expect("Pool failed");
 
-    let migrations = if var("RUST_ENV") == Ok("production".to_string()){
-        std::env::current_exe().unwrap().parent().unwrap().join(MIGRATIONS_DIR)
-    }else{
+    let migrations = if var("RUST_ENV") == Ok("production".to_string()) {
+        std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(MIGRATIONS_DIR)
+    } else {
         dev_root().join(MIGRATIONS_DIR)
     };
     info!("{}", &migrations.display());
 
-    Migrator::new(migrations)
-        .await?
-        .run(&pool)
-        .await?;
+    Migrator::new(migrations).await?.run(&pool).await?;
 
     let sleep_time = config.sleep_time;
     let url = config.url.clone();
@@ -251,21 +205,18 @@ async fn main() -> Result<(), Error> {
     // Fail fast on a misconfigured CORS origin: a bad allowlist silently
     // deployed is worse than a loud refusal at startup.
     if config.production {
-        validate_origin(&url)
-            .map_err(|e| Error::default(&e))?;
+        validate_origin(&url).map_err(|e| Error::default(&e))?;
     }
 
     // The session key is used in every mode; actix-session panics on keys
     // shorter than 64 bytes, so validate up front (crash-safety).
-    validate_secret_key(&config.secret_key)
-        .map_err(|e| Error::default(&e))?;
+    validate_secret_key(&config.secret_key).map_err(|e| Error::default(&e))?;
 
     // Validate the whole CORS allowlist up front in every mode: a dev origin
     // with a typo must not silently deploy a broader or broken policy.
     let cors_origins = cors_origins_for(&config);
     for origin in &cors_origins {
-        validate_origin(origin)
-            .map_err(|e| Error::default(&e))?;
+        validate_origin(origin).map_err(|e| Error::default(&e))?;
     }
 
     // Configure the single YouTube-connection throttle with the (optional)
@@ -306,19 +257,19 @@ async fn main() -> Result<(), Error> {
         .await
         .expect("Cant create images cache directory");
 
-
     let pool2 = pool.clone();
-    spawn(async move{
+    let worker_config = config.clone();
+    spawn(async move {
         //let auth = HttpAuthentication::bearer(validator);
         loop {
             info!("**** Start updating yt-dlp ****");
-            match Ytdlp::auto_update().await{
-                Ok(()) => {},
+            match Ytdlp::auto_update().await {
+                Ok(()) => {}
                 Err(e) => error!("{}", e),
             }
             info!("**** Finish updating yt-dlp ****");
-            match do_the_work(&pool2).await{
-                Ok(_) => {},
+            match do_the_work(&pool2, &worker_config).await {
+                Ok(_) => {}
                 Err(e) => {
                     error!("Error doing the work: {e}");
                 }
@@ -326,13 +277,11 @@ async fn main() -> Result<(), Error> {
             info!("Sleep time: {}", &sleep_time);
             sleep(Duration::from_secs(sleep_time * 3600)).await;
         }
-
     });
-
 
     let config2 = config.clone();
     HttpServer::new(move || {
-        let appstate = AppState{
+        let appstate = AppState {
             config: config2.clone(),
             pool: pool.clone(),
         };
@@ -340,43 +289,40 @@ async fn main() -> Result<(), Error> {
         let static_files = config.html_path.trim_end_matches('/').to_string();
         App::new()
             .wrap(Logger::default())
-            .wrap(
-                if config.production{
-                    SessionMiddleware::builder(
-                        CookieSessionStore::default(),
-                        Key::from(config.secret_key.as_bytes()).clone()
-                    )
-                    .cookie_http_only(true)
-                    .cookie_same_site(SameSite::None)
-                    .cookie_secure(true)
-                    .session_lifecycle(
-                        PersistentSession::default()
-                            .session_ttl(time::Duration::days(7))
-                    )
-                    .build()
-                }else{
-                    SessionMiddleware::builder(
-                        CookieSessionStore::default(),
-                        Key::from(config.secret_key.as_bytes()).clone()
-                    )
-                    .cookie_secure(false)
-                    .session_lifecycle(
-                        PersistentSession::default()
-                            .session_ttl(time::Duration::days(7))
-                    )
-                    .build()
-                }
-            )
+            .wrap(if config.production {
+                SessionMiddleware::builder(
+                    CookieSessionStore::default(),
+                    Key::from(config.secret_key.as_bytes()).clone(),
+                )
+                .cookie_http_only(true)
+                .cookie_same_site(SameSite::None)
+                .cookie_secure(true)
+                .session_lifecycle(
+                    PersistentSession::default().session_ttl(time::Duration::days(7)),
+                )
+                .build()
+            } else {
+                SessionMiddleware::builder(
+                    CookieSessionStore::default(),
+                    Key::from(config.secret_key.as_bytes()).clone(),
+                )
+                .cookie_secure(false)
+                .session_lifecycle(
+                    PersistentSession::default().session_ttl(time::Duration::days(7)),
+                )
+                .build()
+            })
             .wrap(build_cors(&cors_origins))
             .app_data(Data::clone(&data))
-            .service(af::Files::new("/app", static_files.clone())
-                .index_file("index.html")
-                .default_handler(
-                    af::NamedFile::open(
-                        [static_files.clone(), "index.html".to_string()].join("/"),
-                    )
-                    .expect("index file should exist"),
-                )
+            .service(
+                af::Files::new("/app", static_files.clone())
+                    .index_file("index.html")
+                    .default_handler(
+                        af::NamedFile::open(
+                            [static_files.clone(), "index.html".to_string()].join("/"),
+                        )
+                        .expect("index file should exist"),
+                    ),
             )
             .configure(handlers::config_services)
     })
@@ -385,7 +331,6 @@ async fn main() -> Result<(), Error> {
     .run()
     .await
     .map_err(|e| e.into())
-
 }
 
 #[cfg(test)]

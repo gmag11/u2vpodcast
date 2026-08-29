@@ -1,4 +1,5 @@
 pub mod middleware;
+pub mod sponsorblock;
 pub mod throttle;
 pub mod token_utils;
 pub mod worker;

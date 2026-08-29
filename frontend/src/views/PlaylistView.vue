@@ -243,9 +243,15 @@
 			<h1 class="truncate font-display text-2xl font-semibold text-text">
 				{{ $t('playlist.title') }} ({{ items.length }})
 			</h1>
-			<AppButton v-if="items.length > 0" class="ml-auto" @click="playAll">
+			<AppButton
+				v-if="items.length > 0"
+				:aria-label="$t('playlist.playAll')"
+				class="ml-auto"
+				data-testid="playlist-play-all"
+				@click="playAll"
+			>
 				<PhPlay class="h-4 w-4" weight="fill" />
-				{{ $t('playlist.playAll') }}
+				<span class="hidden sm:inline">{{ $t('playlist.playAll') }}</span>
 			</AppButton>
 		</div>
 

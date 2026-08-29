@@ -279,10 +279,12 @@ describe('PlaylistView inline reordering', () => {
 		const { wrapper, player } = await mountView();
 		const play = vi.spyOn(player, 'play').mockResolvedValue();
 		await emitDrop(wrapper, [episode(2), episode(3), episode(1)]);
-		await wrapper
-			.findAll('button')
-			.find((button) => button.text().includes('Play all'))!
-			.trigger('click');
+		const playAllButton = wrapper.get('[data-testid="playlist-play-all"]');
+		expect(playAllButton.attributes('aria-label')).toBe('Play all');
+		expect(playAllButton.get('span').classes()).toEqual(
+			expect.arrayContaining(['hidden', 'sm:inline'])
+		);
+		await playAllButton.trigger('click');
 		expect(play).toHaveBeenCalledOnce();
 		const [firstEpisode, queue, options] = play.mock.calls[0];
 		expect(firstEpisode.id).toBe(2);

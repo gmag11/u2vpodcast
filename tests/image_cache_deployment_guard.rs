@@ -44,7 +44,10 @@ fn compose_has_no_new_volume_for_image_cache() {
 
     // The named-volumes block still lists exactly the two original volumes.
     let named = compose.split("volumes:").last().unwrap_or_default();
-    assert!(named.contains("audios: {}"), "named `audios` volume must remain");
+    assert!(
+        named.contains("audios: {}"),
+        "named `audios` volume must remain"
+    );
     assert!(named.contains("db: {}"), "named `db` volume must remain");
     assert!(
         !named.contains("images"),

@@ -137,6 +137,12 @@ export const api = {
 		});
 	},
 
+	async refreshEpisodeSponsorBlock(ytId: string) {
+		return request<Episode>(`/api/1.0/episodes/${ytId}/sponsorblock/refresh/`, {
+			method: 'POST'
+		});
+	},
+
 	async addEpisodeToPlaylist(episodeId: number) {
 		return request<Episode>('/api/1.0/playlist/', {
 			method: 'POST',
