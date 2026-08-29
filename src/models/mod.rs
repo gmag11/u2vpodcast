@@ -5,6 +5,7 @@ mod user;
 mod error;
 mod role;
 mod episode;
+mod playlist;
 mod ytdlp;
 pub mod channel;
 pub mod response;
@@ -42,7 +43,11 @@ use ytinfo::{
     YTInfo,
     cache_image,
 };
-pub use episode::Episode;
+pub use episode::{
+    Episode,
+    EpisodeProgress,
+};
+pub use playlist::PlaylistItem;
 pub use appstate::AppState;
 pub use user::{
     User,

@@ -11,7 +11,8 @@ const router = createRouter({
 	history: createMemoryHistory(),
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
-		{ path: '/history', name: 'history', component: { template: '<div />' } }
+		{ path: '/history', name: 'history', component: { template: '<div />' } },
+		{ path: '/playlist', name: 'playlist', component: { template: '<div />' } }
 	]
 });
 

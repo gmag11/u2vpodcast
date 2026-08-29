@@ -88,6 +88,17 @@
 					>
 						{{ $t('header.history') }}
 					</RouterLink>
+					<RouterLink
+						to="/playlist"
+						class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+						:class="
+							route.name === 'playlist'
+								? 'bg-accent-600 text-white'
+								: 'text-text-muted hover:text-text'
+						"
+					>
+						{{ $t('playlist.title') }}
+					</RouterLink>
 				</div>
 			</div>
 
@@ -197,6 +208,16 @@
 				@click="drawerOpen = false"
 			>
 				{{ $t('header.history') }}
+			</RouterLink>
+			<RouterLink
+				to="/playlist"
+				class="rounded-md px-3 py-2 text-sm font-medium transition-colors"
+				:class="
+					route.name === 'playlist' ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'
+				"
+				@click="drawerOpen = false"
+			>
+				{{ $t('playlist.title') }}
 			</RouterLink>
 		</nav>
 

@@ -29,6 +29,7 @@ use sqlx::{
 use super::{
     Error,
     Episode,
+    PlaylistItem,
     YTInfo,
     cache_image,
 };
@@ -438,6 +439,7 @@ impl Channel{
     pub async fn delete(pool: &SqlitePool, id: i64) -> Result<Self, Error>{
         info!("delete");
         let mut tx = pool.begin().await?;
+        PlaylistItem::purge_for_channel(&mut tx, id).await?;
         query("DELETE FROM episodes WHERE channel_id = $1")
             .bind(id)
             .execute(&mut *tx)
@@ -616,6 +618,33 @@ mod channel_pagination_tests {
         .expect("insert channel")
     }
 
+    async fn insert_episode(pool: &SqlitePool, channel_id: i64, yt_id: &str) -> i64 {
+        let now = Utc::now();
+        query(
+            "INSERT INTO episodes (channel_id, title, description, yt_id, webpage_url, \
+             published_at, duration, image, listen, position_seconds, listened_at, \
+             created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id",
+        )
+        .bind(channel_id)
+        .bind(format!("episode {yt_id}"))
+        .bind("")
+        .bind(yt_id)
+        .bind(format!("https://youtu.be/{yt_id}"))
+        .bind(now)
+        .bind("00:10:00")
+        .bind("")
+        .bind(false)
+        .bind(0i64)
+        .bind(Option::<DateTime<Utc>>::None)
+        .bind(now)
+        .bind(now)
+        .map(|row: SqliteRow| row.get::<i64, _>("id"))
+        .fetch_one(pool)
+        .await
+        .expect("insert episode")
+    }
+
     #[tokio::test]
     async fn pagination_pages_are_disjoint_and_bounded() {
         let pool = memory_pool().await;
@@ -647,6 +676,43 @@ mod channel_pagination_tests {
         let pneg = Channel::read_with_pagination(&pool, -3, 2).await.expect("negative page");
         assert_eq!(p0.len(), 2);
         assert_eq!(pneg.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delete_removes_channel_playlist_items_and_reindexes() {
+        let pool = memory_pool().await;
+        let removed_channel = insert_channel(&pool, "https://example.com/removed", "Removed Channel").await;
+        let kept_channel = insert_channel(&pool, "https://example.com/kept", "Kept Channel").await;
+        let removed_first = insert_episode(&pool, removed_channel, "del111").await;
+        let kept = insert_episode(&pool, kept_channel, "keep22").await;
+        let removed_last = insert_episode(&pool, removed_channel, "del333").await;
+        for episode_id in [removed_first, kept, removed_last] {
+            PlaylistItem::add(&pool, episode_id).await.expect("add playlist item");
+        }
+
+        Channel::delete(&pool, removed_channel).await.expect("delete channel");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].episode_id, kept);
+        assert_eq!(items[0].position, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_channel_without_playlist_items_leaves_playlist_unchanged() {
+        let pool = memory_pool().await;
+        let removed_channel = insert_channel(&pool, "https://example.com/removed-empty", "Removed Empty").await;
+        let kept_channel = insert_channel(&pool, "https://example.com/kept-full", "Kept Full").await;
+        insert_episode(&pool, removed_channel, "gone11").await;
+        let kept = insert_episode(&pool, kept_channel, "stay22").await;
+        PlaylistItem::add(&pool, kept).await.expect("add kept item");
+
+        Channel::delete(&pool, removed_channel).await.expect("delete channel");
+
+        let items = PlaylistItem::read_all(&pool).await.expect("read playlist");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].episode_id, kept);
+        assert_eq!(items[0].position, 0);
     }
 }
 

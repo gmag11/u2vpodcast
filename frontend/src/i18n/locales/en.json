@@ -70,6 +70,34 @@
 		"emptyTitle": "No episodes yet",
 		"emptyBody": "Episodes from your channels will appear here as they are downloaded."
 	},
+	"playlist": {
+		"title": "Playlist",
+		"emptyTitle": "No pending episodes",
+		"emptyBody": "Episodes you add here play in order and leave the playlist when finished.",
+		"add": "Add to playlist",
+		"added": "Added to playlist",
+		"addFailed": "Could not add to playlist",
+		"remove": "Remove from playlist",
+		"removed": "Removed from playlist",
+		"removeFailed": "Could not remove from playlist",
+		"unmark": "Mark as not listened",
+		"unmarkFailed": "Could not clear the listened state",
+		"dragHandle": "Reorder {title}",
+		"pickedUp": "Picked up {title}, position {position} of {total}",
+		"moved": "Moved {title} to position {position} of {total}",
+		"dropped": "Dropped {title} at position {position} of {total}",
+		"cancelled": "Reordering cancelled. {title} returned to position {position} of {total}",
+		"reorderPending": "Saving playlist order",
+		"reorderFailed": "Could not save the playlist order",
+		"playAll": "Play all",
+		"actions": "Episode actions",
+		"favorite": "Favourite",
+		"originalLink": "Original link",
+		"resetProgress": "Reset progress",
+		"progressReset": "Playback progress reset",
+		"resetProgressFailed": "Could not reset playback progress",
+		"channelView": "Channel view"
+	},
 	"card": {
 		"openOnYouTube": "Open on YouTube",
 		"rssFeed": "Get RSS feed",
@@ -81,7 +109,10 @@
 		"delete": "Delete",
 		"deleteLabel": "Delete channel and audio files",
 		"syncTooltip": "Updated {age} ago. Status: {status}",
-		"lastEpisodeTooltip": "Last episode {age} ago"
+		"lastEpisodeTooltip": "Last episode {age} ago",
+		"listened": "Listened",
+		"continueAt": "Continue at {time}",
+		"startOver": "Start over"
 	},
 	"status": {
 		"ok": "Ok",
@@ -93,7 +124,19 @@
 		"stop": "Stop",
 		"seek": "Seek",
 		"mute": "Mute",
-		"unmute": "Unmute"
+		"unmute": "Unmute",
+		"next": "Next",
+		"previous": "Previous",
+		"shuffle": "Shuffle",
+		"repeatOff": "Repeat off",
+		"repeatAll": "Repeat all",
+		"repeatOne": "Repeat one",
+		"queue": "Up next queue",
+		"upNext": "Up next",
+		"removeFromQueue": "Remove from queue",
+		"clearQueue": "Clear",
+		"emptyQueue": "No episodes queued",
+		"queueReady": "Queue ready"
 	},
 	"pagination": {
 		"previous": "Previous",
@@ -116,5 +159,15 @@
 	"languages": {
 		"en": "English",
 		"es": "Español"
+	},
+	"favorites": {
+		"add": "Add to favorites",
+		"remove": "Remove from favorites",
+		"added": "Added to favorites",
+		"removed": "Removed from favorites",
+		"failed": "Could not update favorites",
+		"filterLabel": "Favorites only",
+		"emptyTitle": "No favorites yet",
+		"emptyBody": "Episodes you mark with the star will appear here."
 	}
 }

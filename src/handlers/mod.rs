@@ -3,10 +3,12 @@ mod logout;
 mod status;
 mod channels;
 mod episodes;
+mod playlists;
 mod users;
 mod options;
 mod feed;
 mod config;
+mod media;
 
 
 use actix_web::web;
@@ -16,7 +18,6 @@ use actix_files as af;
 use super::models::{
     Credentials,
     AppState,
-    audios_dir,
     images_dir,
 };
 use super::utils::middleware::{
@@ -55,10 +56,14 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                     .wrap(RequireSession)
                                     .configure(users::api_users)
                                     .configure(options::api_options)
+                                    .configure(playlists::api_playlists)
                                     .service(channels::read)
                                     .service(channels::read_with_pagination)
                                     .service(episodes::read_with_pagination)
                                     .service(episodes::read_all)
+                                    .service(episodes::read_progress)
+                                    .service(episodes::update_progress)
+                                    .service(episodes::update_favorite)
                                     .service(channels::create)
                                     .service(channels::update_episodes)
                                     .service(channels::refresh_image)
@@ -71,7 +76,8 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("/media")
                     .wrap(SessionOrBasicAuth)
-                    .service(af::Files::new("", audios_dir()))
+                    .route("/{path:.*}", web::get().to(media::serve_media))
+                    .route("/{path:.*}", web::head().to(media::serve_media))
             )
             .service(
                 web::scope("/images")

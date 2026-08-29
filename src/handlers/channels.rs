@@ -213,7 +213,7 @@ async fn delete(
                     }
                     _ => {
                         info!("Remove directory {}/{}", folder, &channel.slug);
-                        match tokio::fs::remove_dir_all(format!("{}/{}", folder, &channel.slug))
+                        match tokio::fs::remove_dir_all(format!("{}/{}", folder, channel.slug))
                             .await {
                             Ok(_) => debug!("Removed directorio {}/{}", folder, &channel.slug),
                             Err(e) => error!("Can't remove directory {}/{}: {}", folder, &channel.slug, e),
@@ -223,7 +223,7 @@ async fn delete(
                         // an error: the channel may never have had a cached
                         // image.
                         match tokio::fs::remove_file(
-                            format!("{}/{}.jpg", images_dir(), &channel.slug)
+                            format!("{}/{}.jpg", images_dir(), channel.slug)
                         ).await {
                             Ok(_) => debug!("Removed cached image for {}", &channel.slug),
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},

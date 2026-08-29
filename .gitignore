@@ -24,4 +24,5 @@ u2vpodcast.db*
 .github/prompts/
 .github/skills/
 .vscode/
+.pi/
 opencode.json

@@ -50,6 +50,7 @@ LICENSE
 sample.http
 sample.hurl
 openspec/
+.pi/
 
 # OS
 .DS_Store

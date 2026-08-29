@@ -12,6 +12,7 @@ const router = createRouter({
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
 		{ path: '/history', name: 'history', component: HistoryView },
+		{ path: '/playlist', name: 'playlist', component: { template: '<div />' } },
 		{ path: '/:channelId(\\d+)', name: 'episodes', component: { template: '<div />' } }
 	]
 });
@@ -31,6 +32,9 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		duration: '00:10:00',
 		image: '',
 		listen: false,
+		position_seconds: 0,
+		listened_at: null,
+		favorite: false,
 		created_at: now,
 		updated_at: now
 	};
@@ -133,5 +137,38 @@ describe('HistoryView', () => {
 		await input.setValue('');
 		expect(wrapper.text()).toContain('Episodio 10');
 		expect(wrapper.text()).toContain('Episodio 42');
+	});
+
+	it('favorites-only filter shows only favorited episodes', async () => {
+		const fav = episode(7, 'Favorited', 'Canal');
+		fav.favorite = true;
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(
+			okResult([episode(1, 'Episodio 10'), fav]) as never
+		);
+		const wrapper = await mountView();
+		expect(wrapper.text()).toContain('Episodio 10');
+		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		expect(wrapper.text()).toContain('Favorited');
+		expect(wrapper.text()).not.toContain('Episodio 10');
+	});
+
+	it('favorites-only filter combines with the search query', async () => {
+		const fav = episode(7, 'Favorited 42', 'Canal');
+		fav.favorite = true;
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(
+			okResult([episode(1, 'Episodio 42'), fav]) as never
+		);
+		const wrapper = await mountView();
+		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		await wrapper.find('input[placeholder="Search episodes…"]').setValue('42');
+		expect(wrapper.text()).toContain('Favorited 42');
+		expect(wrapper.text()).not.toContain('Episodio 42');
+	});
+
+	it('shows the favorites empty state when nothing is favorited', async () => {
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(okResult([episode(1, 'Episodio 10')]) as never);
+		const wrapper = await mountView();
+		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		expect(wrapper.text()).toContain('No favorites yet');
 	});
 });

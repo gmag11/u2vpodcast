@@ -70,6 +70,34 @@
 		"emptyTitle": "Aún no hay episodios",
 		"emptyBody": "Los episodios de tus canales aparecerán aquí a medida que se descarguen."
 	},
+	"playlist": {
+		"title": "Playlist",
+		"emptyTitle": "No hay episodios pendientes",
+		"emptyBody": "Los episodios que añadas aquí se reproducirán en orden y saldrán de la playlist al terminar.",
+		"add": "Añadir a la playlist",
+		"added": "Añadido a la playlist",
+		"addFailed": "No se pudo añadir a la playlist",
+		"remove": "Quitar de la playlist",
+		"removed": "Quitado de la playlist",
+		"removeFailed": "No se pudo quitar de la playlist",
+		"unmark": "Marcar como no escuchado",
+		"unmarkFailed": "No se pudo eliminar la marca de escuchado",
+		"dragHandle": "Reordenar {title}",
+		"pickedUp": "Has seleccionado {title}, posición {position} de {total}",
+		"moved": "Has movido {title} a la posición {position} de {total}",
+		"dropped": "Has colocado {title} en la posición {position} de {total}",
+		"cancelled": "Reordenación cancelada. {title} vuelve a la posición {position} de {total}",
+		"reorderPending": "Guardando el orden de la playlist",
+		"reorderFailed": "No se pudo guardar el orden de la playlist",
+		"playAll": "Reproducir todo",
+		"actions": "Acciones del episodio",
+		"favorite": "Favorito",
+		"originalLink": "Enlace original",
+		"resetProgress": "Reiniciar progreso",
+		"progressReset": "Progreso de reproducción reiniciado",
+		"resetProgressFailed": "No se pudo reiniciar el progreso",
+		"channelView": "Ver canal"
+	},
 	"card": {
 		"openOnYouTube": "Abrir en YouTube",
 		"rssFeed": "Obtener feed RSS",
@@ -81,7 +109,10 @@
 		"delete": "Eliminar",
 		"deleteLabel": "Eliminar canal y archivos de audio",
 		"syncTooltip": "Actualizado hace {age}. Estado: {status}",
-		"lastEpisodeTooltip": "Último episodio hace {age}"
+		"lastEpisodeTooltip": "Último episodio hace {age}",
+		"listened": "Escuchado",
+		"continueAt": "Continuar en {time}",
+		"startOver": "Empezar de nuevo"
 	},
 	"status": {
 		"ok": "Correcto",
@@ -93,7 +124,19 @@
 		"stop": "Detener",
 		"seek": "Buscar",
 		"mute": "Silenciar",
-		"unmute": "Activar sonido"
+		"unmute": "Activar sonido",
+		"next": "Siguiente",
+		"previous": "Anterior",
+		"shuffle": "Mezclar",
+		"repeatOff": "Repetición desactivada",
+		"repeatAll": "Repetir todo",
+		"repeatOne": "Repetir uno",
+		"queue": "Cola",
+		"upNext": "A continuación",
+		"removeFromQueue": "Quitar de la cola",
+		"clearQueue": "Vaciar",
+		"emptyQueue": "No hay episodios en cola",
+		"queueReady": "Cola lista"
 	},
 	"pagination": {
 		"previous": "Anterior",
@@ -116,5 +159,15 @@
 	"languages": {
 		"en": "English",
 		"es": "Español"
+	},
+	"favorites": {
+		"add": "Añadir a favoritos",
+		"remove": "Quitar de favoritos",
+		"added": "Añadido a favoritos",
+		"removed": "Quitado de favoritos",
+		"failed": "No se pudo actualizar favoritos",
+		"filterLabel": "Solo favoritos",
+		"emptyTitle": "Aún no hay favoritos",
+		"emptyBody": "Los episodios que marques con la estrella aparecerán aquí."
 	}
 }
