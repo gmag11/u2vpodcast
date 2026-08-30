@@ -142,7 +142,12 @@
 		"queueReady": "Cola lista",
 		"speed": "Velocidad de reproducción",
 		"speedIncrease": "Aumentar velocidad",
-		"speedDecrease": "Reducir velocidad"
+		"speedDecrease": "Reducir velocidad",
+		"collapse": "Cerrar vista ampliada",
+		"expand": "Ampliar reproductor",
+		"seekBack10": "Retroceder 10 segundos",
+		"seekForward10": "Avanzar 10 segundos",
+		"mobileModeNormal": "Orden normal"
 	},
 	"pagination": {
 		"previous": "Anterior",

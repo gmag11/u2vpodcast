@@ -300,14 +300,16 @@ describe('PersistentPlayer controls', () => {
 		expect(bar.text()).toContain('Episode 2');
 	});
 
-	it('renders only play or pause as a compact control', async () => {
+	it('renders exactly one play/pause button and a tappable thumbnail as compact controls', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);
 		await mountBar();
 
 		const compact = wrapper!.get('[data-testid="player-compact"]');
-		expect(compact.findAll('button')).toHaveLength(1);
-		expect(compact.get('button').attributes('aria-label')).toBe('Pause');
+		const buttons = compact.findAll('button');
+		expect(buttons).toHaveLength(2);
+		expect(compact.get('button[aria-label="Pause"]')).toBeTruthy();
+		expect(compact.get('button[aria-label="Expand player"]')).toBeTruthy();
 		expect(compact.find('[role="slider"]').exists()).toBe(false);
 	});
 
@@ -336,9 +338,65 @@ describe('PersistentPlayer controls', () => {
 		});
 		await mountBar();
 
-		await wrapper!.get('[data-testid="player-compact"] button').trigger('click');
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Pause"]')
+			.trigger('click');
 		expect(togglePlay).toHaveBeenCalledOnce();
 		expect(player.playing).toBe(false);
+	});
+
+	it('opens the expanded now-playing view when the compact thumbnail is tapped', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(true);
+	});
+
+	it('closes the expanded view without interrupting playback', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+
+		await wrapper!.get('button[aria-label="Collapse now-playing view"]').trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+		expect(player.playing).toBe(true);
+		expect(player.currentEpisode?.id).toBe(1);
+	});
+
+	it('force-closes the expanded view when the viewport widens past 640px', async () => {
+		let changeListener: ((event: MediaQueryListEvent) => void) | null = null;
+		const mediaQueryList = {
+			matches: false,
+			addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+				changeListener = listener;
+			}),
+			removeEventListener: vi.fn()
+		};
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => mediaQueryList)
+		);
+
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(true);
+
+		expect(changeListener).toBeTruthy();
+		changeListener!({ matches: true } as MediaQueryListEvent);
+		await flushPromises();
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
 	});
 
 	it('renders matching SponsorBlock markers on the compact read-only track', async () => {
@@ -371,6 +429,24 @@ describe('PersistentPlayer controls', () => {
 		expect(track.attributes('tabindex')).toBeUndefined();
 		await track.trigger('click');
 		expect(player.currentTime).toBe(90);
+	});
+	it('leaves the wide composition entirely unaffected by the expanded view', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+
+		// Same controls as before: no expand affordance, thumbnail is not a button.
+		expect(bar.find('button[aria-label="Expand player"]').exists()).toBe(false);
+		expect(bar.get('button[aria-label="Previous"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Stop"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Next"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Playback speed"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Shuffle"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Up next queue"]')).toBeTruthy();
+		expect(bar.find('input[type="range"]').exists()).toBe(true);
+
+		// Tapping the (non-button) wide thumbnail does not open the expanded view.
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
 	});
 });
 

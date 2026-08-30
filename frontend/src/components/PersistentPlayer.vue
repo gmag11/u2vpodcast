@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { computed, onBeforeUnmount, ref, watch } from 'vue';
+	import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 	import {
 		PhGauge,
 		PhList,
@@ -26,12 +26,31 @@
 		usePlayerStore
 	} from '@/stores/player';
 	import ScrollingText from '@/components/ScrollingText.vue';
+	import PersistentPlayerExpanded from '@/components/PersistentPlayerExpanded.vue';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
 	const queueOpen = ref(false);
 	const visible = ref(false);
+	const expanded = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
+	let compactMediaQuery: MediaQueryList | null = null;
+
+	function onCompactMediaQueryChange(event: MediaQueryListEvent) {
+		// The expanded view only exists for the compact composition
+		// (expand-mobile-player-view): crossing into the wide breakpoint (query
+		// matches) force-closes it so the wide composition takes over without a
+		// stale overlay.
+		if (event.matches) expanded.value = false;
+	}
+
+	function openExpanded() {
+		expanded.value = true;
+	}
+
+	function closeExpanded() {
+		expanded.value = false;
+	}
 	const sponsorBlockMarkers = computed(() => {
 		const episode = player.currentEpisode;
 		if (!episode) return [];
@@ -172,10 +191,17 @@
 		}
 		document.removeEventListener('pointerdown', onDocumentPointerDown);
 		document.removeEventListener('keydown', onDocumentKeydown);
+		compactMediaQuery?.removeEventListener('change', onCompactMediaQueryChange);
 	});
 
 	document.addEventListener('pointerdown', onDocumentPointerDown);
 	document.addEventListener('keydown', onDocumentKeydown);
+
+	onMounted(() => {
+		if (typeof window.matchMedia !== 'function') return;
+		compactMediaQuery = window.matchMedia('(min-width: 640px)');
+		compactMediaQuery.addEventListener('change', onCompactMediaQueryChange);
+	});
 </script>
 
 <template>
@@ -213,14 +239,19 @@
 				</div>
 
 				<div class="flex min-w-0 items-center gap-3 px-4 py-3">
-					<div class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-input">
+					<button
+						type="button"
+						class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-input"
+						:aria-label="$t('player.expand')"
+						@click="openExpanded"
+					>
 						<img
 							v-if="player.currentEpisode?.image"
 							:src="player.currentEpisode.image"
 							:alt="player.currentEpisode.title"
 							class="h-full w-full object-cover"
 						/>
-					</div>
+					</button>
 
 					<div class="flex min-w-0 flex-1 flex-col">
 						<ScrollingText
@@ -537,4 +568,6 @@
 			</div>
 		</div>
 	</Transition>
+
+	<PersistentPlayerExpanded :open="expanded" @close="closeExpanded" />
 </template>
