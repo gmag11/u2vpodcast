@@ -7,7 +7,7 @@ While the compact composition (viewport width < 640px) is displayed, tapping the
 The expanded view SHALL display:
 - a close control (a chevron-down icon) in its top-left corner;
 - the current episode's thumbnail, rendered larger than in the compact bar;
-- the episode title and the current episode's channel name;
+- the episode title and the current episode's channel name; when the title is wider than the available space it SHALL scroll continuously from right to left while playback is active, and SHALL be truncated rather than scrolled while playback is not active or when the user's system requests reduced motion;
 - an interactive progress bar spanning the width of the view, together with the elapsed time and the remaining time (or total duration) as separate labels flanking it;
 - a playback speed control equivalent to the wide composition's (standard presets plus the fine-grained +/- stepper in 0.05 steps);
 - a combined shuffle/repeat control, as specified by the `playback-modes` capability;
@@ -55,3 +55,11 @@ The expanded view SHALL only be reachable while the compact composition is activ
 #### Scenario: Expanded view reflects state changes made elsewhere
 - **WHEN** the expanded view is open and playback state changes through another control (for example, a card action)
 - **THEN** the expanded view's progress, play/pause state, speed, and mode indicators update to match
+
+#### Scenario: Expanded title scrolls continuously while playing
+- **WHEN** the expanded view is open, playback is active, and the episode title is wider than the available space
+- **THEN** the title scrolls continuously from right to left so its full text remains readable over time
+
+#### Scenario: Expanded title stops scrolling while paused or reduced motion is requested
+- **WHEN** the expanded view shows an overflowing title and playback is not active or the user's system requests reduced motion
+- **THEN** the title does not animate and is truncated instead
