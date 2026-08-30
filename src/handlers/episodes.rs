@@ -28,6 +28,7 @@ async fn read_with_pagination(
                 debug!("{:?}", episodes);
                 for episode in episodes.iter_mut() {
                     episode.channel_slug = channel.slug.clone();
+                    episode.channel_title = channel.title.clone();
                     episode.playback_speed = channel.playback_speed;
                     episode.apply_sponsorblock_config(
                         data.config.sponsorblock_enabled,

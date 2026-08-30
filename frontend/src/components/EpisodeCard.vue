@@ -25,6 +25,7 @@
 	import { api } from '@/lib/api/client';
 	import type { Episode } from '@/types';
 	import { toHHMMSS } from '@/lib/utils/formatter';
+	import ScrollingText from '@/components/ScrollingText.vue';
 
 	const props = withDefaults(
 		defineProps<{
@@ -63,11 +64,6 @@
 	const menuOpen = ref(false);
 	const menuTrigger = ref<HTMLButtonElement | null>(null);
 	const menuElement = ref<HTMLElement | null>(null);
-	const titleViewport = ref<HTMLElement | null>(null);
-	const titleText = ref<HTMLElement | null>(null);
-	const titleScrollDistance = ref(0);
-	const TITLE_SCROLL_GAP_PX = 32;
-	const TITLE_SCROLL_SPEED_PX_PER_SECOND = 32;
 	const menuId = computed(() => `episode-actions-${props.episode.id}`);
 
 	function formatDurationLabel(seconds: number) {
@@ -127,13 +123,6 @@
 			liveEpisode.value.sponsorblock_enabled === true ? liveEpisode.value.sponsorblock_segments : []
 		)
 	);
-	const titleScrollActive = computed(() => isPlaying.value && titleScrollDistance.value > 0);
-	const titleScrollStyle = computed(() => ({
-		'--playlist-title-distance': `${titleScrollDistance.value}px`,
-		'--playlist-title-duration': `${titleScrollDistance.value / TITLE_SCROLL_SPEED_PX_PER_SECOND}s`
-	}));
-	let titleResizeObserver: ResizeObserver | undefined;
-
 	function formatDate(value: Date | string) {
 		return d(new Date(value), 'short');
 	}
@@ -172,34 +161,14 @@
 		closeMenu();
 	}
 
-	async function measureTitleScroll() {
-		await nextTick();
-		const viewportWidth = titleViewport.value?.clientWidth ?? 0;
-		const textWidth = titleText.value?.scrollWidth ?? 0;
-		titleScrollDistance.value =
-			viewportWidth > 0 && textWidth > viewportWidth ? textWidth + TITLE_SCROLL_GAP_PX : 0;
-	}
-
-	watch(
-		() => props.episode.title,
-		() => void measureTitleScroll()
-	);
-
 	onMounted(() => {
 		document.addEventListener('pointerdown', onDocumentPointerDown);
 		document.addEventListener('keydown', onDocumentKeydown);
-		void measureTitleScroll();
-		if (typeof ResizeObserver !== 'undefined') {
-			titleResizeObserver = new ResizeObserver(() => void measureTitleScroll());
-			if (titleViewport.value) titleResizeObserver.observe(titleViewport.value);
-			if (titleText.value) titleResizeObserver.observe(titleText.value);
-		}
 	});
 
 	onBeforeUnmount(() => {
 		document.removeEventListener('pointerdown', onDocumentPointerDown);
 		document.removeEventListener('keydown', onDocumentKeydown);
-		titleResizeObserver?.disconnect();
 	});
 
 	// Playlist toggle: add when absent, remove when present, notifying on both
@@ -381,31 +350,11 @@
 			</button>
 
 			<div class="min-w-0 flex-1 overflow-hidden">
-				<div
-					ref="titleViewport"
-					class="playlist-title-viewport overflow-hidden"
-					data-testid="playlist-title-viewport"
-					:aria-label="props.episode.title"
-				>
-					<h2
-						class="playlist-title-scroll inline-flex w-max min-w-full whitespace-nowrap text-sm font-bold text-text"
-						:class="{ 'playlist-title-scroll--active': titleScrollActive }"
-						:style="titleScrollStyle"
-						data-testid="playlist-title-scroll"
-					>
-						<span ref="titleText" class="shrink-0" data-testid="playlist-title-text">
-							{{ props.episode.title }}
-						</span>
-						<span
-							v-if="titleScrollDistance > 0"
-							class="shrink-0"
-							data-testid="playlist-title-copy"
-							aria-hidden="true"
-						>
-							{{ props.episode.title }}
-						</span>
-					</h2>
-				</div>
+				<ScrollingText
+					class="text-sm font-bold text-text"
+					:text="props.episode.title"
+					:active="isPlaying"
+				/>
 				<p class="truncate text-xs font-normal text-text-muted" data-testid="playlist-channel">
 					{{ props.episode.channel_title }}
 				</p>
@@ -711,33 +660,3 @@
 		</div>
 	</article>
 </template>
-
-<style scoped>
-	.playlist-title-viewport {
-		container-type: inline-size;
-	}
-
-	.playlist-title-scroll {
-		gap: 32px;
-	}
-
-	.playlist-title-scroll--active {
-		animation: playlist-title-scroll var(--playlist-title-duration) linear infinite;
-		will-change: transform;
-	}
-
-	@keyframes playlist-title-scroll {
-		from {
-			transform: translateX(0);
-		}
-		to {
-			transform: translateX(calc(-1 * var(--playlist-title-distance)));
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.playlist-title-scroll--active {
-			animation: none;
-		}
-	}
-</style>

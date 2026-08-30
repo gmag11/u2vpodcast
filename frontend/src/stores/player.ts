@@ -1263,10 +1263,10 @@ export const usePlayerStore = defineStore('player', () => {
 			const hours = Math.floor(currentTime.value / 3600);
 			const minutes = Math.floor((currentTime.value % 3600) / 60);
 			const seconds = Math.floor(currentTime.value % 60);
-			return [hours, minutes, seconds]
-				.filter((v, i) => v > 0 || i > 0)
-				.map((v) => String(v).padStart(2, '0'))
-				.join(':');
+			const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+			return hours > 0
+				? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+				: minuteSeconds;
 		}
 		return '0:00';
 	});

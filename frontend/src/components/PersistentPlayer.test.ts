@@ -100,7 +100,7 @@ describe('PersistentPlayer controls', () => {
 			global: { plugins: [testI18n] }
 		});
 		await flushPromises();
-		return wrapper;
+		return wrapper.get('[data-testid="player-wide"]');
 	}
 
 	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
@@ -113,7 +113,7 @@ describe('PersistentPlayer controls', () => {
 		const player = usePlayerStore();
 		startPlayback(player);
 
-		const bar = (await mountBar()).get('.fixed.bottom-0');
+		const bar = await mountBar();
 		const stopBtn = bar.get('button[aria-label="Stop"]');
 		const nextBtn = bar.get('button[aria-label="Next"]');
 
@@ -266,8 +266,8 @@ describe('PersistentPlayer controls', () => {
 		const player = usePlayerStore();
 		startPlayback(player);
 		player.upNext = [episode(2), episode(3)];
-		const bar = await mountBar();
-		expect(bar.find('.fixed.bottom-0').exists()).toBe(true);
+		await mountBar();
+		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
 
 		// stop playback with items still queued -> stays visible
 		player.playing = false;
@@ -289,7 +289,7 @@ describe('PersistentPlayer controls', () => {
 		player.stopped = true;
 
 		const bar = await mountBar();
-		expect(bar.find('.fixed.bottom-0').exists()).toBe(true);
+		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
 		expect(bar.text()).toContain('Queue ready');
 
 		const playBtn = bar.get('button[aria-label="Play"]');
@@ -298,6 +298,79 @@ describe('PersistentPlayer controls', () => {
 		// queue stays reachable: the popover opens without a current episode
 		await bar.get('button[aria-label="Up next queue"]').trigger('click');
 		expect(bar.text()).toContain('Episode 2');
+	});
+
+	it('renders only play or pause as a compact control', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		expect(compact.findAll('button')).toHaveLength(1);
+		expect(compact.get('button').attributes('aria-label')).toBe('Pause');
+		expect(compact.find('[role="slider"]').exists()).toBe(false);
+	});
+
+	it('shows channel and elapsed-only compact clock including hour rollover', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = { ...player.currentEpisode!, channel_title: 'VisualPolitik' };
+		player.duration = 7200;
+		player.currentTime = 669;
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		expect(compact.text()).toContain('VisualPolitik • 11:09');
+		expect(compact.text()).not.toContain(player.durationLabel);
+
+		player.currentTime = 3600;
+		await flushPromises();
+		expect(compact.text()).toContain('VisualPolitik • 1:00:00');
+	});
+
+	it('toggles playback from the compact control', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const togglePlay = vi.spyOn(player, 'togglePlay').mockImplementation(async () => {
+			player.playing = !player.playing;
+		});
+		await mountBar();
+
+		await wrapper!.get('[data-testid="player-compact"] button').trigger('click');
+		expect(togglePlay).toHaveBeenCalledOnce();
+		expect(player.playing).toBe(false);
+	});
+
+	it('renders matching SponsorBlock markers on the compact read-only track', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_segments: [
+				{ start: 60, end: 120, category: 'sponsor', rejected: true },
+				{ start: 180, end: 240, category: 'intro', rejected: false }
+			]
+		};
+		player.currentTime = 90;
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const wide = wrapper!.get('[data-testid="player-wide"]');
+		const compactMarkers = compact.findAll('[data-testid="player-sponsorblock-segment"]');
+		const wideMarkers = wide.findAll('[data-testid="player-sponsorblock-segment"]');
+		expect(compactMarkers).toHaveLength(2);
+		expect(compactMarkers[0].classes()).toContain('bg-sponsorblock');
+		expect(compactMarkers[1].classes()).toContain('bg-sponsorblock-other');
+		expect(compactMarkers.map((marker) => marker.attributes('style'))).toEqual(
+			wideMarkers.map((marker) => marker.attributes('style'))
+		);
+
+		const track = compact.get('[data-testid="player-progress-compact"]');
+		expect(track.attributes('aria-hidden')).toBe('true');
+		expect(track.attributes('role')).toBeUndefined();
+		expect(track.attributes('tabindex')).toBeUndefined();
+		await track.trigger('click');
+		expect(player.currentTime).toBe(90);
 	});
 });
 
@@ -321,7 +394,7 @@ describe('PersistentPlayer speed control', () => {
 			global: { plugins: [testI18n] }
 		});
 		await flushPromises();
-		return wrapper;
+		return wrapper.get('[data-testid="player-wide"]');
 	}
 
 	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
@@ -330,7 +403,7 @@ describe('PersistentPlayer speed control', () => {
 		player.stopped = false;
 	}
 
-	function openPanel(bar: ReturnType<typeof mount>) {
+	function openPanel(bar: Awaited<ReturnType<typeof mountBar>>) {
 		return bar.get('button[aria-label="Playback speed"]').trigger('click');
 	}
 

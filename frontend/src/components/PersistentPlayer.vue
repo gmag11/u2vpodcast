@@ -25,6 +25,7 @@
 		SPEED_STEP,
 		usePlayerStore
 	} from '@/stores/player';
+	import ScrollingText from '@/components/ScrollingText.vue';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
@@ -190,7 +191,65 @@
 			v-if="visible && (player.currentEpisode != null || player.upNext.length > 0)"
 			class="fixed bottom-0 left-0 right-0 z-30 border-t border-outline bg-surface/95 shadow-[0_-4px_20px_var(--glow)] backdrop-blur-xl"
 		>
-			<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-2 px-4 md:gap-4 md:px-8">
+			<div class="sm:hidden" data-testid="player-compact">
+				<div
+					class="relative h-1 w-full overflow-hidden bg-surface-input"
+					data-testid="player-progress-compact"
+					aria-hidden="true"
+				>
+					<div
+						class="absolute inset-y-0 left-0 bg-accent-400 transition-all duration-150"
+						:style="{ width: player.progress + '%' }"
+					></div>
+					<div
+						v-for="(marker, index) in sponsorBlockMarkers"
+						:key="index"
+						class="absolute inset-y-0 z-10"
+						:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+						:data-category="marker.category"
+						data-testid="player-sponsorblock-segment"
+						:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
+					></div>
+				</div>
+
+				<div class="flex min-w-0 items-center gap-3 px-4 py-3">
+					<div class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-input">
+						<img
+							v-if="player.currentEpisode?.image"
+							:src="player.currentEpisode.image"
+							:alt="player.currentEpisode.title"
+							class="h-full w-full object-cover"
+						/>
+					</div>
+
+					<div class="flex min-w-0 flex-1 flex-col">
+						<ScrollingText
+							class="text-sm font-semibold text-text"
+							:text="player.currentEpisode?.title ?? $t('player.queueReady')"
+							:active="player.playing"
+						/>
+						<p v-if="player.currentEpisode" class="truncate text-xs text-text-muted">
+							{{ player.currentEpisode.channel_title }} &bull; {{ player.currentLabel }}
+						</p>
+					</div>
+
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
+						:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
+						:disabled="player.loading || player.currentEpisode == null"
+						@click="player.togglePlay()"
+					>
+						<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />
+						<PhPlay v-else class="ml-0.5 h-5 w-5 text-white" weight="fill" />
+					</button>
+				</div>
+			</div>
+
+			<div
+				class="mx-auto hidden h-20 max-w-[1440px] items-center gap-2 px-4 sm:flex md:gap-4 md:px-8"
+				data-testid="player-wide"
+			>
 				<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
 					<img
 						v-if="player.currentEpisode?.image"
