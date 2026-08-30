@@ -189,6 +189,21 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		expect(togglePlay).toHaveBeenCalledOnce();
 	});
 
+	it('reseeds playback from the visible list when the current episode is paused', async () => {
+		const ep = episode({ id: 7, yt_id: 'yt7' });
+		const wrapper = mountPlaylistCard(ep);
+		const player = usePlayerStore();
+		player.currentEpisode = ep;
+		player.playing = false;
+		const play = vi.spyOn(player, 'play').mockImplementation(async () => undefined);
+		const togglePlay = vi.spyOn(player, 'togglePlay').mockImplementation(async () => undefined);
+
+		await wrapper.get('[data-testid="playlist-image-playback"]').trigger('click');
+
+		expect(play).toHaveBeenCalledWith(ep, [ep], { queueSource: 'playlist' });
+		expect(togglePlay).not.toHaveBeenCalled();
+	});
+
 	it('scrolls only the playing title and stops it while paused', async () => {
 		const restoreMeasurements = mockTitleMeasurements();
 		const ep = episode({ title: 'A title wide enough to overflow the mobile row' });

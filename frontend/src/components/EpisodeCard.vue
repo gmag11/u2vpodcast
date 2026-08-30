@@ -128,7 +128,7 @@
 	}
 
 	function togglePlayback() {
-		if (isCurrent.value) player.togglePlay();
+		if (isPlaying.value) player.togglePlay();
 		else player.play(props.episode, props.list, { queueSource: props.queueSource });
 	}
 

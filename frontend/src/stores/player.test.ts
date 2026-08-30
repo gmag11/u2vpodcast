@@ -343,6 +343,18 @@ describe('player store queue', () => {
 		expect(player.currentEpisode?.id).toBe(9);
 	});
 
+	it('replaces an existing queue when playing from a new list', async () => {
+		const player = usePlayerStore();
+		const firstList = [episode(1), episode(2), episode(3)];
+		const nextList = [episode(9), episode(10), episode(11)];
+		await player.play(firstList[0], firstList);
+
+		await player.play(nextList[0], nextList);
+
+		expect(player.upNext.map((e) => e.id)).toEqual([10, 11]);
+		expect(player.currentEpisode?.id).toBe(9);
+	});
+
 	it('advance plays the next episode, drains the queue and records history', async () => {
 		const player = usePlayerStore();
 		const episodes = [episode(1), episode(2), episode(3)];
