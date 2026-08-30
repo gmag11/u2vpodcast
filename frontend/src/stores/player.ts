@@ -103,6 +103,39 @@ export function sponsorBlockSkipTarget(
 	return interval?.end ?? seconds;
 }
 
+// Mobile expanded view (expand-mobile-player-view): the three simplified
+// states its combined shuffle/repeat control cycles through. Values outside
+// this set (repeat-one, or shuffle combined with a repeat mode) have no exact
+// representation; callers use `closestMobilePlaybackMode` to pick the nearest
+// one without mutating the underlying shuffle/repeat state.
+export type MobilePlaybackMode = 'normal' | 'repeat' | 'shuffle';
+
+const MOBILE_PLAYBACK_MODE_CYCLE: MobilePlaybackMode[] = ['normal', 'repeat', 'shuffle'];
+
+/**
+ * Maps the store's independent `shuffle`/`repeat` state onto the closest of
+ * the three mobile expanded-view states, without changing that state. Exact
+ * matches: shuffle off + repeat none -> 'normal'; shuffle off + repeat all ->
+ * 'repeat'; shuffle on + repeat none -> 'shuffle'. Anything else (repeat-one,
+ * or shuffle combined with any repeat mode) falls back to 'shuffle' when
+ * shuffle is on, otherwise 'repeat' (it is still repeating in some form).
+ */
+export function closestMobilePlaybackMode(
+	shuffle: boolean,
+	repeat: RepeatMode
+): MobilePlaybackMode {
+	if (!shuffle && repeat === 'none') return 'normal';
+	if (!shuffle && repeat === 'all') return 'repeat';
+	if (shuffle && repeat === 'none') return 'shuffle';
+	return shuffle ? 'shuffle' : 'repeat';
+}
+
+/** Returns the next state in the normal -> repeat -> shuffle -> normal cycle. */
+export function nextMobilePlaybackMode(current: MobilePlaybackMode): MobilePlaybackMode {
+	const index = MOBILE_PLAYBACK_MODE_CYCLE.indexOf(current);
+	return MOBILE_PLAYBACK_MODE_CYCLE[(index + 1) % MOBILE_PLAYBACK_MODE_CYCLE.length];
+}
+
 export function sponsorBlockTimelineMarkers(
 	duration: number,
 	segments: SponsorBlockSegment[] | null | undefined
@@ -882,6 +915,28 @@ export const usePlayerStore = defineStore('player', () => {
 		return repeat.value;
 	}
 
+	// Mobile expanded view's combined shuffle/repeat control
+	// (expand-mobile-player-view): advances through normal -> repeat -> shuffle
+	// -> normal, setting shuffle and repeat directly to land exactly on the
+	// selected state's underlying values. Reuses the current mode's closest
+	// mapping so pressing it always lands on an exact, reachable state.
+	function cycleMobilePlaybackMode(): MobilePlaybackMode {
+		const current = closestMobilePlaybackMode(shuffle.value, repeat.value);
+		const next = nextMobilePlaybackMode(current);
+		if (next === 'normal') {
+			shuffle.value = false;
+			repeat.value = 'none';
+		} else if (next === 'repeat') {
+			shuffle.value = false;
+			repeat.value = 'all';
+		} else {
+			shuffle.value = true;
+			repeat.value = 'none';
+		}
+		persistQueue();
+		return next;
+	}
+
 	async function advance() {
 		const finished = currentEpisode.value;
 		if (repeat.value === 'one' && finished) {
@@ -1263,10 +1318,10 @@ export const usePlayerStore = defineStore('player', () => {
 			const hours = Math.floor(currentTime.value / 3600);
 			const minutes = Math.floor((currentTime.value % 3600) / 60);
 			const seconds = Math.floor(currentTime.value % 60);
-			return [hours, minutes, seconds]
-				.filter((v, i) => v > 0 || i > 0)
-				.map((v) => String(v).padStart(2, '0'))
-				.join(':');
+			const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+			return hours > 0
+				? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+				: minuteSeconds;
 		}
 		return '0:00';
 	});
@@ -1296,11 +1351,32 @@ export const usePlayerStore = defineStore('player', () => {
 		return '';
 	});
 
+	// Remaining time label for the mobile expanded now-playing view
+	// (expand-mobile-player-view): duration minus elapsed, formatted like
+	// `currentLabel`/`durationLabel` (M:SS / MM:SS / H:MM:SS).
+	const remainingLabel = computed(() => {
+		const total =
+			duration.value > 0 ? duration.value : parseDurationSeconds(currentEpisode.value?.duration);
+		if (total == null || total <= 0) return '0:00';
+		const remaining = Math.max(0, total - currentTime.value);
+		const hours = Math.floor(remaining / 3600);
+		const minutes = Math.floor((remaining % 3600) / 60);
+		const seconds = Math.floor(remaining % 60);
+		const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+		return hours > 0
+			? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+			: minuteSeconds;
+	});
+
 	function isCurrent(episode: Episode) {
 		return currentEpisode.value != null && currentEpisode.value.id === episode.id;
 	}
 
+	const mobilePlaybackMode = computed(() => closestMobilePlaybackMode(shuffle.value, repeat.value));
+
 	return {
+		mobilePlaybackMode,
+		cycleMobilePlaybackMode,
 		currentEpisode,
 		playing,
 		currentTime,
@@ -1318,6 +1394,7 @@ export const usePlayerStore = defineStore('player', () => {
 		progress,
 		currentLabel,
 		durationLabel,
+		remainingLabel,
 		play,
 		advance,
 		skipNext,

@@ -91,12 +91,12 @@ function mockTitleMeasurements(viewportWidth = 100) {
 	const clientWidth = vi
 		.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
 		.mockImplementation(function (this: HTMLElement) {
-			return this.dataset.testid === 'playlist-title-viewport' ? viewportWidth : 0;
+			return this.dataset.testid === 'scrolling-text-viewport' ? viewportWidth : 0;
 		});
 	const scrollWidth = vi
 		.spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
 		.mockImplementation(function (this: HTMLElement) {
-			return this.dataset.testid === 'playlist-title-text'
+			return this.dataset.testid === 'scrolling-text-text'
 				? (this.textContent?.length ?? 0) * 8
 				: 0;
 		});
@@ -107,7 +107,7 @@ function mockTitleMeasurements(viewportWidth = 100) {
 }
 
 function marqueeMetric(wrapper: ReturnType<typeof mountPlaylistCard>, property: string) {
-	const track = wrapper.get('[data-testid="playlist-title-scroll"]').element as HTMLElement;
+	const track = wrapper.get('[data-testid="scrolling-text-track"]').element as HTMLElement;
 	return Number.parseFloat(track.style.getPropertyValue(property));
 }
 
@@ -133,9 +133,7 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		expect(mobile.get('[data-testid="playlist-image-playback"]').attributes('aria-label')).toBe(
 			'Play'
 		);
-		expect(mobile.get('[data-testid="playlist-title-scroll"]').classes()).toContain(
-			'playlist-title-scroll'
-		);
+		expect(mobile.findComponent({ name: 'ScrollingText' }).exists()).toBe(true);
 		expect(mobile.get('[data-testid="playlist-channel"]').text()).toBe('Static channel');
 		expect(mobile.text()).toContain('1:00:00');
 		expect(mobile.text()).not.toContain(ep.description);
@@ -198,21 +196,21 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		const player = usePlayerStore();
 		await flushPromises();
 
-		const track = wrapper.get('[data-testid="playlist-title-scroll"]');
-		expect(track.classes()).not.toContain('playlist-title-scroll--active');
-		expect(wrapper.find('[data-testid="playlist-title-copy"]').exists()).toBe(true);
+		const track = wrapper.get('[data-testid="scrolling-text-track"]');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
+		expect(wrapper.find('[data-testid="scrolling-text-copy"]').exists()).toBe(true);
 
 		player.currentEpisode = ep;
 		player.playing = true;
 		await flushPromises();
-		expect(track.classes()).toContain('playlist-title-scroll--active');
-		expect(wrapper.get('[data-testid="playlist-title-copy"]').attributes('aria-hidden')).toBe(
+		expect(track.classes()).toContain('scrolling-text-track--active');
+		expect(wrapper.get('[data-testid="scrolling-text-copy"]').attributes('aria-hidden')).toBe(
 			'true'
 		);
 
 		player.playing = false;
 		await flushPromises();
-		expect(track.classes()).not.toContain('playlist-title-scroll--active');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
 		restoreMeasurements();
 	});
 
@@ -224,10 +222,10 @@ describe('EpisodeCard mobile playlist presentation', () => {
 		);
 		await flushPromises();
 
-		const shortDistance = marqueeMetric(shorter, '--playlist-title-distance');
-		const longDistance = marqueeMetric(longer, '--playlist-title-distance');
-		const shortDuration = marqueeMetric(shorter, '--playlist-title-duration');
-		const longDuration = marqueeMetric(longer, '--playlist-title-duration');
+		const shortDistance = marqueeMetric(shorter, '--scrolling-text-distance');
+		const longDistance = marqueeMetric(longer, '--scrolling-text-distance');
+		const shortDuration = marqueeMetric(shorter, '--scrolling-text-duration');
+		const longDuration = marqueeMetric(longer, '--scrolling-text-duration');
 
 		expect(longDistance).toBeGreaterThan(shortDistance);
 		expect(longDuration).toBeGreaterThan(shortDuration);

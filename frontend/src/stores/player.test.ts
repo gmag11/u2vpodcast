@@ -1421,6 +1421,49 @@ describe('player store playback modes', () => {
 		expect(player.cycleRepeat()).toBe('none');
 	});
 
+	it('cycles the mobile combined mode normal -> repeat -> shuffle -> normal', () => {
+		const player = usePlayerStore();
+		expect(player.mobilePlaybackMode).toBe('normal');
+
+		expect(player.cycleMobilePlaybackMode()).toBe('repeat');
+		expect(player.shuffle).toBe(false);
+		expect(player.repeat).toBe('all');
+		expect(player.mobilePlaybackMode).toBe('repeat');
+
+		expect(player.cycleMobilePlaybackMode()).toBe('shuffle');
+		expect(player.shuffle).toBe(true);
+		expect(player.repeat).toBe('none');
+		expect(player.mobilePlaybackMode).toBe('shuffle');
+
+		expect(player.cycleMobilePlaybackMode()).toBe('normal');
+		expect(player.shuffle).toBe(false);
+		expect(player.repeat).toBe('none');
+		expect(player.mobilePlaybackMode).toBe('normal');
+	});
+
+	it('maps an unreachable combination to its closest mobile mode without changing it', () => {
+		const player = usePlayerStore();
+		player.cycleRepeat(); // -> all
+		player.cycleRepeat(); // -> one
+		expect(player.repeat).toBe('one');
+		// repeat-one has no exact mobile representation; closest is 'repeat'
+		expect(player.mobilePlaybackMode).toBe('repeat');
+		expect(player.repeat).toBe('one');
+
+		player.toggleShuffle();
+		expect(player.shuffle).toBe(true);
+		// shuffle combined with a repeat mode also has no exact representation;
+		// closest is 'shuffle', and the underlying state stays untouched
+		expect(player.mobilePlaybackMode).toBe('shuffle');
+		expect(player.shuffle).toBe(true);
+		expect(player.repeat).toBe('one');
+
+		// interacting with the control now advances from that closest state
+		expect(player.cycleMobilePlaybackMode()).toBe('normal');
+		expect(player.shuffle).toBe(false);
+		expect(player.repeat).toBe('none');
+	});
+
 	it('shuffle permutes the queue without losing or duplicating items', async () => {
 		const player = usePlayerStore();
 		const episodes = [episode(1), episode(2), episode(3), episode(4), episode(5)];

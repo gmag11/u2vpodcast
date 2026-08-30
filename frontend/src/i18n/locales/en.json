@@ -142,7 +142,12 @@
 		"queueReady": "Queue ready",
 		"speed": "Playback speed",
 		"speedIncrease": "Increase speed",
-		"speedDecrease": "Decrease speed"
+		"speedDecrease": "Decrease speed",
+		"collapse": "Collapse now-playing view",
+		"expand": "Expand player",
+		"seekBack10": "Seek back 10 seconds",
+		"seekForward10": "Seek forward 10 seconds",
+		"mobileModeNormal": "Normal order"
 	},
 	"pagination": {
 		"previous": "Previous",

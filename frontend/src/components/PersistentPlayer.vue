@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { computed, onBeforeUnmount, ref, watch } from 'vue';
+	import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 	import {
 		PhGauge,
 		PhList,
@@ -25,12 +25,32 @@
 		SPEED_STEP,
 		usePlayerStore
 	} from '@/stores/player';
+	import ScrollingText from '@/components/ScrollingText.vue';
+	import PersistentPlayerExpanded from '@/components/PersistentPlayerExpanded.vue';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
 	const queueOpen = ref(false);
 	const visible = ref(false);
+	const expanded = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
+	let compactMediaQuery: MediaQueryList | null = null;
+
+	function onCompactMediaQueryChange(event: MediaQueryListEvent) {
+		// The expanded view only exists for the compact composition
+		// (expand-mobile-player-view): crossing into the wide breakpoint (query
+		// matches) force-closes it so the wide composition takes over without a
+		// stale overlay.
+		if (event.matches) expanded.value = false;
+	}
+
+	function openExpanded() {
+		expanded.value = true;
+	}
+
+	function closeExpanded() {
+		expanded.value = false;
+	}
 	const sponsorBlockMarkers = computed(() => {
 		const episode = player.currentEpisode;
 		if (!episode) return [];
@@ -171,10 +191,17 @@
 		}
 		document.removeEventListener('pointerdown', onDocumentPointerDown);
 		document.removeEventListener('keydown', onDocumentKeydown);
+		compactMediaQuery?.removeEventListener('change', onCompactMediaQueryChange);
 	});
 
 	document.addEventListener('pointerdown', onDocumentPointerDown);
 	document.addEventListener('keydown', onDocumentKeydown);
+
+	onMounted(() => {
+		if (typeof window.matchMedia !== 'function') return;
+		compactMediaQuery = window.matchMedia('(min-width: 640px)');
+		compactMediaQuery.addEventListener('change', onCompactMediaQueryChange);
+	});
 </script>
 
 <template>
@@ -190,7 +217,70 @@
 			v-if="visible && (player.currentEpisode != null || player.upNext.length > 0)"
 			class="fixed bottom-0 left-0 right-0 z-30 border-t border-outline bg-surface/95 shadow-[0_-4px_20px_var(--glow)] backdrop-blur-xl"
 		>
-			<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-2 px-4 md:gap-4 md:px-8">
+			<div class="sm:hidden" data-testid="player-compact">
+				<div
+					class="relative h-1 w-full overflow-hidden bg-surface-input"
+					data-testid="player-progress-compact"
+					aria-hidden="true"
+				>
+					<div
+						class="absolute inset-y-0 left-0 bg-accent-400 transition-all duration-150"
+						:style="{ width: player.progress + '%' }"
+					></div>
+					<div
+						v-for="(marker, index) in sponsorBlockMarkers"
+						:key="index"
+						class="absolute inset-y-0 z-10"
+						:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+						:data-category="marker.category"
+						data-testid="player-sponsorblock-segment"
+						:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
+					></div>
+				</div>
+
+				<div class="flex min-w-0 items-center gap-3 px-4 py-3">
+					<button
+						type="button"
+						class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-input"
+						:aria-label="$t('player.expand')"
+						@click="openExpanded"
+					>
+						<img
+							v-if="player.currentEpisode?.image"
+							:src="player.currentEpisode.image"
+							:alt="player.currentEpisode.title"
+							class="h-full w-full object-cover"
+						/>
+					</button>
+
+					<div class="flex min-w-0 flex-1 flex-col">
+						<ScrollingText
+							class="text-sm font-semibold text-text"
+							:text="player.currentEpisode?.title ?? $t('player.queueReady')"
+							:active="player.playing"
+						/>
+						<p v-if="player.currentEpisode" class="truncate text-xs text-text-muted">
+							{{ player.currentEpisode.channel_title }} &bull; {{ player.currentLabel }}
+						</p>
+					</div>
+
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
+						:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
+						:disabled="player.loading || player.currentEpisode == null"
+						@click="player.togglePlay()"
+					>
+						<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />
+						<PhPlay v-else class="ml-0.5 h-5 w-5 text-white" weight="fill" />
+					</button>
+				</div>
+			</div>
+
+			<div
+				class="mx-auto hidden h-20 max-w-[1440px] items-center gap-2 px-4 sm:flex md:gap-4 md:px-8"
+				data-testid="player-wide"
+			>
 				<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
 					<img
 						v-if="player.currentEpisode?.image"
@@ -478,4 +568,6 @@
 			</div>
 		</div>
 	</Transition>
+
+	<PersistentPlayerExpanded :open="expanded" @close="closeExpanded" />
 </template>
