@@ -204,6 +204,30 @@ describe('PersistentPlayerExpanded', () => {
 		expect(seekRelativeSpy).toHaveBeenCalledWith(10);
 	});
 
+	it('long press on next skips and marks listened', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+		const w = await mountExpanded();
+
+		const nextBtn = w.get('button[aria-label="Next"]');
+		await nextBtn.trigger('pointerdown');
+		await vi.advanceTimersByTimeAsync(600);
+		await flushPromises();
+
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.playStack[0].listen).toBe(true);
+
+		// the release after a long press must not skip twice
+		await nextBtn.trigger('pointerup');
+		await nextBtn.trigger('click');
+		await flushPromises();
+		expect(player.currentEpisode?.id).toBe(2);
+
+		vi.useRealTimers();
+	});
+
 	it('opens the queue panel and lists upcoming episodes', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

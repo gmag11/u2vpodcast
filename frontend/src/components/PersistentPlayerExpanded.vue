@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	import { computed, ref } from 'vue';
+	import { computed, onBeforeUnmount, ref } from 'vue';
 	import {
 		PhCaretDown,
 		PhGauge,
@@ -33,6 +33,8 @@
 	const showSpeed = ref(false);
 	const queueOpen = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
+	let nextTimer: ReturnType<typeof setTimeout> | null = null;
+	let nextClickSuppress = false;
 
 	const sponsorBlockMarkers = computed(() => {
 		const episode = player.currentEpisode;
@@ -54,6 +56,51 @@
 		const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
 		player.seek(ratio * player.duration);
 	}
+
+	// Next control: short press skips, long press (> 500ms) skips and marks
+	// the finished episode listened — same dual behavior as the wide player
+	// (per the up-next-queue capability). Keyboard activation (Enter/Space)
+	// resolves to a native click and keeps the short behavior.
+	function nextPointerDown() {
+		if (player.upNext.length === 0) return;
+		nextClickSuppress = false;
+		nextTimer = setTimeout(() => {
+			nextTimer = null;
+			nextClickSuppress = true;
+			player.skipNext(true);
+		}, 500);
+	}
+
+	function nextPointerUp() {
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+			nextClickSuppress = true;
+			player.skipNext();
+		}
+	}
+
+	function nextPointerLeave() {
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+		}
+	}
+
+	function onNextClick() {
+		if (nextClickSuppress) {
+			nextClickSuppress = false;
+			return;
+		}
+		player.skipNext();
+	}
+
+	onBeforeUnmount(() => {
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+		}
+	});
 
 	function close() {
 		emit('close');
@@ -346,7 +393,10 @@
 						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
 						:aria-label="$t('player.next')"
 						:disabled="player.upNext.length === 0"
-						@click="player.skipNext()"
+						@pointerdown="nextPointerDown"
+						@pointerup="nextPointerUp"
+						@pointerleave="nextPointerLeave"
+						@click="onNextClick"
 					>
 						<PhSkipForward class="h-5 w-5" weight="fill" />
 					</button>
