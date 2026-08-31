@@ -48,6 +48,7 @@ class MockAudioElement {
 
 	src = '';
 	_currentTime = 0;
+	currentTimeAssignments = 0;
 	// Simulates a browser that only allows seeking within its buffered prefix:
 	// while `seekClampEnd > 0`, currentTime is clamped to it (like `seekable`).
 	seekClampEnd = MockAudioElement.defaultClamp;
@@ -65,7 +66,17 @@ class MockAudioElement {
 	}
 
 	set currentTime(v: number) {
+		this.currentTimeAssignments += 1;
 		this._currentTime = this.seekClampEnd > 0 && v > this.seekClampEnd ? this.seekClampEnd : v;
+	}
+
+	get seekable(): TimeRanges {
+		const end = this.seekClampEnd > 0 ? this.seekClampEnd : this.duration;
+		return {
+			length: end > 0 ? 1 : 0,
+			start: () => 0,
+			end: () => end
+		};
 	}
 
 	private listeners: Record<string, Array<() => void>> = {};
@@ -757,6 +768,30 @@ describe('player store playback progress', () => {
 			expect(player.currentEpisode?.position_seconds).toBe(300);
 		} finally {
 			MockAudioElement.defaultClamp = 0;
+		}
+	});
+
+	it('does not repeat a resume seek until the target becomes seekable', async () => {
+		vi.useFakeTimers();
+		MockAudioElement.defaultClamp = 100;
+		try {
+			const player = usePlayerStore();
+			const ep = episode(1);
+			ep.position_seconds = 300;
+			await player.play(ep);
+			const el = MockAudioElement.instances[0];
+			const assignmentsAfterFirstAttempt = el.currentTimeAssignments;
+
+			vi.advanceTimersByTime(2_000);
+			expect(el.currentTimeAssignments).toBe(assignmentsAfterFirstAttempt);
+
+			el.seekClampEnd = 600;
+			vi.advanceTimersByTime(500);
+			expect(el.currentTime).toBe(300);
+			expect(el.currentTimeAssignments).toBe(assignmentsAfterFirstAttempt + 1);
+		} finally {
+			MockAudioElement.defaultClamp = 0;
+			vi.useRealTimers();
 		}
 	});
 

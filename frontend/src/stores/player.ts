@@ -249,6 +249,7 @@ export const usePlayerStore = defineStore('player', () => {
 	let resumeTarget: number | null = null;
 	let resumeDeadline = 0;
 	let resumeTimer: ReturnType<typeof setInterval> | null = null;
+	let resumeSeekAttempted = false;
 	// Id of the episode just finalized at its duration (completion / long-press
 	// skip). While set, a departing-episode flush must not regress that
 	// completion position; it is cleared as soon as playback restarts on any
@@ -585,6 +586,7 @@ export const usePlayerStore = defineStore('player', () => {
 		resumeEpisodeId = null;
 		resumeTarget = null;
 		resumeDeadline = 0;
+		resumeSeekAttempted = false;
 		if (resumeTimer) {
 			clearInterval(resumeTimer);
 			resumeTimer = null;
@@ -601,6 +603,7 @@ export const usePlayerStore = defineStore('player', () => {
 		resumeEpisodeId = currentEpisode.value?.id ?? null;
 		resumeTarget = target;
 		resumeDeadline = Date.now() + 20_000;
+		resumeSeekAttempted = false;
 		const current = currentEpisode.value;
 		if (current) {
 			// Keep the canonical progress in sync with what we are resuming to.
@@ -645,8 +648,27 @@ export const usePlayerStore = defineStore('player', () => {
 			finishResume();
 			return;
 		}
-		trace('resume: seek attempt', { target: resumeTarget, at: el.currentTime });
 		const target = sponsorBlockSkipTarget(resumeTarget, activeSponsorBlockSegments(current));
+		if (resumeSeekAttempted) {
+			// WebKit cancels the active byte-range request when currentTime is
+			// assigned again. Wait until the target is actually seekable before
+			// retrying, otherwise iOS playback alternates between short bursts and
+			// stalls while the 500 ms retry loop continually restarts the request.
+			try {
+				let targetIsSeekable = false;
+				for (let index = 0; index < el.seekable.length; index += 1) {
+					if (target >= el.seekable.start(index) && target <= el.seekable.end(index)) {
+						targetIsSeekable = true;
+						break;
+					}
+				}
+				if (!targetIsSeekable) return;
+			} catch {
+				// Some test/legacy media implementations do not expose TimeRanges.
+			}
+		}
+		trace('resume: seek attempt', { target: resumeTarget, at: el.currentTime });
+		resumeSeekAttempted = true;
 		el.currentTime = target;
 		currentTime.value = target;
 		publishMediaPositionState();
