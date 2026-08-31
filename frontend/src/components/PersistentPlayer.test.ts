@@ -180,6 +180,57 @@ describe('PersistentPlayer controls', () => {
 		expect(bar.find('[data-testid="player-sponsorblock-segment"]').exists()).toBe(false);
 	});
 
+	it('shows the current chapter in wide and between compact title and metadata', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 10, end: 150, title: 'Introduction' }]
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const compactTitle = compact.get('[data-testid="scrolling-text-viewport"]');
+		const compactChapter = compact.get('[data-testid="player-current-chapter"]');
+		const compactMetadata = compact.get('[data-testid="player-compact-metadata"]');
+		expect(compactChapter.text()).toBe('Introduction');
+		expect(compactChapter.classes()).toContain('truncate');
+		expect(
+			compactTitle.element.compareDocumentPosition(compactChapter.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			compactChapter.element.compareDocumentPosition(compactMetadata.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+
+		player.currentEpisode = { ...player.currentEpisode!, chapters: [] };
+		await flushPromises();
+		expect(bar.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+		expect(compact.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+	});
+
+	it('updates the wide chapter label when playback crosses a boundary', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 149;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		player.currentTime = 150;
+		await flushPromises();
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Main topic');
+	});
+
 	it('renders distinct chapter markers on the wide scrubber and seeks on activation', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

@@ -19,6 +19,7 @@
 	} from '@phosphor-icons/vue';
 	import {
 		chapterTimelineMarkers,
+		currentChapterIndex,
 		parseDurationSeconds,
 		sponsorBlockTimelineMarkers,
 		SPEED_MAX,
@@ -67,6 +68,11 @@
 		if (!episode) return [];
 		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
 		return chapterTimelineMarkers(duration, episode.chapters);
+	});
+	const currentChapterTitle = computed(() => {
+		const episode = player.currentEpisode;
+		const index = currentChapterIndex(player.currentTime, episode?.chapters);
+		return index >= 0 ? episode?.chapters[index]?.title : undefined;
 	});
 
 	// Formats a rate for display without float artifacts, trimming trailing
@@ -282,7 +288,18 @@
 							:text="player.currentEpisode?.title ?? $t('player.queueReady')"
 							:active="player.playing"
 						/>
-						<p v-if="player.currentEpisode" class="truncate text-xs text-text-muted">
+						<p
+							v-if="currentChapterTitle"
+							class="truncate text-xs text-text-muted"
+							data-testid="player-current-chapter"
+						>
+							{{ currentChapterTitle }}
+						</p>
+						<p
+							v-if="player.currentEpisode"
+							class="truncate text-xs text-text-muted"
+							data-testid="player-compact-metadata"
+						>
 							{{ player.currentEpisode.channel_title }} &bull; {{ player.currentLabel }}
 						</p>
 					</div>
@@ -319,6 +336,13 @@
 					</p>
 					<p v-else class="max-w-60 truncate text-sm font-semibold text-text">
 						{{ $t('player.queueReady') }}
+					</p>
+					<p
+						v-if="currentChapterTitle"
+						class="max-w-60 truncate text-xs text-text-muted"
+						data-testid="player-current-chapter"
+					>
+						{{ currentChapterTitle }}
 					</p>
 					<p v-if="player.currentEpisode" class="max-w-60 truncate text-xs text-text-muted">
 						{{ player.currentLabel }} / {{ player.durationLabel }}

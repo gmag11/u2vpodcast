@@ -185,6 +185,21 @@ describe('PersistentPlayerExpanded', () => {
 		expect(w.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
 	});
 
+	it('shows the current chapter without reserving space when there is none', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 10, end: 150, title: 'Introduction' }]
+		};
+		const w = await mountExpanded();
+
+		expect(w.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		player.currentEpisode = { ...player.currentEpisode!, chapters: [] };
+		await flushPromises();
+		expect(w.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+	});
+
 	it('renders a chapter list only when the episode has chapters', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

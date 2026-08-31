@@ -4,9 +4,9 @@ Once episodes carry chapter data, listeners have no lightweight, always-visible 
 
 ## What Changes
 
-- Display the current chapter's title as a secondary label near the episode title in the persistent player's wide composition and in the expanded "now playing" view, updating live as playback crosses chapter boundaries.
+- Display the current chapter's title as a secondary label near the episode title in the persistent player's compact and wide compositions and in the expanded "now playing" view, updating live as playback crosses chapter boundaries.
 - The label is present only when the current episode has stored chapters; absent otherwise, with no layout shift for episodes without chapters.
-- The compact composition (viewport < 640px) is explicitly out of scope: it already renders a closed, space-constrained set of elements (`persistent-audio-player`'s compact-composition requirement lists them exhaustively), and this change does not add to that list.
+- In the compact composition, place the chapter title between the episode title and the channel/playback-time line.
 
 ## Capabilities
 

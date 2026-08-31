@@ -56,6 +56,10 @@
 	const activeChapterIndex = computed(() =>
 		currentChapterIndex(player.currentTime, player.currentEpisode?.chapters)
 	);
+	const currentChapterTitle = computed(() => {
+		const index = activeChapterIndex.value;
+		return index >= 0 ? player.currentEpisode?.chapters[index]?.title : undefined;
+	});
 
 	function speedLabel(value: number) {
 		return String(Math.round(value * 100) / 100);
@@ -171,6 +175,13 @@
 						:text="player.currentEpisode?.title ?? $t('player.queueReady')"
 						:active="player.playing"
 					/>
+					<p
+						v-if="currentChapterTitle"
+						class="truncate text-sm text-text-muted"
+						data-testid="player-current-chapter"
+					>
+						{{ currentChapterTitle }}
+					</p>
 					<p v-if="player.currentEpisode" class="truncate text-sm text-text-muted">
 						{{ player.currentEpisode.channel_title }}
 					</p>
