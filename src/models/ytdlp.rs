@@ -212,6 +212,7 @@ impl Ytdlp {
             "mp3",
             "--audio-quality",
             "160K",
+            "--embed-chapters",
             "-o",
             output,
             "--print-json",
@@ -531,7 +532,7 @@ mod download_args_tests {
     }
 
     #[tokio::test]
-    async fn download_requests_constant_bitrate_mp3() {
+    async fn download_requests_constant_bitrate_mp3_with_embedded_chapters() {
         crate::utils::throttle::init_throttle(Duration::ZERO);
         let runner = Arc::new(ArgumentsRunner {
             args: Mutex::new(Vec::new()),
@@ -544,6 +545,7 @@ mod download_args_tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--audio-quality", "160K"]));
+        assert!(args.iter().any(|arg| arg == "--embed-chapters"));
     }
 
     #[tokio::test]

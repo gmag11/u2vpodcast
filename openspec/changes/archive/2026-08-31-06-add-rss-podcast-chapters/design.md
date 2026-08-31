@@ -14,11 +14,15 @@
 
 ## Decisions
 
-**Persist translated chapters for the active processed file rather than re-deriving them from ID3 frames at feed-generation time.** `01-add-chapter-capture-and-embed`'s `translate_chapters` is a pure function over `(episode.chapters, retained_intervals)`; the feed handler can call it directly using the same episode/SponsorBlock-cache data it already loads (`sponsorblock_segments`, rejected categories) to reproduce the identical translated list, rather than parsing the derived MP3's ID3 chapter frames back out. This avoids adding an MP3-parsing dependency purely to read back data the backend already computed once.
+**Compute translated chapters for the active processed file rather than re-deriving them from ID3 frames.** `01-add-chapter-capture-and-embed`'s `translate_chapters` is a pure function over `(episode.chapters, retained_intervals)`; the feed handler can call it directly using the same episode/SponsorBlock-cache data it already loads (`sponsorblock_segments`, rejected categories) to reproduce the identical translated list, rather than parsing the derived MP3's ID3 chapter frames back out. This avoids adding an MP3-parsing dependency purely to read back data the backend already computed once.
 
 **Add the chapters JSON endpoint under the existing episode/media routing area** (e.g., `GET /channels/{slug}/episodes/{yt_id}/chapters.json` or similar, following whatever path convention `src/handlers/episodes.rs` or `src/handlers/media.rs` already uses for per-episode, per-slug resources) rather than inventing a new top-level route family.
 
 **Use `rss::extension::{Extension, ExtensionMap}` to build the `<podcast:chapters>` element**, registering the `podcast` namespace on the channel via `ChannelBuilder::namespaces(...)`, consistent with how the crate already registers the `itunes` namespace.
+
+**Emit JSON Chapters version `1.2.0` and use the configured public base URL.** The current format requires a root `version` property and the `application/json+chapters` content type. The public standard requires HTTPS resource URLs, which deployments satisfy by configuring an HTTPS base URL; the application does not reject HTTP because local and private installations legitimately use it.
+
+**Embed raw chapters during the original yt-dlp download.** Pass `--embed-chapters` to the existing extraction/conversion command while continuing to parse the same `--print-json` output for database persistence. This keeps the original MP3 and database chapter representations aligned without another FFmpeg pass. SponsorBlock processing remains separate and embeds translated chapters into its derived file.
 
 ## Risks / Trade-offs
 
