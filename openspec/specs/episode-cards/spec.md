@@ -101,7 +101,7 @@ The playlist-specific presentation SHALL be used only when the containing view e
 
 ### Requirement: Played mark, resume hint, and progress strip on episode cards
 
-The episode card SHALL render its playback state compactly, per the `playback-progress` capability: the top-right corner tinted green when the episode is listened (no label or icon), a resume hint for partially played episodes, and a read-only progress strip spanning the card's bottom edge that reflects the saved position (the live playhead for the currently playing episode) and ignores pointer interaction.
+The episode card SHALL render its playback state compactly, per the `playback-progress` capability: the top-right corner tinted green when the episode is listened (no label or icon), a resume hint for partially played episodes, and a read-only progress strip spanning the card's bottom edge that reflects the saved position (the live playhead for the currently playing episode) and ignores pointer interaction. When the episode has stored chapters, the progress strip SHALL also render a marker at each chapter's original start time, positioned by the episode's total duration, visually distinct from any SponsorBlock segment markers also shown on the strip. The strip's read-only behavior (no pointer interaction) SHALL apply to chapter markers exactly as it does to SponsorBlock markers.
 
 #### Scenario: Played mark on completed episodes
 - **WHEN** an episode has `listen` true
@@ -122,6 +122,18 @@ The episode card SHALL render its playback state compactly, per the `playback-pr
 #### Scenario: No indicator for untouched episodes
 - **WHEN** an episode has never been played or its position is at most 30 seconds
 - **THEN** the card shows neither the played mark nor a resume hint, and no progress strip
+
+#### Scenario: Progress strip shows chapter marks
+- **WHEN** an episode with stored chapters is rendered and the card shows a progress strip
+- **THEN** the strip includes a marker at each chapter's original start time, visually distinct from any SponsorBlock markers present
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** an episode has no stored chapters
+- **THEN** the progress strip renders no chapter markers
+
+#### Scenario: Chapter marks remain read-only
+- **WHEN** the user clicks or drags on a progress strip that includes chapter marks
+- **THEN** playback is unaffected, exactly as for a strip without chapter marks
 
 ### Requirement: Add/remove toggle for the single playlist
 

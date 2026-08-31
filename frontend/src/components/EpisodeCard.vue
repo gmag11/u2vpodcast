@@ -18,6 +18,7 @@
 		usePlayerStore,
 		RESUME_POSITION_S,
 		parseDurationSeconds,
+		chapterTimelineMarkers,
 		sponsorBlockTimelineMarkers
 	} from '@/stores/player';
 	import { usePlaylistStore } from '@/stores/playlists';
@@ -123,6 +124,9 @@
 			timelineDuration.value,
 			liveEpisode.value.sponsorblock_enabled === true ? liveEpisode.value.sponsorblock_segments : []
 		)
+	);
+	const chapterMarkers = computed(() =>
+		chapterTimelineMarkers(timelineDuration.value, liveEpisode.value.chapters)
 	);
 	function formatDate(value: Date | string) {
 		return d(new Date(value), 'short');
@@ -640,6 +644,24 @@
 								{{ $t('playlist.unmark') }}
 							</span>
 						</span>
+						<span
+							v-if="episode.chapters && episode.chapters.length > 0"
+							class="group relative flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted"
+							role="img"
+							tabindex="0"
+							data-testid="episode-chapters-indicator"
+							:aria-label="$t('card.hasChapters')"
+							:aria-describedby="`card-chapters-tooltip-${episode.id}`"
+						>
+							<PhListBullets class="h-4 w-4" aria-hidden="true" />
+							<span
+								:id="`card-chapters-tooltip-${episode.id}`"
+								role="tooltip"
+								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+							>
+								{{ $t('card.hasChapters') }}
+							</span>
+						</span>
 						<span class="group relative">
 							<button
 								type="button"
@@ -677,24 +699,6 @@
 								{{ inPlaylist ? $t('playlist.remove') : $t('playlist.add') }}
 							</span>
 						</span>
-						<span
-							v-if="episode.chapters && episode.chapters.length > 0"
-							class="group relative flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted"
-							role="img"
-							tabindex="0"
-							data-testid="episode-chapters-indicator"
-							:aria-label="$t('card.hasChapters')"
-							:aria-describedby="`card-chapters-tooltip-${episode.id}`"
-						>
-							<PhListBullets class="h-4 w-4" aria-hidden="true" />
-							<span
-								:id="`card-chapters-tooltip-${episode.id}`"
-								role="tooltip"
-								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-							>
-								{{ $t('card.hasChapters') }}
-							</span>
-						</span>
 						<time class="shrink-0 text-sm text-text-muted">
 							{{ formatDate(props.episode.published_at) }}
 						</time>
@@ -723,6 +727,14 @@
 				:data-category="marker.category"
 				data-testid="episode-sponsorblock-segment"
 				:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
+			></div>
+			<div
+				v-for="(marker, index) in chapterMarkers"
+				:key="index"
+				class="absolute inset-y-0 z-20 w-0.5 bg-chapter-marker"
+				data-testid="episode-chapter-marker"
+				:data-start-seconds="marker.startSeconds"
+				:style="{ left: `${marker.left}%` }"
 			></div>
 		</div>
 	</article>
