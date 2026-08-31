@@ -149,7 +149,10 @@ describe('HistoryView', () => {
 		);
 		const wrapper = await mountView();
 		expect(wrapper.text()).toContain('Episodio 10');
-		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		const filter = wrapper.get('button[aria-describedby="history-favorites-filter-tooltip"]');
+		expect(filter.attributes('title')).toBeUndefined();
+		expect(wrapper.get('#history-favorites-filter-tooltip').text()).toBe('Favorites only');
+		await filter.trigger('click');
 		expect(wrapper.text()).toContain('Favorited');
 		expect(wrapper.text()).not.toContain('Episodio 10');
 	});
@@ -161,7 +164,9 @@ describe('HistoryView', () => {
 			okResult([episode(1, 'Episodio 42'), fav]) as never
 		);
 		const wrapper = await mountView();
-		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		await wrapper
+			.get('button[aria-describedby="history-favorites-filter-tooltip"]')
+			.trigger('click');
 		await wrapper.find('input[placeholder="Search episodes…"]').setValue('42');
 		expect(wrapper.text()).toContain('Favorited 42');
 		expect(wrapper.text()).not.toContain('Episodio 42');
@@ -170,7 +175,9 @@ describe('HistoryView', () => {
 	it('shows the favorites empty state when nothing is favorited', async () => {
 		vi.mocked(api.getAllEpisodes).mockResolvedValue(okResult([episode(1, 'Episodio 10')]) as never);
 		const wrapper = await mountView();
-		await wrapper.find('button[title="Favorites only"]').trigger('click');
+		await wrapper
+			.get('button[aria-describedby="history-favorites-filter-tooltip"]')
+			.trigger('click');
 		expect(wrapper.text()).toContain('No favorites yet');
 	});
 });

@@ -508,10 +508,13 @@ describe('EpisodeCard chapter indicator', () => {
 		const withoutChapters = mountCard(episode({ chapters: [] }));
 
 		expect(withChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
-		expect(withChapters.find('[aria-label="Has chapters"]').attributes('role')).toBe('img');
-		expect(withChapters.get('[role="tooltip"]').text()).toBe('Has chapters');
+		const indicator = withChapters.find('[aria-label="Has chapters"]');
+		expect(indicator.attributes('role')).toBe('img');
+		expect(indicator.attributes('title')).toBeUndefined();
+		expect(withChapters.get(`#${indicator.attributes('aria-describedby')}`).text()).toBe(
+			'Has chapters'
+		);
 		expect(withoutChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(false);
-		expect(withoutChapters.find('[role="tooltip"]').exists()).toBe(false);
 	});
 
 	it('renders in the default, compact, and playlist presentations', () => {
@@ -531,6 +534,29 @@ describe('EpisodeCard chapter indicator', () => {
 				.find('[data-testid="episode-chapters-indicator"]')
 				.exists()
 		).toBe(true);
+		const playlistIndicator = playlist.get('[data-testid="episode-chapters-indicator"]');
+		expect(playlistIndicator.attributes('title')).toBeUndefined();
+		expect(playlist.get(`#${playlistIndicator.attributes('aria-describedby')}`).text()).toBe(
+			'Has chapters'
+		);
+	});
+
+	it('uses styled tooltips instead of native titles for card action icons', () => {
+		const wrapper = mountCard(
+			episode({
+				listen: true,
+				chapters: [{ start: 0, end: 60, title: 'Introduction' }]
+			})
+		);
+		const labels = ['Mark as not listened', 'Add to favorites', 'Add to playlist', 'Has chapters'];
+
+		for (const label of labels) {
+			const icon = wrapper.get(`[aria-label="${label}"]`);
+			expect(icon.attributes('title')).toBeUndefined();
+			const tooltipId = icon.attributes('aria-describedby');
+			expect(wrapper.get(`#${tooltipId}`).text()).toBe(label);
+			expect(wrapper.get(`#${tooltipId}`).attributes('role')).toBe('tooltip');
+		}
 	});
 
 	it('reserves a stable chapter slot in the mobile playlist status row', () => {

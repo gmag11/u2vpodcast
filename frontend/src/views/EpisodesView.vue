@@ -12,6 +12,7 @@
 	import type { Channel, Episode } from '@/types';
 	import AppButton from '@/components/AppButton.vue';
 	import AppHeader from '@/components/AppHeader.vue';
+	import AppTooltip from '@/components/AppTooltip.vue';
 	import EpisodeCard from '@/components/EpisodeCard.vue';
 	import SearchInput from '@/components/SearchInput.vue';
 
@@ -169,21 +170,28 @@
 			<div class="flex-1">
 				<SearchInput v-model="searchQuery" :placeholder="$t('episodes.searchPlaceholder')" />
 			</div>
-			<button
-				type="button"
-				class="flex h-11 shrink-0 items-center gap-2 rounded-full border border-outline px-4 text-sm font-medium transition-colors"
-				:class="
-					favoritesOnly
-						? 'border-accent-500 bg-accent-500/10 text-accent-500'
-						: 'bg-surface-input text-text-muted hover:text-text'
-				"
-				:aria-pressed="favoritesOnly"
-				:title="$t('favorites.filterLabel')"
-				@click="favoritesOnly = !favoritesOnly"
+			<AppTooltip
+				id="episodes-favorites-filter-tooltip"
+				v-slot="{ describedby }"
+				:text="$t('favorites.filterLabel')"
+				align="right"
 			>
-				<PhStar class="h-4 w-4" :weight="favoritesOnly ? 'fill' : 'regular'" />
-				<span class="hidden sm:inline">{{ $t('favorites.filterLabel') }}</span>
-			</button>
+				<button
+					type="button"
+					class="flex h-11 shrink-0 items-center gap-2 rounded-full border border-outline px-4 text-sm font-medium transition-colors"
+					:class="
+						favoritesOnly
+							? 'border-accent-500 bg-accent-500/10 text-accent-500'
+							: 'bg-surface-input text-text-muted hover:text-text'
+					"
+					:aria-pressed="favoritesOnly"
+					:aria-describedby="describedby"
+					@click="favoritesOnly = !favoritesOnly"
+				>
+					<PhStar class="h-4 w-4" :weight="favoritesOnly ? 'fill' : 'regular'" />
+					<span class="hidden sm:inline">{{ $t('favorites.filterLabel') }}</span>
+				</button>
+			</AppTooltip>
 		</div>
 
 		<p v-if="favoritesEmpty" class="mt-4 text-center text-text-muted">

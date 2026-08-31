@@ -27,6 +27,7 @@
 		usePlayerStore
 	} from '@/stores/player';
 	import ScrollingText from '@/components/ScrollingText.vue';
+	import AppTooltip from '@/components/AppTooltip.vue';
 	import PersistentPlayerExpanded from '@/components/PersistentPlayerExpanded.vue';
 
 	const player = usePlayerStore();
@@ -226,7 +227,7 @@
 		>
 			<div class="sm:hidden" data-testid="player-compact">
 				<div
-					class="relative h-1 w-full overflow-hidden bg-surface-input"
+					class="relative h-1 w-full bg-surface-input"
 					data-testid="player-progress-compact"
 					aria-hidden="true"
 				>
@@ -246,12 +247,18 @@
 					<div
 						v-for="(marker, index) in chapterMarkers"
 						:key="index"
-						class="absolute inset-y-0 z-20 w-0.5 bg-chapter-marker"
+						class="group absolute inset-y-0 z-20 w-0.5 bg-chapter-marker"
 						data-testid="player-chapter-marker"
 						:data-start-seconds="marker.startSeconds"
-						:title="marker.title"
 						:style="{ left: `${marker.left}%` }"
-					></div>
+					>
+						<span
+							role="tooltip"
+							class="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-64 -translate-x-1/2 rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100"
+						>
+							{{ marker.title }}
+						</span>
+					</div>
 				</div>
 
 				<div class="flex min-w-0 items-center gap-3 px-4 py-3">
@@ -482,44 +489,58 @@
 				</div>
 
 				<div class="flex shrink-0 items-center gap-1">
-					<button
-						type="button"
-						class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
-						:class="player.shuffle ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'"
-						:aria-label="$t('player.shuffle')"
-						:aria-pressed="player.shuffle"
-						:title="$t('player.shuffle')"
-						@click="player.toggleShuffle()"
+					<AppTooltip
+						id="player-shuffle-tooltip"
+						v-slot="{ describedby }"
+						:text="$t('player.shuffle')"
 					>
-						<PhShuffle class="h-5 w-5" weight="regular" />
-					</button>
-					<button
-						type="button"
-						class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
-						:class="
-							player.repeat !== 'none'
-								? 'bg-accent-600 text-white'
-								: 'text-text-muted hover:text-text'
-						"
-						:aria-label="
+						<button
+							type="button"
+							class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+							:class="
+								player.shuffle ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'
+							"
+							:aria-label="$t('player.shuffle')"
+							:aria-pressed="player.shuffle"
+							:aria-describedby="describedby"
+							@click="player.toggleShuffle()"
+						>
+							<PhShuffle class="h-5 w-5" weight="regular" />
+						</button>
+					</AppTooltip>
+					<AppTooltip
+						id="player-repeat-tooltip"
+						v-slot="{ describedby }"
+						:text="
 							player.repeat === 'none'
 								? $t('player.repeatOff')
 								: player.repeat === 'all'
 									? $t('player.repeatAll')
 									: $t('player.repeatOne')
 						"
-						:title="
-							player.repeat === 'none'
-								? $t('player.repeatOff')
-								: player.repeat === 'all'
-									? $t('player.repeatAll')
-									: $t('player.repeatOne')
-						"
-						@click="player.cycleRepeat()"
 					>
-						<PhRepeat v-if="player.repeat !== 'one'" class="h-5 w-5" weight="regular" />
-						<PhRepeatOnce v-else class="h-5 w-5" weight="regular" />
-					</button>
+						<button
+							type="button"
+							class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+							:class="
+								player.repeat !== 'none'
+									? 'bg-accent-600 text-white'
+									: 'text-text-muted hover:text-text'
+							"
+							:aria-label="
+								player.repeat === 'none'
+									? $t('player.repeatOff')
+									: player.repeat === 'all'
+										? $t('player.repeatAll')
+										: $t('player.repeatOne')
+							"
+							:aria-describedby="describedby"
+							@click="player.cycleRepeat()"
+						>
+							<PhRepeat v-if="player.repeat !== 'one'" class="h-5 w-5" weight="regular" />
+							<PhRepeatOnce v-else class="h-5 w-5" weight="regular" />
+						</button>
+					</AppTooltip>
 				</div>
 
 				<div class="hidden shrink-0 items-center gap-2 sm:flex">

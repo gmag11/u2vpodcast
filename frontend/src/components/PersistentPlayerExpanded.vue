@@ -18,6 +18,7 @@
 	} from '@phosphor-icons/vue';
 	import {
 		chapterTimelineMarkers,
+		currentChapterIndex,
 		parseDurationSeconds,
 		sponsorBlockTimelineMarkers,
 		SPEED_MAX,
@@ -52,9 +53,22 @@
 		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
 		return chapterTimelineMarkers(duration, episode.chapters);
 	});
+	const activeChapterIndex = computed(() =>
+		currentChapterIndex(player.currentTime, player.currentEpisode?.chapters)
+	);
 
 	function speedLabel(value: number) {
 		return String(Math.round(value * 100) / 100);
+	}
+
+	function formatChapterStart(value: number) {
+		const hours = Math.floor(value / 3600);
+		const minutes = Math.floor((value % 3600) / 60);
+		const seconds = Math.floor(value % 60);
+		const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+		return hours > 0
+			? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+			: minuteSeconds;
 	}
 
 	function onSeek(event: MouseEvent) {
@@ -439,6 +453,35 @@
 						<PhSkipForward class="h-5 w-5" weight="fill" />
 					</button>
 				</div>
+
+				<section
+					v-if="player.currentEpisode?.chapters?.length"
+					class="w-full"
+					data-testid="player-chapters"
+				>
+					<h2 class="mb-2 text-sm font-semibold text-text">{{ $t('player.chapters') }}</h2>
+					<ul class="max-h-64 space-y-1 overflow-y-auto" data-testid="player-chapter-list">
+						<li v-for="(chapter, index) in player.currentEpisode.chapters" :key="index">
+							<button
+								type="button"
+								class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors"
+								:class="
+									index === activeChapterIndex
+										? 'bg-accent-600/15 text-text'
+										: 'text-text-muted hover:bg-surface-input hover:text-text'
+								"
+								:aria-current="index === activeChapterIndex ? 'true' : undefined"
+								data-testid="player-chapter-row"
+								@click="player.seek(chapter.start)"
+							>
+								<span class="min-w-0 flex-1 truncate text-sm font-medium">{{ chapter.title }}</span>
+								<span class="shrink-0 text-xs tabular-nums text-text-muted">{{
+									formatChapterStart(chapter.start)
+								}}</span>
+							</button>
+						</li>
+					</ul>
+				</section>
 			</div>
 		</div>
 	</Transition>

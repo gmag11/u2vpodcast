@@ -185,6 +185,89 @@ describe('PersistentPlayerExpanded', () => {
 		expect(w.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
 	});
 
+	it('renders a chapter list only when the episode has chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const w = await mountExpanded();
+		expect(w.find('[data-testid="player-chapters"]').exists()).toBe(false);
+
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 3750, title: 'Main topic' }
+			]
+		};
+		await flushPromises();
+
+		expect(w.get('[data-testid="player-chapters"]').text()).toContain('Chapters');
+		const rows = w.findAll('[data-testid="player-chapter-row"]');
+		expect(rows).toHaveLength(2);
+		expect(rows[0].text()).toContain('Introduction');
+		expect(rows[0].text()).toContain('0:00');
+		expect(rows[1].text()).toContain('Main topic');
+		expect(rows[1].text()).toContain('2:30');
+	});
+
+	it('seeks to a chapter start when its row is activated', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+
+		await w.findAll('[data-testid="player-chapter-row"]')[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('updates the highlighted chapter as playback crosses a boundary', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const w = await mountExpanded();
+		const rows = w.findAll('[data-testid="player-chapter-row"]');
+
+		expect(rows[0].attributes('aria-current')).toBe('true');
+		expect(rows[1].attributes('aria-current')).toBeUndefined();
+		player.currentTime = 150;
+		await flushPromises();
+		expect(rows[0].attributes('aria-current')).toBeUndefined();
+		expect(rows[1].attributes('aria-current')).toBe('true');
+	});
+
+	it('keeps a long chapter list internally scrollable', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: Array.from({ length: 20 }, (_, index) => ({
+				start: index * 30,
+				end: (index + 1) * 30,
+				title: `Chapter ${index + 1}`
+			}))
+		};
+		const w = await mountExpanded();
+		const list = w.get('[data-testid="player-chapter-list"]');
+
+		expect(w.findAll('[data-testid="player-chapter-row"]')).toHaveLength(20);
+		expect(list.classes()).toContain('max-h-64');
+		expect(list.classes()).toContain('overflow-y-auto');
+		expect(w.find('button[aria-label="Pause"]').exists()).toBe(true);
+	});
+
 	it('shows elapsed and remaining time labels', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import {
 	chapterTimelineMarkers,
+	currentChapterIndex,
 	sponsorBlockSkipTarget,
 	sponsorBlockTimelineMarkers,
 	usePlayerStore,
@@ -250,6 +251,19 @@ describe('SponsorBlock playback', () => {
 			{ left: 25, title: 'Main topic', startSeconds: 150 }
 		]);
 		expect(chapterTimelineMarkers(0, [{ start: 0, end: 10, title: 'Intro' }])).toEqual([]);
+	});
+
+	it('finds the chapter containing the current playback time', () => {
+		const chapters = [
+			{ start: 10, end: 60, title: 'Introduction' },
+			{ start: 60, end: 180, title: 'Main topic' },
+			{ start: 180, end: 240, title: 'Wrap-up' }
+		];
+
+		expect(currentChapterIndex(5, chapters)).toBe(-1);
+		expect(currentChapterIndex(90, chapters)).toBe(1);
+		expect(currentChapterIndex(240, chapters)).toBe(-1);
+		expect(currentChapterIndex(90, [])).toBe(-1);
 	});
 
 	it('skips on timeupdate and explicit seek using the original timeline', async () => {

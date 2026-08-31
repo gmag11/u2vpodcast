@@ -166,6 +166,13 @@ export function chapterTimelineMarkers(
 	});
 }
 
+export function currentChapterIndex(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number {
+	return (chapters ?? []).findIndex(({ start, end }) => currentTime >= start && currentTime < end);
+}
+
 export const usePlayerStore = defineStore('player', () => {
 	const currentEpisode = ref<Episode | null>(null);
 	const playing = ref(false);
