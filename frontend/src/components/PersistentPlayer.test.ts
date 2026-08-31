@@ -73,6 +73,7 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		chapters: [],
 		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now

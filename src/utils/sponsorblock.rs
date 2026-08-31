@@ -1,5 +1,6 @@
 use crate::models::{
-    Episode, Error, SponsorBlockCache, SponsorBlockSegment, SUPPORTED_SPONSORBLOCK_CATEGORIES,
+    Episode, EpisodeChapter, Error, SponsorBlockCache, SponsorBlockSegment,
+    SUPPORTED_SPONSORBLOCK_CATEGORIES,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -268,6 +269,67 @@ pub fn ffconcat_manifest(original: &Path, retained: &[SponsorBlockSegment]) -> S
     manifest
 }
 
+pub fn translate_chapter_time(t: f64, retained: &[SponsorBlockSegment]) -> f64 {
+    let mut cumulative = 0.0;
+    for interval in retained {
+        if t <= interval.start {
+            return cumulative;
+        }
+        if t <= interval.end {
+            return cumulative + (t - interval.start);
+        }
+        cumulative += interval.end - interval.start;
+    }
+    cumulative
+}
+
+pub fn translate_chapters(
+    chapters: &[EpisodeChapter],
+    retained: &[SponsorBlockSegment],
+) -> Vec<EpisodeChapter> {
+    chapters
+        .iter()
+        .filter_map(|chapter| {
+            let start = translate_chapter_time(chapter.start, retained);
+            let end = translate_chapter_time(chapter.end, retained);
+            (start < end).then(|| EpisodeChapter {
+                start,
+                end,
+                title: chapter.title.clone(),
+            })
+        })
+        .collect()
+}
+
+fn escape_ffmetadata(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' | '=' | ';' | '#' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            '\n' => escaped.push_str("\\\n"),
+            '\r' => {}
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+pub fn ffmetadata_chapters(chapters: &[EpisodeChapter]) -> String {
+    let mut metadata = ";FFMETADATA1\n".to_string();
+    for chapter in chapters {
+        metadata.push_str(&format!(
+            "[CHAPTER]\nTIMEBASE=1/1000\nSTART={}\nEND={}\ntitle={}\n",
+            (chapter.start * 1000.0).round() as i64,
+            (chapter.end * 1000.0).round() as i64,
+            escape_ffmetadata(&chapter.title)
+        ));
+    }
+    metadata
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedMedia {
     pub filename: String,
@@ -279,12 +341,20 @@ pub async fn generate_processed_mp3(
     sponsor_segments: &[SponsorBlockSegment],
     original_duration: f64,
     hash: &str,
+    chapters: &[EpisodeChapter],
 ) -> Result<ProcessedMedia, String> {
     let original = original.to_path_buf();
     let sponsor_segments = sponsor_segments.to_vec();
     let hash = hash.to_string();
+    let chapters = chapters.to_vec();
     actix_web::rt::task::spawn_blocking(move || {
-        generate_processed_mp3_blocking(&original, &sponsor_segments, original_duration, &hash)
+        generate_processed_mp3_blocking(
+            &original,
+            &sponsor_segments,
+            original_duration,
+            &hash,
+            &chapters,
+        )
     })
     .await
     .map_err(|error| format!("SponsorBlock media task failed: {error}"))?
@@ -295,7 +365,29 @@ fn generate_processed_mp3_blocking(
     sponsor_segments: &[SponsorBlockSegment],
     original_duration: f64,
     hash: &str,
+    chapters: &[EpisodeChapter],
 ) -> Result<ProcessedMedia, String> {
+    generate_processed_mp3_blocking_with(
+        original,
+        sponsor_segments,
+        original_duration,
+        hash,
+        chapters,
+        |chapters| Ok(ffmetadata_chapters(chapters)),
+    )
+}
+
+fn generate_processed_mp3_blocking_with<F>(
+    original: &Path,
+    sponsor_segments: &[SponsorBlockSegment],
+    original_duration: f64,
+    hash: &str,
+    chapters: &[EpisodeChapter],
+    render_metadata: F,
+) -> Result<ProcessedMedia, String>
+where
+    F: FnOnce(&[EpisodeChapter]) -> Result<String, String>,
+{
     let retained = retained_intervals(sponsor_segments, original_duration);
     if retained.is_empty() {
         return Err("SponsorBlock segments leave no original audio to retain".to_string());
@@ -314,7 +406,12 @@ fn generate_processed_mp3_blocking(
     let destination = parent.join(&filename);
     let nonce = rand::random::<u64>();
     let manifest_path = parent.join(format!(".{filename}.{nonce}.ffconcat.tmp"));
+    let metadata_path = parent.join(format!(".{filename}.{nonce}.ffmetadata.tmp"));
     let temporary_path = parent.join(format!(".{filename}.{nonce}.tmp.mp3"));
+    let translated_chapters = translate_chapters(chapters, &retained);
+    let chapter_metadata = (!translated_chapters.is_empty())
+        .then(|| render_metadata(&translated_chapters))
+        .transpose()?;
 
     let result = (|| {
         let manifest_source = original
@@ -326,7 +423,12 @@ fn generate_processed_mp3_blocking(
             ffconcat_manifest(manifest_source, &retained),
         )
         .map_err(|error| format!("write ffconcat manifest: {error}"))?;
-        let output = Command::new("ffmpeg")
+        if let Some(metadata) = &chapter_metadata {
+            fs::write(&metadata_path, metadata)
+                .map_err(|error| format!("write chapter metadata: {error}"))?;
+        }
+        let mut command = Command::new("ffmpeg");
+        command
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -337,7 +439,14 @@ fn generate_processed_mp3_blocking(
                 "0",
                 "-i",
             ])
-            .arg(&manifest_path)
+            .arg(&manifest_path);
+        if chapter_metadata.is_some() {
+            command
+                .args(["-f", "ffmetadata", "-i"])
+                .arg(&metadata_path)
+                .args(["-map_metadata", "1", "-map_chapters", "1"]);
+        }
+        let output = command
             .args(["-map", "0:a:0", "-c:a", "copy", "-y"])
             .arg(&temporary_path)
             .output()
@@ -362,6 +471,7 @@ fn generate_processed_mp3_blocking(
     })();
 
     let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&metadata_path);
     if result.is_err() {
         let _ = fs::remove_file(&temporary_path);
     }
@@ -490,16 +600,21 @@ pub async fn reconcile_episode(
         episode.yt_id
     );
     let original = channel_dir.join(format!("{}.mp3", episode.yt_id));
-    let processed =
-        match generate_processed_mp3(&original, &rejected, original_duration, &processing_hash)
-            .await
-        {
-            Ok(processed) => processed,
-            Err(message) => {
-                let _ = SponsorBlockCache::record_failure(pool, episode.id, &message).await;
-                return Err(Error::default(&message));
-            }
-        };
+    let processed = match generate_processed_mp3(
+        &original,
+        &rejected,
+        original_duration,
+        &processing_hash,
+        &episode.chapters,
+    )
+    .await
+    {
+        Ok(processed) => processed,
+        Err(message) => {
+            let _ = SponsorBlockCache::record_failure(pool, episode.id, &message).await;
+            return Err(Error::default(&message));
+        }
+    };
     let current = match SponsorBlockCache::upsert_success(
         pool,
         episode.id,
@@ -636,6 +751,28 @@ mod tests {
         SponsorBlockSegment::new(start, end, "sponsor")
     }
 
+    fn chapter(start: f64, end: f64, title: &str) -> EpisodeChapter {
+        EpisodeChapter {
+            start,
+            end,
+            title: title.to_string(),
+        }
+    }
+
+    fn probe_chapters(path: &Path) -> serde_json::Value {
+        let output = Command::new("ffprobe")
+            .args(["-v", "error", "-show_chapters", "-of", "json"])
+            .arg(path)
+            .output()
+            .expect("start chapter ffprobe");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("parse chapter ffprobe JSON")
+    }
+
     #[test]
     fn normalizes_supported_categories_without_merging_descriptive_segments() {
         let mut unsupported = raw_category(30.0, 40.0, "chapter");
@@ -751,6 +888,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn chapter_time_translation_is_monotonic_across_removed_audio() {
+        let retained = [seg(0.0, 10.0), seg(20.0, 30.0)];
+        assert_eq!(translate_chapter_time(5.0, &retained), 5.0);
+        assert_eq!(translate_chapter_time(35.0, &retained), 20.0);
+        assert_eq!(translate_chapter_time(20.0, &retained), 10.0);
+        assert_eq!(translate_chapter_time(15.0, &retained), 10.0);
+    }
+
+    #[test]
+    fn chapters_are_translated_and_collapsed_chapters_are_dropped() {
+        let all_retained = [seg(0.0, 30.0)];
+        let chapters = [chapter(0.0, 10.0, "Intro"), chapter(10.0, 30.0, "Main")];
+        assert_eq!(translate_chapters(&chapters, &all_retained), chapters);
+        assert!(translate_chapters(&[], &all_retained).is_empty());
+
+        let retained = [seg(0.0, 10.0), seg(20.0, 30.0)];
+        assert_eq!(
+            translate_chapters(
+                &[
+                    chapter(12.0, 18.0, "Removed"),
+                    chapter(15.0, 25.0, "Snapped"),
+                ],
+                &retained,
+            ),
+            [chapter(10.0, 15.0, "Snapped")]
+        );
+    }
+
+    #[test]
+    fn ffmetadata_renderer_escapes_titles_exactly() {
+        assert_eq!(
+            ffmetadata_chapters(&[
+                chapter(0.0, 1.25, "Intro"),
+                chapter(1.25, 2.0, "A=B; C#D\\E\nnext"),
+            ]),
+            ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1250\ntitle=Intro\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=1250\nEND=2000\ntitle=A\\=B\\; C\\#D\\\\E\\\nnext\n"
+        );
+    }
+
     #[actix_web::test]
     async fn generates_and_probes_a_stream_copy_derivative() {
         let dir = media_fixture_dir();
@@ -783,6 +960,7 @@ mod tests {
             &[seg(1.0, 2.0)],
             3.0,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            &[],
         )
         .await
         .expect("generate derivative");
@@ -797,7 +975,11 @@ mod tests {
             processed.duration
         );
         assert_eq!(fs::read(&original).unwrap(), original_bytes);
-        assert!(dir.join(processed.filename).is_file());
+        assert!(dir.join(&processed.filename).is_file());
+        assert_eq!(
+            probe_chapters(&dir.join(&processed.filename))["chapters"],
+            serde_json::json!([])
+        );
         assert_eq!(
             fs::read_dir(&dir)
                 .unwrap()
@@ -842,6 +1024,7 @@ mod tests {
             &[seg(1.0, 2.0)],
             3.0,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            &[],
         )
         .await
         .expect("generate derivative from relative path");
@@ -860,6 +1043,7 @@ mod tests {
             &[seg(0.0, 3.0)],
             3.0,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            &[],
         )
         .await;
         assert!(result.is_err());
@@ -868,8 +1052,103 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn embeds_translated_chapters_in_the_derived_mp3() {
+        let dir = media_fixture_dir();
+        let original = dir.join("video-id.mp3");
+        let output = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-q:a",
+                "4",
+                "-y",
+            ])
+            .arg(&original)
+            .output()
+            .expect("start fixture FFmpeg");
+        assert!(output.status.success());
+
+        let processed = generate_processed_mp3(
+            &original,
+            &[seg(1.0, 2.0)],
+            3.0,
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            &[
+                chapter(0.0, 1.0, "Intro"),
+                chapter(1.2, 1.8, "Removed"),
+                chapter(1.5, 3.0, "Main; topic"),
+            ],
+        )
+        .await
+        .expect("generate chapter derivative");
+
+        let probe = probe_chapters(&dir.join(&processed.filename));
+        let chapters = probe["chapters"].as_array().expect("chapters array");
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0]["start_time"], "0.000000");
+        assert_eq!(chapters[0]["end_time"], "1.000000");
+        assert_eq!(chapters[0]["tags"]["title"], "Intro");
+        assert_eq!(chapters[1]["start_time"], "1.000000");
+        assert_eq!(chapters[1]["end_time"], "2.000000");
+        assert_eq!(chapters[1]["tags"]["title"], "Main; topic");
+        assert!(fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
+        fs::remove_dir_all(dir).expect("remove media fixture directory");
+    }
+
+    #[test]
+    fn chapter_metadata_failure_does_not_publish_a_partial_derivative() {
+        let dir = media_fixture_dir();
+        let original = dir.join("video-id.mp3");
+        let output = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-q:a",
+                "4",
+                "-y",
+            ])
+            .arg(&original)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let destination = dir.join("video-id.sponsorblock.aaaaaaaaaaaaaaaa.mp3");
+
+        let result = generate_processed_mp3_blocking_with(
+            &original,
+            &[seg(1.0, 2.0)],
+            3.0,
+            hash,
+            &[chapter(0.0, 3.0, "Episode")],
+            |_| Err("write chapter metadata: injected failure".to_string()),
+        );
+
+        assert!(result.is_err());
+        assert!(!destination.exists());
+        assert!(fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".tmp")));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[actix_web::test]
     async fn reconciliation_preserves_active_state_on_failure_and_clears_it_on_empty() {
-        let (pool, episode, dir) = reconciliation_fixture().await;
+        let (pool, mut episode, dir) = reconciliation_fixture().await;
+        episode.chapters = vec![chapter(0.0, 3.0, "Episode")];
         let raw_segments = [raw(1.0, 2.0)];
         let segments = normalize_segments(&raw_segments, Some(3.0));
         let hash = snapshot_hash(&segments);

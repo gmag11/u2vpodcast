@@ -1,6 +1,6 @@
 use super::super::models::{
-    audios_dir, cookies_file, ytdlp_path, Channel, Config, Episode, Error, PlaylistItem, YtVideo,
-    Ytdlp,
+    audios_dir, cookies_file, ytdlp_path, Channel, Chapter, Config, Episode, EpisodeChapter, Error,
+    PlaylistItem, YtVideo, Ytdlp,
 };
 use super::sponsorblock::{reconcile_episode, SponsorBlockClient};
 use actix_web::http::StatusCode;
@@ -367,6 +367,28 @@ fn needs_metadata_probe(episode_exists: bool, video: &YtVideo) -> bool {
     !episode_exists && flat_date(video).is_none()
 }
 
+fn episode_chapters(chapters: Option<&[Chapter]>, duration: Option<f64>) -> Vec<EpisodeChapter> {
+    let Some(chapters) = chapters else {
+        return Vec::new();
+    };
+    chapters
+        .iter()
+        .enumerate()
+        .filter_map(|(index, chapter)| {
+            let end = chapter
+                .end_time
+                .or_else(|| (index + 1 == chapters.len()).then_some(duration).flatten())?;
+            (chapter.start_time.is_finite() && end.is_finite() && chapter.start_time < end).then(
+                || EpisodeChapter {
+                    start: chapter.start_time,
+                    end,
+                    title: chapter.title.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
 async fn process_episode(
     pool: &SqlitePool,
     channel: &Channel,
@@ -468,6 +490,10 @@ async fn process_episode(
         return Ok(());
     }
     let listen = false;
+    let chapters = episode_chapters(
+        info.chapters.as_deref(),
+        super::sponsorblock::parse_duration_seconds(duration),
+    );
     let episode = Episode::new(
         pool,
         channel.id,
@@ -479,6 +505,7 @@ async fn process_episode(
         duration,
         image,
         listen,
+        chapters,
     )
     .await?;
     // Auto-append freshly downloaded episodes to the end of the playlist
@@ -632,6 +659,7 @@ mod selection_tests {
             duration_string: String::new(),
             release_date: String::new(),
             live_status: String::new(),
+            chapters: None,
         }
     }
 
@@ -762,8 +790,10 @@ mod selection_tests {
 
 #[cfg(test)]
 mod episode_download_tests {
-    use super::{needs_episode_download, needs_metadata_probe};
-    use crate::models::YtVideo;
+    use super::{episode_chapters, needs_episode_download, needs_metadata_probe};
+    use crate::models::{Chapter, EpisodeChapter, YtVideo};
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
+    use std::path::Path;
 
     fn video(timestamp: Option<i64>, upload_date: &str) -> YtVideo {
         YtVideo {
@@ -778,6 +808,7 @@ mod episode_download_tests {
             duration_string: String::new(),
             release_date: String::new(),
             live_status: String::new(),
+            chapters: None,
         }
     }
 
@@ -797,6 +828,107 @@ mod episode_download_tests {
         ));
         assert!(!needs_metadata_probe(false, &video(None, "20240101")));
         assert!(!needs_metadata_probe(true, &video(None, "")));
+    }
+
+    #[test]
+    fn chapter_normalization_uses_duration_for_the_last_end_and_drops_invalid_entries() {
+        let chapters = vec![
+            Chapter {
+                start_time: 0.0,
+                end_time: Some(10.0),
+                title: "Intro".to_string(),
+            },
+            Chapter {
+                start_time: 10.0,
+                end_time: Some(10.0),
+                title: "Empty".to_string(),
+            },
+            Chapter {
+                start_time: 10.0,
+                end_time: None,
+                title: "Main".to_string(),
+            },
+        ];
+        assert_eq!(
+            episode_chapters(Some(&chapters), Some(30.0)),
+            vec![
+                EpisodeChapter {
+                    start: 0.0,
+                    end: 10.0,
+                    title: "Intro".to_string()
+                },
+                EpisodeChapter {
+                    start: 10.0,
+                    end: 30.0,
+                    title: "Main".to_string()
+                },
+            ]
+        );
+        assert!(episode_chapters(None, Some(30.0)).is_empty());
+    }
+
+    #[tokio::test]
+    async fn downloaded_video_chapters_are_persisted_on_the_episode() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        Migrator::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .unwrap()
+            .run(&pool)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now();
+        let channel_id: i64 = sqlx::query_scalar(
+            "INSERT INTO channels (url, title, slug, active, description, image, first, max, created_at, updated_at) \
+             VALUES ('https://example.com', 'Channel', 'channel', TRUE, '', '', $1, 5, $1, $1) RETURNING id",
+        )
+        .bind(now)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let source = [
+            Chapter {
+                start_time: 0.0,
+                end_time: Some(10.0),
+                title: "Intro".to_string(),
+            },
+            Chapter {
+                start_time: 10.0,
+                end_time: None,
+                title: "Main".to_string(),
+            },
+        ];
+        let chapters = episode_chapters(Some(&source), Some(30.0));
+
+        let saved = crate::models::Episode::new(
+            &pool,
+            channel_id,
+            "Episode",
+            "",
+            "video-id",
+            "https://example.com/video",
+            &now,
+            "00:00:30",
+            "",
+            false,
+            chapters.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(saved.chapters, chapters);
+        let stored: String = sqlx::query_scalar("SELECT chapters_json FROM episodes WHERE id = $1")
+            .bind(saved.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<EpisodeChapter>>(&stored).unwrap(),
+            chapters
+        );
     }
 }
 

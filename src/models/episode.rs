@@ -10,6 +10,13 @@ use sqlx::{
 use std::path::Path;
 use tracing::info;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EpisodeChapter {
+    pub start: f64,
+    pub end: f64,
+    pub title: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
     pub id: i64,
@@ -33,6 +40,8 @@ pub struct Episode {
     pub position_seconds: i64,
     pub listened_at: Option<DateTime<Utc>>,
     pub favorite: bool,
+    #[serde(default)]
+    pub chapters: Vec<EpisodeChapter>,
     #[serde(default)]
     pub sponsorblock_enabled: bool,
     #[serde(default)]
@@ -69,6 +78,14 @@ fn get_default_empty() -> String {
 }
 
 impl Episode {
+    fn chapters(row: &SqliteRow) -> Vec<EpisodeChapter> {
+        row.try_get::<Option<String>, _>("chapters_json")
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
+    }
+
     pub fn apply_sponsorblock_config(&mut self, enabled: bool, rejected_categories: &[String]) {
         self.sponsorblock_enabled = enabled;
         if !enabled {
@@ -152,6 +169,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            chapters: Self::chapters(&row),
             sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
@@ -182,6 +200,7 @@ impl Episode {
             position_seconds: row.get("position_seconds"),
             listened_at: row.get("listened_at"),
             favorite: row.get("favorite"),
+            chapters: Self::chapters(&row),
             sponsorblock_enabled: false,
             sponsorblock_segments: segments,
             sponsorblock_hash: hash,
@@ -204,6 +223,7 @@ impl Episode {
         duration: &str,
         image: &str,
         listen: bool,
+        chapters: Vec<EpisodeChapter>,
     ) -> Result<Self, Error> {
         info!("new");
         let created_at = Utc::now();
@@ -225,6 +245,7 @@ impl Episode {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            chapters,
             sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
@@ -237,12 +258,16 @@ impl Episode {
     }
 
     pub async fn create(pool: &SqlitePool, episode: &Self) -> Result<Episode, Error> {
+        let chapters_json = (!episode.chapters.is_empty())
+            .then(|| serde_json::to_string(&episode.chapters))
+            .transpose()
+            .map_err(|error| Error::default(&format!("serialize episode chapters: {error}")))?;
         let sql = "INSERT INTO episodes (channel_id, title, description, yt_id,
                    webpage_url, published_at, duration, image, listen,
-                   position_seconds, listened_at, favorite, created_at,
+                   position_seconds, listened_at, favorite, chapters_json, created_at,
                    updated_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                   $13, $14) RETURNING *;";
+                   $13, $14, $15) RETURNING *;";
         query(sql)
             .bind(episode.channel_id)
             .bind(&episode.title)
@@ -256,6 +281,7 @@ impl Episode {
             .bind(episode.position_seconds)
             .bind(episode.listened_at)
             .bind(episode.favorite)
+            .bind(chapters_json)
             .bind(episode.created_at)
             .bind(episode.updated_at)
             .map(Self::from_row)
@@ -654,6 +680,7 @@ mod episode_update_tests {
             position_seconds: 0,
             listened_at: None,
             favorite: false,
+            chapters: Vec::new(),
             sponsorblock_enabled: false,
             sponsorblock_segments: Vec::new(),
             sponsorblock_hash: None,
@@ -780,6 +807,61 @@ mod episode_update_tests {
             .await
             .expect("count untouched rows");
         assert_eq!(untouched, 1, "the other episode must be untouched");
+    }
+
+    #[tokio::test]
+    async fn chapters_round_trip_and_survive_unrelated_updates() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let mut episode = episode_struct(channel_id, "chapters1");
+        episode.chapters = vec![
+            EpisodeChapter {
+                start: 0.0,
+                end: 30.0,
+                title: "Intro".to_string(),
+            },
+            EpisodeChapter {
+                start: 30.0,
+                end: 90.0,
+                title: "Topic".to_string(),
+            },
+        ];
+
+        let saved = Episode::create(&pool, &episode).await.expect("create");
+        assert_eq!(saved.chapters, episode.chapters);
+        let stored: Option<String> = query("SELECT chapters_json FROM episodes WHERE id = $1")
+            .bind(saved.id)
+            .map(|row: SqliteRow| row.get("chapters_json"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<EpisodeChapter>>(&stored.unwrap()).unwrap(),
+            episode.chapters
+        );
+
+        let mut update = saved.clone();
+        update.title = "Updated".to_string();
+        let updated = Episode::update(&pool, &update).await.expect("update");
+        assert_eq!(updated.chapters, episode.chapters);
+        assert_eq!(
+            serde_json::to_value(&updated).unwrap()["chapters"][0]["start"],
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn episodes_without_chapters_serialize_an_empty_list() {
+        let pool = memory_pool().await;
+        let channel_id = insert_channel(&pool).await;
+        let saved = Episode::create(&pool, &episode_struct(channel_id, "nochapters"))
+            .await
+            .expect("create");
+        assert!(saved.chapters.is_empty());
+        assert_eq!(
+            serde_json::to_value(&saved).unwrap()["chapters"],
+            serde_json::json!([])
+        );
     }
 
     #[tokio::test]

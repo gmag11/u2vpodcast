@@ -41,11 +41,18 @@ export interface Episode {
 	position_seconds: number;
 	listened_at: string | null;
 	favorite: boolean;
+	chapters: EpisodeChapter[];
 	sponsorblock_enabled?: boolean;
 	sponsorblock_segments?: SponsorBlockSegment[];
 	sponsorblock_hash?: string | null;
 	created_at: Date;
 	updated_at: Date;
+}
+
+export interface EpisodeChapter {
+	start: number;
+	end: number;
+	title: string;
 }
 
 export interface SponsorBlockSegment {

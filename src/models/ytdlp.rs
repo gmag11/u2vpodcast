@@ -48,6 +48,14 @@ impl CommandRunner for ProcessCommandRunner {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Chapter {
+    pub start_time: f64,
+    #[serde(default)]
+    pub end_time: Option<f64>,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct YtVideo {
     pub id: String,
     pub title: String,
@@ -69,6 +77,8 @@ pub struct YtVideo {
     pub release_date: String,
     #[serde(default, deserialize_with = "string_or_default")]
     pub live_status: String,
+    #[serde(default)]
+    pub chapters: Option<Vec<Chapter>>,
 }
 
 // yt-dlp flat entries and info dicts frequently emit explicit `null` for
@@ -461,6 +471,23 @@ mod parse_dump_output_tests {
     fn optional_timestamp_defaults_to_none() {
         let videos = parse_dump_output(SAMPLE).expect("valid output parses");
         assert_eq!(videos[0].timestamp, None);
+    }
+
+    #[test]
+    fn parses_chapters_and_tolerates_missing_or_empty_lists() {
+        let with_chapters = br#"{"id":"chapters","title":"Video","chapters":[{"start_time":0.0,"end_time":30.5,"title":"Intro"},{"start_time":30.5,"end_time":null,"title":"Main"}]}"#;
+        let videos = parse_dump_output(with_chapters).expect("chapters parse");
+        let chapters = videos[0].chapters.as_ref().expect("chapter list");
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].start_time, 0.0);
+        assert_eq!(chapters[0].end_time, Some(30.5));
+        assert_eq!(chapters[0].title, "Intro");
+        assert_eq!(chapters[1].end_time, None);
+
+        let missing = parse_dump_output(br#"{"id":"missing","title":"Video"}"#).unwrap();
+        assert!(missing[0].chapters.is_none());
+        let empty = parse_dump_output(br#"{"id":"empty","title":"Video","chapters":[]}"#).unwrap();
+        assert!(empty[0].chapters.as_ref().unwrap().is_empty());
     }
 
     #[test]

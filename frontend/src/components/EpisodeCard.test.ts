@@ -59,7 +59,8 @@ function episode(overrides: Partial<Episode> = {}): Episode {
 		created_at: now,
 		updated_at: now,
 		playback_speed: 1,
-		...overrides
+		...overrides,
+		chapters: overrides.chapters ?? []
 	};
 }
 

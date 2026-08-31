@@ -183,6 +183,7 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		chapters: [],
 		sponsorblock_enabled: true,
 		sponsorblock_segments: [],
 		sponsorblock_hash: null,

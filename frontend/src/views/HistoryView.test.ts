@@ -36,6 +36,7 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		chapters: [],
 		created_at: now,
 		updated_at: now
 	};
