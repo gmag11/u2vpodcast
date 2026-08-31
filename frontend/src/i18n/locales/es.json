@@ -114,6 +114,7 @@
 		"syncTooltip": "Actualizado hace {age}. Estado: {status}",
 		"lastEpisodeTooltip": "Último episodio hace {age}",
 		"listened": "Escuchado",
+		"hasChapters": "Tiene capítulos",
 		"continueAt": "Continuar en {time}",
 		"startOver": "Empezar de nuevo"
 	},

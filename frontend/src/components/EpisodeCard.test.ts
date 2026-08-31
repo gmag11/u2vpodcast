@@ -496,6 +496,57 @@ describe('EpisodeCard playback indicators', () => {
 	});
 });
 
+describe('EpisodeCard chapter indicator', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	it('renders only for episodes with stored chapters', () => {
+		const withChapters = mountCard(
+			episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] })
+		);
+		const withoutChapters = mountCard(episode({ chapters: [] }));
+
+		expect(withChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		expect(withChapters.find('[aria-label="Has chapters"]').attributes('role')).toBe('img');
+		expect(withChapters.get('[role="tooltip"]').text()).toBe('Has chapters');
+		expect(withoutChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(false);
+		expect(withoutChapters.find('[role="tooltip"]').exists()).toBe(false);
+	});
+
+	it('renders in the default, compact, and playlist presentations', () => {
+		const ep = episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] });
+		const standard = mountCard(ep);
+		const compact = mount(EpisodeCard, {
+			props: { episode: ep, compact: true },
+			global: { plugins: [createPinia(), testI18n], stubs: { RouterLink: true } }
+		});
+		const playlist = mountPlaylistCard(ep);
+
+		expect(standard.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		expect(compact.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		expect(
+			playlist
+				.get('[data-testid="playlist-status-column"]')
+				.find('[data-testid="episode-chapters-indicator"]')
+				.exists()
+		).toBe(true);
+	});
+
+	it('reserves a stable chapter slot in the mobile playlist status row', () => {
+		const withChapters = mountPlaylistCard(
+			episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] })
+		);
+		const withoutChapters = mountPlaylistCard(episode({ chapters: [] }));
+
+		expect(withChapters.get('[data-testid="playlist-chapters-slot"]').classes()).toContain('h-3.5');
+		expect(withoutChapters.get('[data-testid="playlist-chapters-slot"]').classes()).toContain(
+			'h-3.5'
+		);
+		expect(withoutChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(false);
+	});
+});
+
 describe('EpisodeCard playlist toggle', () => {
 	function mountCardWith(ep: Episode, seedPlaylist: Episode[]) {
 		const pinia = createPinia();

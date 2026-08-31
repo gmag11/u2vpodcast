@@ -4,6 +4,7 @@
 	import {
 		PhArrowCounterClockwise,
 		PhLinkSimple,
+		PhListBullets,
 		PhListPlus,
 		PhDotsThreeVertical,
 		PhMicrophoneStage,
@@ -368,7 +369,7 @@
 			</div>
 
 			<div
-				class="relative flex h-16 w-8 shrink-0 flex-col items-center justify-between"
+				class="relative flex h-16 w-12 shrink-0 flex-col items-center justify-between"
 				data-testid="playlist-status-column"
 			>
 				<button
@@ -459,8 +460,9 @@
 						<span>{{ $t('playlist.channelView') }}</span>
 					</RouterLink>
 				</div>
-				<div class="flex w-full items-center justify-between">
+				<div class="grid w-full grid-cols-3 items-center gap-1">
 					<span
+						class="flex h-3.5 w-3.5 items-center justify-center"
 						role="img"
 						data-icon="star"
 						data-testid="playlist-favorite-status"
@@ -471,6 +473,7 @@
 						<PhStar class="h-3.5 w-3.5" :weight="isFavorite ? 'fill' : 'regular'" />
 					</span>
 					<span
+						class="flex h-3.5 w-3.5 items-center justify-center"
 						role="img"
 						data-icon="playlist"
 						data-testid="playlist-membership-status"
@@ -479,6 +482,27 @@
 						:aria-label="inPlaylist ? $t('playlist.remove') : $t('playlist.add')"
 					>
 						<PhPlaylist class="h-3.5 w-3.5" :weight="inPlaylist ? 'fill' : 'regular'" />
+					</span>
+					<span class="relative block h-3.5 w-3.5" data-testid="playlist-chapters-slot">
+						<span
+							v-if="episode.chapters && episode.chapters.length > 0"
+							class="group relative block text-text-muted"
+							role="img"
+							tabindex="0"
+							data-testid="episode-chapters-indicator"
+							:aria-label="$t('card.hasChapters')"
+							:aria-describedby="`playlist-chapters-tooltip-${episode.id}`"
+							:title="$t('card.hasChapters')"
+						>
+							<PhListBullets class="h-3.5 w-3.5" aria-hidden="true" />
+							<span
+								:id="`playlist-chapters-tooltip-${episode.id}`"
+								role="tooltip"
+								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+							>
+								{{ $t('card.hasChapters') }}
+							</span>
+						</span>
 					</span>
 				</div>
 			</div>
@@ -628,6 +652,25 @@
 							<PhPlaylist v-if="inPlaylist" class="h-4 w-4" weight="fill" />
 							<PhListPlus v-else class="h-4 w-4" weight="regular" />
 						</button>
+						<span
+							v-if="episode.chapters && episode.chapters.length > 0"
+							class="group relative flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted"
+							role="img"
+							tabindex="0"
+							data-testid="episode-chapters-indicator"
+							:aria-label="$t('card.hasChapters')"
+							:aria-describedby="`card-chapters-tooltip-${episode.id}`"
+							:title="$t('card.hasChapters')"
+						>
+							<PhListBullets class="h-4 w-4" aria-hidden="true" />
+							<span
+								:id="`card-chapters-tooltip-${episode.id}`"
+								role="tooltip"
+								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+							>
+								{{ $t('card.hasChapters') }}
+							</span>
+						</span>
 						<time class="shrink-0 text-sm text-text-muted">
 							{{ formatDate(props.episode.published_at) }}
 						</time>
