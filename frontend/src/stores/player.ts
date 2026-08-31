@@ -173,6 +173,25 @@ export function currentChapterIndex(
 	return (chapters ?? []).findIndex(({ start, end }) => currentTime >= start && currentTime < end);
 }
 
+export function nextChapterStart(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number | null {
+	const index = currentChapterIndex(currentTime, chapters);
+	return index >= 0 ? (chapters?.[index + 1]?.start ?? null) : null;
+}
+
+export function previousChapterSeekTarget(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number | null {
+	const index = currentChapterIndex(currentTime, chapters);
+	if (index < 0 || !chapters) return null;
+	const currentChapter = chapters[index];
+	if (currentTime - currentChapter.start > 3) return currentChapter.start;
+	return chapters[index - 1]?.start ?? null;
+}
+
 export const usePlayerStore = defineStore('player', () => {
 	const currentEpisode = ref<Episode | null>(null);
 	const playing = ref(false);

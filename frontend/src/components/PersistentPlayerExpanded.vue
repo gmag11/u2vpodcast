@@ -19,7 +19,9 @@
 	import {
 		chapterTimelineMarkers,
 		currentChapterIndex,
+		nextChapterStart,
 		parseDurationSeconds,
+		previousChapterSeekTarget,
 		sponsorBlockTimelineMarkers,
 		SPEED_MAX,
 		SPEED_MIN,
@@ -60,6 +62,12 @@
 		const index = activeChapterIndex.value;
 		return index >= 0 ? player.currentEpisode?.chapters[index]?.title : undefined;
 	});
+	const nextChapterTarget = computed(() =>
+		nextChapterStart(player.currentTime, player.currentEpisode?.chapters)
+	);
+	const previousChapterTarget = computed(() =>
+		previousChapterSeekTarget(player.currentTime, player.currentEpisode?.chapters)
+	);
 
 	function speedLabel(value: number) {
 		return String(Math.round(value * 100) / 100);
@@ -80,6 +88,10 @@
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
 		player.seek(ratio * player.duration);
+	}
+
+	function seekToChapter(target: number | null) {
+		if (target != null) player.seek(target);
 	}
 
 	// Next control: short press skips, long press (> 500ms) skips and marks
@@ -470,7 +482,31 @@
 					class="w-full"
 					data-testid="player-chapters"
 				>
-					<h2 class="mb-2 text-sm font-semibold text-text">{{ $t('player.chapters') }}</h2>
+					<div class="mb-2 flex items-center justify-between gap-3">
+						<h2 class="text-sm font-semibold text-text">{{ $t('player.chapters') }}</h2>
+						<div class="flex items-center gap-1">
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+								:aria-label="$t('player.previousChapter')"
+								:disabled="previousChapterTarget == null"
+								data-testid="player-previous-chapter"
+								@click="seekToChapter(previousChapterTarget)"
+							>
+								<PhSkipBack class="h-4 w-4" weight="regular" />
+							</button>
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+								:aria-label="$t('player.nextChapter')"
+								:disabled="nextChapterTarget == null"
+								data-testid="player-next-chapter"
+								@click="seekToChapter(nextChapterTarget)"
+							>
+								<PhSkipForward class="h-4 w-4" weight="regular" />
+							</button>
+						</div>
+					</div>
 					<ul class="max-h-64 space-y-1 overflow-y-auto" data-testid="player-chapter-list">
 						<li v-for="(chapter, index) in player.currentEpisode.chapters" :key="index">
 							<button

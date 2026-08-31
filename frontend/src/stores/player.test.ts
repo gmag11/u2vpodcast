@@ -3,6 +3,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import {
 	chapterTimelineMarkers,
 	currentChapterIndex,
+	nextChapterStart,
+	previousChapterSeekTarget,
 	sponsorBlockSkipTarget,
 	sponsorBlockTimelineMarkers,
 	usePlayerStore,
@@ -264,6 +266,32 @@ describe('SponsorBlock playback', () => {
 		expect(currentChapterIndex(90, chapters)).toBe(1);
 		expect(currentChapterIndex(240, chapters)).toBe(-1);
 		expect(currentChapterIndex(90, [])).toBe(-1);
+	});
+
+	it('finds the next chapter start when one is available', () => {
+		const chapters = [
+			{ start: 0, end: 60, title: 'Introduction' },
+			{ start: 60, end: 180, title: 'Main topic' },
+			{ start: 180, end: 240, title: 'Wrap-up' }
+		];
+
+		expect(nextChapterStart(90, chapters)).toBe(180);
+		expect(nextChapterStart(200, chapters)).toBeNull();
+		expect(nextChapterStart(90, [])).toBeNull();
+	});
+
+	it('finds the previous chapter seek target using the restart threshold', () => {
+		const chapters = [
+			{ start: 0, end: 60, title: 'Introduction' },
+			{ start: 60, end: 180, title: 'Main topic' },
+			{ start: 180, end: 240, title: 'Wrap-up' }
+		];
+
+		expect(previousChapterSeekTarget(64, chapters)).toBe(60);
+		expect(previousChapterSeekTarget(63, chapters)).toBe(0);
+		expect(previousChapterSeekTarget(4, chapters)).toBe(0);
+		expect(previousChapterSeekTarget(3, chapters)).toBeNull();
+		expect(previousChapterSeekTarget(90, [])).toBeNull();
 	});
 
 	it('skips on timeupdate and explicit seek using the original timeline', async () => {

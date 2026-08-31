@@ -21,6 +21,8 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 class MockAudioElement {
+	static instances: MockAudioElement[] = [];
+
 	src = '';
 	currentTime = 0;
 	duration = 0;
@@ -32,6 +34,10 @@ class MockAudioElement {
 	preload = 'metadata';
 
 	private listeners: Record<string, Array<() => void>> = {};
+
+	constructor() {
+		MockAudioElement.instances.push(this);
+	}
 
 	play = vi.fn(async () => {
 		this.paused = false;
@@ -86,6 +92,7 @@ describe('PersistentPlayerExpanded', () => {
 		vi.stubGlobal('HTMLAudioElement', AudioClass);
 		vi.stubGlobal('Audio', AudioClass);
 		localStorage.clear();
+		MockAudioElement.instances.length = 0;
 		setActivePinia(createPinia());
 	});
 
@@ -205,6 +212,8 @@ describe('PersistentPlayerExpanded', () => {
 		startPlayback(player);
 		const w = await mountExpanded();
 		expect(w.find('[data-testid="player-chapters"]').exists()).toBe(false);
+		expect(w.find('[data-testid="player-previous-chapter"]').exists()).toBe(false);
+		expect(w.find('[data-testid="player-next-chapter"]').exists()).toBe(false);
 
 		player.currentEpisode = {
 			...player.currentEpisode!,
@@ -222,6 +231,76 @@ describe('PersistentPlayerExpanded', () => {
 		expect(rows[0].text()).toContain('0:00');
 		expect(rows[1].text()).toContain('Main topic');
 		expect(rows[1].text()).toContain('2:30');
+	});
+
+	it('seeks to the next chapter and disables next in the last chapter', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 60, title: 'Introduction' },
+				{ start: 60, end: 180, title: 'Main topic' },
+				{ start: 180, end: 300, title: 'Wrap-up' }
+			]
+		};
+		player.currentTime = 90;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+		const next = w.get('[data-testid="player-next-chapter"]');
+
+		expect(next.attributes('disabled')).toBeUndefined();
+		await next.trigger('click');
+		expect(seekSpy).toHaveBeenCalledWith(180);
+
+		player.currentTime = 200;
+		await flushPromises();
+		expect(next.attributes('disabled')).toBeDefined();
+	});
+
+	it('restarts or moves to the previous chapter and disables at the beginning', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 60, title: 'Introduction' },
+				{ start: 60, end: 180, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 64;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+		const previous = w.get('[data-testid="player-previous-chapter"]');
+
+		await previous.trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(60);
+
+		player.currentTime = 63;
+		await flushPromises();
+		await previous.trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(0);
+
+		player.currentTime = 3;
+		await flushPromises();
+		expect(previous.attributes('disabled')).toBeDefined();
+	});
+
+	it('applies SponsorBlock skipping after chapter navigation', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.chapters = [
+			{ start: 0, end: 120, title: 'Introduction' },
+			{ start: 120, end: 300, title: 'Main topic' }
+		];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		await player.play(item);
+		player.currentTime = 60;
+		const w = await mountExpanded();
+
+		await w.get('[data-testid="player-next-chapter"]').trigger('click');
+		expect(player.currentTime).toBe(150);
+		expect(MockAudioElement.instances[0].currentTime).toBe(150);
 	});
 
 	it('seeks to a chapter start when its row is activated', async () => {

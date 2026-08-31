@@ -138,6 +138,8 @@
 		"queue": "Cola",
 		"upNext": "A continuación",
 		"chapters": "Capítulos",
+		"previousChapter": "Capítulo anterior",
+		"nextChapter": "Capítulo siguiente",
 		"removeFromQueue": "Quitar de la cola",
 		"clearQueue": "Vaciar",
 		"emptyQueue": "No hay episodios en cola",
