@@ -22,6 +22,8 @@ The seek bar in both `PersistentPlayer.vue` (wide and compact compositions) and 
 
 **Wire click/tap on a chapter marker to `player.seek(startSeconds)`, reusing the existing `onSeek`-adjacent seek path** rather than introducing a new seek function — this automatically inherits the already-specified rejected-interval skip behavior (`persistent-audio-player`'s "Web playback skips configured rejected intervals" requirement), since `seek()` already clamps forward out of rejected ranges.
 
+**Show chapter titles with a CSS tooltip on interactive markers.** The wide and expanded marker buttons use a wider transparent hit target around the same 2px visual tick, revealing a styled title tooltip on hover and keyboard focus. This avoids the delay and inconsistent presentation of native `title` tooltips while keeping the visible marker thin; the compact track remains read-only and accessibility-hidden.
+
 **Compact track markers are visual-only**, added to the same non-interactive `<div>` that already renders the compact SponsorBlock overlay (`aria-hidden="true"`, no click handler), consistent with the compact composition's existing no-seek-interaction rule.
 
 ## Risks / Trade-offs

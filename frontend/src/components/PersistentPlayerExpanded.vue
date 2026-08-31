@@ -17,6 +17,7 @@
 		PhX
 	} from '@phosphor-icons/vue';
 	import {
+		chapterTimelineMarkers,
 		parseDurationSeconds,
 		sponsorBlockTimelineMarkers,
 		SPEED_MAX,
@@ -44,6 +45,12 @@
 			duration,
 			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
 		);
+	});
+	const chapterMarkers = computed(() => {
+		const episode = player.currentEpisode;
+		if (!episode) return [];
+		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
+		return chapterTimelineMarkers(duration, episode.chapters);
 	});
 
 	function speedLabel(value: number) {
@@ -324,7 +331,7 @@
 						data-testid="player-progress-expanded"
 						@click="onSeek"
 					>
-						<div class="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
+						<div class="relative h-1.5 w-full rounded-full bg-surface-input">
 							<div
 								class="absolute inset-y-0 left-0 rounded-full bg-accent-400 transition-[width] duration-150"
 								:style="{ width: player.progress + '%' }"
@@ -338,6 +345,37 @@
 								data-testid="player-sponsorblock-segment"
 								:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
 							></div>
+							<button
+								v-for="(marker, index) in chapterMarkers"
+								:key="index"
+								type="button"
+								class="group absolute -inset-y-2 z-20 w-3 -translate-x-1/2"
+								data-testid="player-chapter-marker"
+								:data-start-seconds="marker.startSeconds"
+								:aria-label="marker.title"
+								:aria-describedby="`expanded-chapter-tooltip-${index}`"
+								:style="{ left: `${marker.left}%` }"
+								@click.stop="player.seek(marker.startSeconds)"
+							>
+								<span
+									class="absolute inset-y-2 left-1/2 w-0.5 -translate-x-1/2 bg-chapter-marker"
+									aria-hidden="true"
+								></span>
+								<span
+									:id="`expanded-chapter-tooltip-${index}`"
+									role="tooltip"
+									class="pointer-events-none absolute bottom-full z-30 mb-1 w-max max-w-64 rounded-md bg-surface-high px-2 py-1 text-left text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+									:class="
+										marker.left < 15
+											? 'left-1/2'
+											: marker.left > 85
+												? 'right-1/2'
+												: 'left-1/2 -translate-x-1/2'
+									"
+								>
+									{{ marker.title }}
+								</span>
+							</button>
 						</div>
 					</div>
 					<div class="flex items-center justify-between text-xs text-text-muted">

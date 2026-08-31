@@ -145,6 +145,46 @@ describe('PersistentPlayerExpanded', () => {
 		expect(seekSpy).toHaveBeenCalledWith(300);
 	});
 
+	it('renders chapter markers on the scrubber and seeks on activation', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+
+		const markers = w.findAll('[data-testid="player-chapter-marker"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].get('[aria-hidden="true"]').classes()).toContain('bg-chapter-marker');
+		expect(markers[0].attributes('style')).toContain('left: 0%');
+		expect(markers[1].attributes('style')).toContain('left: 25%');
+		expect(markers[1].attributes('title')).toBeUndefined();
+		const tooltip = markers[1].get('[role="tooltip"]');
+		expect(tooltip.text()).toBe('Main topic');
+		expect(tooltip.classes()).toContain('group-hover:opacity-100');
+		expect(tooltip.classes()).toContain('group-focus-visible:opacity-100');
+		expect(markers[1].attributes('aria-describedby')).toBe(tooltip.attributes('id'));
+		expect(markers[1].element.tagName).toBe('BUTTON');
+		expect(markers[1].attributes('tabindex')).toBeUndefined();
+
+		await markers[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('renders no chapter markers without stored chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const w = await mountExpanded();
+
+		expect(w.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
+	});
+
 	it('shows elapsed and remaining time labels', async () => {
 		const player = usePlayerStore();
 		startPlayback(player);

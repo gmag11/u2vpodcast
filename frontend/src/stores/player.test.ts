@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import {
+	chapterTimelineMarkers,
 	sponsorBlockSkipTarget,
 	sponsorBlockTimelineMarkers,
 	usePlayerStore,
@@ -233,6 +234,22 @@ describe('SponsorBlock playback', () => {
 		expect(
 			sponsorBlockTimelineMarkers(0, [{ start: 1, end: 2, category: 'sponsor', rejected: true }])
 		).toEqual([]);
+	});
+
+	it('maps valid chapter starts onto the original timeline', () => {
+		expect(chapterTimelineMarkers(600, undefined)).toEqual([]);
+		expect(chapterTimelineMarkers(600, [])).toEqual([]);
+		expect(
+			chapterTimelineMarkers(600, [
+				{ start: 0, end: 60, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' },
+				{ start: 700, end: 800, title: 'Beyond duration' }
+			])
+		).toEqual([
+			{ left: 0, title: 'Introduction', startSeconds: 0 },
+			{ left: 25, title: 'Main topic', startSeconds: 150 }
+		]);
+		expect(chapterTimelineMarkers(0, [{ start: 0, end: 10, title: 'Intro' }])).toEqual([]);
 	});
 
 	it('skips on timeupdate and explicit seek using the original timeline', async () => {

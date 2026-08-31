@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import type { Episode, EpisodeProgress, SponsorBlockSegment } from '@/types';
+import type { Episode, EpisodeChapter, EpisodeProgress, SponsorBlockSegment } from '@/types';
 import { loadQueue, saveQueue, type RepeatMode } from '@/lib/utils/queue.storage';
 import { api } from '@/lib/api/client';
 import { usePlaylistStore } from '@/stores/playlists';
@@ -152,6 +152,17 @@ export function sponsorBlockTimelineMarkers(
 				category
 			}
 		];
+	});
+}
+
+export function chapterTimelineMarkers(
+	duration: number,
+	chapters: EpisodeChapter[] | null | undefined
+): Array<{ left: number; title: string; startSeconds: number }> {
+	if (!Number.isFinite(duration) || duration <= 0) return [];
+	return (chapters ?? []).flatMap(({ start, title }) => {
+		if (!Number.isFinite(start) || start < 0 || start > duration) return [];
+		return [{ left: (start / duration) * 100, title, startSeconds: start }];
 	});
 }
 
