@@ -101,7 +101,11 @@ fn fetch_from_base_url(
     {
         Ok(response) => response,
         Err(UreqError::StatusCode(404)) => return Ok(Vec::new()),
-        Err(error) => return Err(format!("SponsorBlock request to {base_url} failed: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "SponsorBlock request to {base_url} failed: {error}"
+            ))
+        }
     };
     let body = response
         .body_mut()
@@ -437,10 +441,13 @@ pub async fn reconcile_episode(
         rejected.len()
     );
 
-    if let Some(active) = previous
-        .as_ref()
-        .filter(|active| active.processing_hash.as_deref() == Some(processing_hash.as_str()))
-    {
+    if let Some(active) = previous.as_ref().filter(|active| {
+        active.processing_hash.as_deref() == Some(processing_hash.as_str())
+            && active
+                .processed_filename
+                .as_ref()
+                .is_none_or(|filename| channel_dir.join(filename).is_file())
+    }) {
         info!(
             "SponsorBlock processing is unchanged for {}; keeping existing media",
             episode.yt_id
@@ -893,6 +900,20 @@ mod tests {
         assert_eq!(unchanged.snapshot_hash, hash);
         assert!(dir.join(&active_filename).is_file());
 
+        fs::remove_file(dir.join(&active_filename)).unwrap();
+        assert!(
+            reconcile_episode(&pool, &same_client, &episode, &dir, &categories)
+                .await
+                .is_err()
+        );
+        let missing = SponsorBlockCache::read(&pool, episode.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(missing.snapshot_hash, hash);
+        assert!(missing.last_error.is_some());
+        fs::write(dir.join(&active_filename), b"active derivative").unwrap();
+
         let changed_body = r#"[
             {"segment":[0.5,2.0],"category":"sponsor","actionType":"skip"},
             {"segment":[2.0,2.5],"category":"intro","actionType":"skip"}
@@ -1124,8 +1145,7 @@ mod tests {
 
     #[actix_web::test]
     async fn returns_error_when_all_endpoints_fail() {
-        let mut client =
-            SponsorBlockClient::new(&unavailable_server(), Duration::from_secs(1));
+        let mut client = SponsorBlockClient::new(&unavailable_server(), Duration::from_secs(1));
         client.base_urls.push(unavailable_server());
 
         assert!(client.fetch("video-id").await.is_err());

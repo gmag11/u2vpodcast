@@ -840,11 +840,24 @@ mod playback_speed_tests {
         let id = insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
         let slug = Channel::read(&pool, id).await.expect("read channel").slug;
 
-        for speed in [0.2, 0.0, -1.0, 3.1, 4.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for speed in [
+            0.2,
+            0.0,
+            -1.0,
+            3.1,
+            4.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
             let error = Channel::set_playback_speed(&pool, &slug, speed)
                 .await
                 .expect_err("must reject");
-            assert_eq!(error.status_code(), StatusCode::BAD_REQUEST, "speed {speed}");
+            assert_eq!(
+                error.status_code(),
+                StatusCode::BAD_REQUEST,
+                "speed {speed}"
+            );
         }
 
         let channel = Channel::read(&pool, id).await.expect("read channel");

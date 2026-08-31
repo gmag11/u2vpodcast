@@ -235,7 +235,13 @@ async fn update_playback_speed(
     body: Json<PlaybackSpeedBody>,
 ) -> actix_web::HttpResponse {
     info!("update_playback_speed");
-    match Channel::set_playback_speed(&data.pool, &path.into_inner(), body.into_inner().playback_speed).await {
+    match Channel::set_playback_speed(
+        &data.pool,
+        &path.into_inner(),
+        body.into_inner().playback_speed,
+    )
+    .await
+    {
         // Fire-and-forget like the progress write: the 204 alone confirms the
         // write, and the error status (400 invalid value / 404 unknown
         // channel) is surfaced through the response line (per-channel-playback-speed).
