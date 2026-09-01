@@ -2,6 +2,7 @@
 	import { computed } from 'vue';
 	import { useI18n } from 'vue-i18n';
 	import { PhArrowDown, PhArrowUp, PhCalendarBlank } from '@phosphor-icons/vue';
+	import AppTooltip from '@/components/AppTooltip.vue';
 	import type { ChannelSortKey, SortDirection } from '@/lib/utils/channel.sort';
 
 	const props = defineProps<{
@@ -39,34 +40,49 @@
 		<div
 			class="inline-flex items-center rounded-full border border-outline bg-surface-input p-1 shadow-inner"
 		>
-			<button
+			<AppTooltip
 				v-for="key in keys"
+				:id="`sort-${key.value}-tooltip`"
 				:key="key.value"
-				type="button"
-				:aria-pressed="modelValue === key.value"
-				:aria-label="key.label"
-				:title="key.tooltip"
-				class="rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500"
-				:class="
-					modelValue === key.value ? 'bg-accent-500 text-white' : 'text-text-muted hover:text-text'
-				"
-				@click="emit('update:modelValue', key.value)"
+				v-slot="{ describedby }"
+				:text="key.tooltip"
 			>
-				<PhCalendarBlank v-if="key.icon" class="h-4 w-4" weight="regular" />
-				<span v-else>{{ key.label }}</span>
-			</button>
+				<button
+					type="button"
+					:aria-pressed="modelValue === key.value"
+					:aria-label="key.label"
+					:aria-describedby="describedby"
+					class="rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-accent-500"
+					:class="
+						modelValue === key.value
+							? 'bg-accent-500 text-white'
+							: 'text-text-muted hover:text-text'
+					"
+					@click="emit('update:modelValue', key.value)"
+				>
+					<PhCalendarBlank v-if="key.icon" class="h-4 w-4" weight="regular" />
+					<span v-else>{{ key.label }}</span>
+				</button>
+			</AppTooltip>
 		</div>
 
-		<button
-			type="button"
-			:aria-pressed="direction === 'asc'"
-			:aria-label="directionAria"
-			:title="directionAria"
-			class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-input text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
-			@click="emit('update:direction', direction === 'asc' ? 'desc' : 'asc')"
+		<AppTooltip
+			id="sort-direction-tooltip"
+			v-slot="{ describedby }"
+			:text="directionAria"
+			align="right"
 		>
-			<PhArrowUp v-if="direction === 'asc'" class="h-4 w-4" weight="bold" />
-			<PhArrowDown v-else class="h-4 w-4" weight="bold" />
-		</button>
+			<button
+				type="button"
+				:aria-pressed="direction === 'asc'"
+				:aria-label="directionAria"
+				:aria-describedby="describedby"
+				class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline bg-surface-input text-text-muted shadow-inner transition-colors hover:text-text focus:outline-none focus:ring-1 focus:ring-accent-500"
+				@click="emit('update:direction', direction === 'asc' ? 'desc' : 'asc')"
+			>
+				<PhArrowUp v-if="direction === 'asc'" class="h-4 w-4" weight="bold" />
+				<PhArrowDown v-else class="h-4 w-4" weight="bold" />
+			</button>
+		</AppTooltip>
 	</div>
 </template>

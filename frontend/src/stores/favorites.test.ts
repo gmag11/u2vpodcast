@@ -29,6 +29,7 @@ function episode(id: number, favorite: boolean): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite,
+		chapters: [],
 		created_at: now,
 		updated_at: now
 	};

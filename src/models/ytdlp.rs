@@ -48,6 +48,14 @@ impl CommandRunner for ProcessCommandRunner {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Chapter {
+    pub start_time: f64,
+    #[serde(default)]
+    pub end_time: Option<f64>,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct YtVideo {
     pub id: String,
     pub title: String,
@@ -69,6 +77,8 @@ pub struct YtVideo {
     pub release_date: String,
     #[serde(default, deserialize_with = "string_or_default")]
     pub live_status: String,
+    #[serde(default)]
+    pub chapters: Option<Vec<Chapter>>,
 }
 
 // yt-dlp flat entries and info dicts frequently emit explicit `null` for
@@ -202,6 +212,7 @@ impl Ytdlp {
             "mp3",
             "--audio-quality",
             "160K",
+            "--embed-chapters",
             "-o",
             output,
             "--print-json",
@@ -464,6 +475,23 @@ mod parse_dump_output_tests {
     }
 
     #[test]
+    fn parses_chapters_and_tolerates_missing_or_empty_lists() {
+        let with_chapters = br#"{"id":"chapters","title":"Video","chapters":[{"start_time":0.0,"end_time":30.5,"title":"Intro"},{"start_time":30.5,"end_time":null,"title":"Main"}]}"#;
+        let videos = parse_dump_output(with_chapters).expect("chapters parse");
+        let chapters = videos[0].chapters.as_ref().expect("chapter list");
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].start_time, 0.0);
+        assert_eq!(chapters[0].end_time, Some(30.5));
+        assert_eq!(chapters[0].title, "Intro");
+        assert_eq!(chapters[1].end_time, None);
+
+        let missing = parse_dump_output(br#"{"id":"missing","title":"Video"}"#).unwrap();
+        assert!(missing[0].chapters.is_none());
+        let empty = parse_dump_output(br#"{"id":"empty","title":"Video","chapters":[]}"#).unwrap();
+        assert!(empty[0].chapters.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
     fn empty_output_yields_empty_vector() {
         let videos = parse_dump_output(b"").expect("empty output is valid");
         assert!(videos.is_empty());
@@ -504,7 +532,7 @@ mod download_args_tests {
     }
 
     #[tokio::test]
-    async fn download_requests_constant_bitrate_mp3() {
+    async fn download_requests_constant_bitrate_mp3_with_embedded_chapters() {
         crate::utils::throttle::init_throttle(Duration::ZERO);
         let runner = Arc::new(ArgumentsRunner {
             args: Mutex::new(Vec::new()),
@@ -517,6 +545,7 @@ mod download_args_tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--audio-quality", "160K"]));
+        assert!(args.iter().any(|arg| arg == "--embed-chapters"));
     }
 
     #[tokio::test]

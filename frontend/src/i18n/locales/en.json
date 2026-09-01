@@ -114,6 +114,7 @@
 		"syncTooltip": "Updated {age} ago. Status: {status}",
 		"lastEpisodeTooltip": "Last episode {age} ago",
 		"listened": "Listened",
+		"hasChapters": "Has chapters",
 		"continueAt": "Continue at {time}",
 		"startOver": "Start over"
 	},
@@ -136,6 +137,9 @@
 		"repeatOne": "Repeat one",
 		"queue": "Up next queue",
 		"upNext": "Up next",
+		"chapters": "Chapters",
+		"previousChapter": "Previous chapter",
+		"nextChapter": "Next chapter",
 		"removeFromQueue": "Remove from queue",
 		"clearQueue": "Clear",
 		"emptyQueue": "No episodes queued",

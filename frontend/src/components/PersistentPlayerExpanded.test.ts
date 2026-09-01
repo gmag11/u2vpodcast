@@ -21,6 +21,8 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 class MockAudioElement {
+	static instances: MockAudioElement[] = [];
+
 	src = '';
 	currentTime = 0;
 	duration = 0;
@@ -32,6 +34,10 @@ class MockAudioElement {
 	preload = 'metadata';
 
 	private listeners: Record<string, Array<() => void>> = {};
+
+	constructor() {
+		MockAudioElement.instances.push(this);
+	}
 
 	play = vi.fn(async () => {
 		this.paused = false;
@@ -72,6 +78,7 @@ function episode(id: number): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		chapters: [],
 		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now
@@ -85,6 +92,7 @@ describe('PersistentPlayerExpanded', () => {
 		vi.stubGlobal('HTMLAudioElement', AudioClass);
 		vi.stubGlobal('Audio', AudioClass);
 		localStorage.clear();
+		MockAudioElement.instances.length = 0;
 		setActivePinia(createPinia());
 	});
 
@@ -142,6 +150,216 @@ describe('PersistentPlayerExpanded', () => {
 		} as DOMRect);
 		await track.trigger('click', { clientX: 50 });
 		expect(seekSpy).toHaveBeenCalledWith(300);
+	});
+
+	it('renders chapter markers on the scrubber and seeks on activation', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+
+		const markers = w.findAll('[data-testid="player-chapter-marker"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].get('[aria-hidden="true"]').classes()).toContain('bg-chapter-marker');
+		expect(markers[0].attributes('style')).toContain('left: 0%');
+		expect(markers[1].attributes('style')).toContain('left: 25%');
+		expect(markers[1].attributes('title')).toBeUndefined();
+		const tooltip = markers[1].get('[role="tooltip"]');
+		expect(tooltip.text()).toBe('Main topic');
+		expect(tooltip.classes()).toContain('group-hover:opacity-100');
+		expect(tooltip.classes()).toContain('group-focus-visible:opacity-100');
+		expect(markers[1].attributes('aria-describedby')).toBe(tooltip.attributes('id'));
+		expect(markers[1].element.tagName).toBe('BUTTON');
+		expect(markers[1].attributes('tabindex')).toBeUndefined();
+
+		await markers[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('renders no chapter markers without stored chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const w = await mountExpanded();
+
+		expect(w.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
+	});
+
+	it('shows the current chapter without reserving space when there is none', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 10, end: 150, title: 'Introduction' }]
+		};
+		const w = await mountExpanded();
+
+		expect(w.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		player.currentEpisode = { ...player.currentEpisode!, chapters: [] };
+		await flushPromises();
+		expect(w.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+	});
+
+	it('renders a chapter list only when the episode has chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const w = await mountExpanded();
+		expect(w.find('[data-testid="player-chapters"]').exists()).toBe(false);
+		expect(w.find('[data-testid="player-previous-chapter"]').exists()).toBe(false);
+		expect(w.find('[data-testid="player-next-chapter"]').exists()).toBe(false);
+
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 3750, title: 'Main topic' }
+			]
+		};
+		await flushPromises();
+
+		expect(w.get('[data-testid="player-chapters"]').text()).toContain('Chapters');
+		const rows = w.findAll('[data-testid="player-chapter-row"]');
+		expect(rows).toHaveLength(2);
+		expect(rows[0].text()).toContain('Introduction');
+		expect(rows[0].text()).toContain('0:00');
+		expect(rows[1].text()).toContain('Main topic');
+		expect(rows[1].text()).toContain('2:30');
+	});
+
+	it('seeks to the next chapter and disables next in the last chapter', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 60, title: 'Introduction' },
+				{ start: 60, end: 180, title: 'Main topic' },
+				{ start: 180, end: 300, title: 'Wrap-up' }
+			]
+		};
+		player.currentTime = 90;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+		const next = w.get('[data-testid="player-next-chapter"]');
+
+		expect(next.attributes('disabled')).toBeUndefined();
+		await next.trigger('click');
+		expect(seekSpy).toHaveBeenCalledWith(180);
+
+		player.currentTime = 200;
+		await flushPromises();
+		expect(next.attributes('disabled')).toBeDefined();
+	});
+
+	it('restarts or moves to the previous chapter and disables at the beginning', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 60, title: 'Introduction' },
+				{ start: 60, end: 180, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 64;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+		const previous = w.get('[data-testid="player-previous-chapter"]');
+
+		await previous.trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(60);
+
+		player.currentTime = 63;
+		await flushPromises();
+		await previous.trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(0);
+
+		player.currentTime = 3;
+		await flushPromises();
+		expect(previous.attributes('disabled')).toBeDefined();
+	});
+
+	it('applies SponsorBlock skipping after chapter navigation', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.chapters = [
+			{ start: 0, end: 120, title: 'Introduction' },
+			{ start: 120, end: 300, title: 'Main topic' }
+		];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		await player.play(item);
+		player.currentTime = 60;
+		const w = await mountExpanded();
+
+		await w.get('[data-testid="player-next-chapter"]').trigger('click');
+		expect(player.currentTime).toBe(150);
+		expect(MockAudioElement.instances[0].currentTime).toBe(150);
+	});
+
+	it('seeks to a chapter start when its row is activated', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const w = await mountExpanded();
+
+		await w.findAll('[data-testid="player-chapter-row"]')[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('updates the highlighted chapter as playback crosses a boundary', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const w = await mountExpanded();
+		const rows = w.findAll('[data-testid="player-chapter-row"]');
+
+		expect(rows[0].attributes('aria-current')).toBe('true');
+		expect(rows[1].attributes('aria-current')).toBeUndefined();
+		player.currentTime = 150;
+		await flushPromises();
+		expect(rows[0].attributes('aria-current')).toBeUndefined();
+		expect(rows[1].attributes('aria-current')).toBe('true');
+	});
+
+	it('keeps a long chapter list internally scrollable', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: Array.from({ length: 20 }, (_, index) => ({
+				start: index * 30,
+				end: (index + 1) * 30,
+				title: `Chapter ${index + 1}`
+			}))
+		};
+		const w = await mountExpanded();
+		const list = w.get('[data-testid="player-chapter-list"]');
+
+		expect(w.findAll('[data-testid="player-chapter-row"]')).toHaveLength(20);
+		expect(list.classes()).toContain('max-h-64');
+		expect(list.classes()).toContain('overflow-y-auto');
+		expect(w.find('button[aria-label="Pause"]').exists()).toBe(true);
 	});
 
 	it('shows elapsed and remaining time labels', async () => {

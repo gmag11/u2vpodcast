@@ -1,7 +1,7 @@
 use actix_session::Session;
 use actix_web::{
     delete, get, post, put,
-    web::{Data, Json, Path, Query},
+    web::{Data, Json, Path},
     Responder,
 };
 use serde::Deserialize;
@@ -15,21 +15,10 @@ use super::{
     AppState,
 };
 
-#[derive(Deserialize)]
-struct Page {
-    page: Option<i64>,
-}
-
 #[get("/channels/")]
-async fn read_with_pagination(
-    data: Data<AppState>,
-    session: Session,
-    page: Query<Page>,
-) -> impl Responder {
+async fn read_all(data: Data<AppState>, session: Session) -> impl Responder {
     info!("read_all");
-    let page = page.page.unwrap_or(1);
-    let per_page = data.config.per_page;
-    match Channel::read_with_pagination(&data.pool, page, per_page).await {
+    match Channel::read_all(&data.pool).await {
         Ok(channels) => Ok(CResponse::ok(session, channels)),
         Err(mut e) => {
             error!("Error: {e}");
@@ -340,6 +329,48 @@ mod handler_tests {
             .await
             .expect("read stored speed");
         assert_eq!(stored, 1.35);
+    }
+
+    #[actix_web::test]
+    async fn channel_list_returns_every_channel_for_client_side_pagination() {
+        let pool = memory_pool().await;
+        for slug in ["c1", "c2", "c3", "dot_csv_lab"] {
+            insert_channel(&pool, slug).await;
+        }
+        let config = test_config();
+        assert_eq!(
+            config.per_page, 3,
+            "fixture must reproduce the pagination boundary"
+        );
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config,
+                    pool: pool.clone(),
+                }))
+                .wrap(
+                    SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        .cookie_secure(false)
+                        .build(),
+                )
+                .service(web::scope("/api/1.0").service(read_all)),
+        )
+        .await;
+
+        let response = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/1.0/channels/")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(response).await;
+        let channels = body["data"].as_array().expect("channel list");
+        assert_eq!(channels.len(), 4);
+        assert!(channels
+            .iter()
+            .any(|channel| channel["slug"] == "dot_csv_lab"));
     }
 
     #[actix_web::test]

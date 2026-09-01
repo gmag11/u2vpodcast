@@ -81,7 +81,7 @@ The system SHALL persist at most one active SponsorBlock snapshot per episode in
 - **WHEN** retention or channel deletion removes an episode
 - **THEN** its SponsorBlock state is removed and no orphan relationship remains
 ### Requirement: Processed MP3 files are generated only for changed non-empty rejected intervals
-When SponsorBlock is enabled and a successful normalized snapshot contains effective rejected intervals whose processing hash differs from the active processing hash, the system SHALL create a derived MP3 named `{yt_id}.sponsorblock.{processing-hash-prefix}.mp3`. The system SHALL preserve the original `{yt_id}.mp3`, copy complete MP3 frames without re-encoding, concatenate the retained intervals, publish the result atomically only after successful completion, and measure the resulting media duration. An unchanged processing hash SHALL NOT trigger media processing even when non-rejected segment data changed. When SponsorBlock is disabled, no derived media SHALL be generated, selected, replaced, or removed.
+When SponsorBlock is enabled and a successful normalized snapshot contains effective rejected intervals whose processing hash differs from the active processing hash, the system SHALL create a derived MP3 named `{yt_id}.sponsorblock.{processing-hash-prefix}.mp3`. The system SHALL preserve the original `{yt_id}.mp3`, copy complete MP3 frames without re-encoding, concatenate the retained intervals, publish the result atomically only after successful completion, and measure the resulting media duration. When the episode has stored chapters, the system SHALL additionally translate each chapter's start and end time from the original timeline onto the derived file's retained-intervals timeline, dropping any chapter whose translated start and end collapse to the same instant, and SHALL embed the translated chapters into the derived MP3 as part of the same generation step, without a separate re-encode or extra pass. An unchanged processing hash SHALL NOT trigger media processing even when non-rejected segment data changed. When SponsorBlock is disabled, no derived media SHALL be generated, selected, replaced, or removed, and no chapter translation SHALL occur.
 
 #### Scenario: First non-empty rejected interval set is processed
 - **WHEN** an episode has an original MP3 and receives its first non-empty effective rejected interval set
@@ -102,6 +102,22 @@ When SponsorBlock is enabled and a successful normalized snapshot contains effec
 #### Scenario: Existing processed media is disabled
 - **WHEN** SponsorBlock is disabled for an episode that has an active derived file
 - **THEN** the system leaves the derived file and cache state intact but does not select or modify that file
+
+#### Scenario: Chapters fall entirely in retained audio
+- **WHEN** a derived MP3 is generated for an episode whose stored chapters all fall within retained intervals
+- **THEN** the derived MP3's embedded chapters have the same titles and count as the original chapters, with start and end times shifted to account only for removed audio preceding them
+
+#### Scenario: A chapter is fully contained in a rejected interval
+- **WHEN** a stored chapter's start and end both fall within a single rejected interval
+- **THEN** that chapter is omitted from the derived MP3's embedded chapters
+
+#### Scenario: A chapter boundary falls inside a rejected interval
+- **WHEN** a stored chapter's start or end falls strictly inside a rejected interval rather than at a retained boundary
+- **THEN** that boundary is snapped forward to the next retained instant when computing the embedded chapter's time
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** a derived MP3 is generated for an episode with no stored chapters
+- **THEN** the derived MP3 is produced exactly as before, with no embedded chapters
 ### Requirement: Retrieval and processing failures preserve the last valid media
 SponsorBlock retrieval failures and media-processing failures SHALL NOT replace a successful stored snapshot or active processed file. If no processed file has ever been published, the original MP3 SHALL remain the served representation. A later synchronization or manual refresh SHALL retry the operation.
 
@@ -120,6 +136,10 @@ SponsorBlock retrieval failures and media-processing failures SHALL NOT replace 
 #### Scenario: Sponsor segments cover the complete episode
 - **WHEN** a normalized snapshot leaves no original-audio interval to retain
 - **THEN** the system rejects the snapshot as a processing failure and preserves the previously active representation without generating replacement silence
+
+#### Scenario: Chapter embedding fails after a successful trim
+- **WHEN** the concatenated trim succeeds but writing translated chapter metadata into the derived MP3 fails
+- **THEN** no partial derived file is published and the previously active representation remains selected
 
 ### Requirement: Episode APIs expose SponsorBlock state and allow refresh
 When SponsorBlock is enabled, episode payloads SHALL include every normalized supported SponsorBlock segment with its category and whether it is rejected by the active configuration, plus the snapshot hash when available. An authenticated episode refresh operation SHALL retrieve and reconcile the latest SponsorBlock snapshot for that episode regardless of whether it is outside the automatic synchronization window, and SHALL return the resulting active snapshot. A refresh failure SHALL report failure without discarding the last valid snapshot. When SponsorBlock is disabled, episode payloads SHALL expose no SponsorBlock segments or hash, and the refresh operation SHALL report that SponsorBlock is disabled without contacting the service or changing stored state.

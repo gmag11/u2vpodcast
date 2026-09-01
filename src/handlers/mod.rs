@@ -40,7 +40,7 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                 .configure(options::api_options)
                                 .configure(playlists::api_playlists)
                                 .service(channels::read)
-                                .service(channels::read_with_pagination)
+                                .service(channels::read_all)
                                 .service(episodes::read_with_pagination)
                                 .service(episodes::read_all)
                                 .service(episodes::read_progress)

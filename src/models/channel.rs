@@ -301,33 +301,6 @@ impl Channel {
             .map_err(|e| e.into())
     }
 
-    pub async fn read_with_pagination(
-        pool: &SqlitePool,
-        page: i64,
-        per_page: i64,
-    ) -> Result<Vec<Channel>, Error> {
-        tracing::debug!("Página: {page}. Páginas: {per_page}");
-        // A malformed page (<= 0) must never yield a negative SQL OFFSET.
-        let page = page.max(1);
-        let offset = (page - 1) * per_page;
-        // Paginate with the same ordering as `read_all` (most recent activity
-        // first) so paginating the list does not silently reorder the UI
-        // (fix-api-contract-mismatches / channels-list-ordering).
-        let sql = "SELECT c.*, e.last_date FROM channels c \
-                   LEFT JOIN (SELECT channel_id, MAX(published_at) AS last_date \
-                              FROM episodes GROUP BY channel_id) e \
-                   ON e.channel_id = c.id \
-                   ORDER BY e.last_date IS NULL, e.last_date DESC \
-                   LIMIT $1 OFFSET $2";
-        query(sql)
-            .bind(per_page)
-            .bind(offset)
-            .map(Self::from_row)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.into())
-    }
-
     pub async fn update(pool: &SqlitePool, channel: &UpdateChannel) -> Result<Self, Error> {
         info!("update");
         debug!("{:?}", channel);
@@ -652,60 +625,6 @@ mod channel_pagination_tests {
         .fetch_one(pool)
         .await
         .expect("insert episode")
-    }
-
-    #[tokio::test]
-    async fn pagination_pages_are_disjoint_and_bounded() {
-        let pool = memory_pool().await;
-        let mut ids = Vec::new();
-        for i in 1..=3 {
-            ids.push(
-                insert_channel(
-                    &pool,
-                    &format!("https://example.com/c{i}"),
-                    &format!("Channel {i}"),
-                )
-                .await,
-            );
-        }
-
-        let page1 = Channel::read_with_pagination(&pool, 1, 2)
-            .await
-            .expect("page 1");
-        let page2 = Channel::read_with_pagination(&pool, 2, 2)
-            .await
-            .expect("page 2");
-
-        assert_eq!(page1.len(), 2);
-        assert_eq!(page2.len(), 1);
-
-        let ids1: std::collections::HashSet<i64> = page1.iter().map(|c| c.id).collect();
-        let ids2: std::collections::HashSet<i64> = page2.iter().map(|c| c.id).collect();
-        assert!(ids1.is_disjoint(&ids2), "pages must not overlap");
-        assert_eq!(
-            ids1.union(&ids2)
-                .cloned()
-                .collect::<std::collections::HashSet<_>>()
-                .len(),
-            3
-        );
-    }
-
-    #[tokio::test]
-    async fn zero_or_negative_page_is_clamped() {
-        let pool = memory_pool().await;
-        insert_channel(&pool, "https://example.com/c1", "Channel 1").await;
-        insert_channel(&pool, "https://example.com/c2", "Channel 2").await;
-
-        // page 0 and page -3 must behave as page 1, never a negative OFFSET.
-        let p0 = Channel::read_with_pagination(&pool, 0, 2)
-            .await
-            .expect("page 0");
-        let pneg = Channel::read_with_pagination(&pool, -3, 2)
-            .await
-            .expect("negative page");
-        assert_eq!(p0.len(), 2);
-        assert_eq!(pneg.len(), 2);
     }
 
     #[tokio::test]

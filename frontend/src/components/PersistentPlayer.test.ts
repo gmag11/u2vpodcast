@@ -73,6 +73,7 @@ function episode(id: number, listen = false): Episode {
 		position_seconds: 0,
 		listened_at: null,
 		favorite: false,
+		chapters: [],
 		sponsorblock_enabled: true,
 		created_at: now,
 		updated_at: now
@@ -177,6 +178,102 @@ describe('PersistentPlayer controls', () => {
 		};
 		const bar = await mountBar();
 		expect(bar.find('[data-testid="player-sponsorblock-segment"]').exists()).toBe(false);
+	});
+
+	it('shows the current chapter in wide and between compact title and metadata', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 10, end: 150, title: 'Introduction' }]
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const compactTitle = compact.get('[data-testid="scrolling-text-viewport"]');
+		const compactChapter = compact.get('[data-testid="player-current-chapter"]');
+		const compactMetadata = compact.get('[data-testid="player-compact-metadata"]');
+		expect(compactChapter.text()).toBe('Introduction');
+		expect(compactChapter.classes()).toContain('truncate');
+		expect(
+			compactTitle.element.compareDocumentPosition(compactChapter.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			compactChapter.element.compareDocumentPosition(compactMetadata.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+
+		player.currentEpisode = { ...player.currentEpisode!, chapters: [] };
+		await flushPromises();
+		expect(bar.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+		expect(compact.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+	});
+
+	it('updates the wide chapter label when playback crosses a boundary', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 149;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		player.currentTime = 150;
+		await flushPromises();
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Main topic');
+	});
+
+	it('renders distinct chapter markers on the wide scrubber and seeks on activation', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+
+		const markers = bar.findAll('[data-testid="player-chapter-marker"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].get('[aria-hidden="true"]').classes()).toContain('bg-chapter-marker');
+		expect(markers[0].attributes('style')).toContain('left: 0%');
+		expect(markers[1].attributes('style')).toContain('left: 25%');
+		expect(markers[1].attributes('title')).toBeUndefined();
+		const tooltip = markers[1].get('[role="tooltip"]');
+		expect(tooltip.text()).toBe('Main topic');
+		expect(tooltip.classes()).toContain('group-hover:opacity-100');
+		expect(tooltip.classes()).toContain('group-focus-visible:opacity-100');
+		expect(markers[1].attributes('aria-describedby')).toBe(tooltip.attributes('id'));
+		expect(markers[1].element.tagName).toBe('BUTTON');
+		expect(markers[1].attributes('tabindex')).toBeUndefined();
+
+		await markers[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('applies SponsorBlock skipping when a chapter marker is activated', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.chapters = [{ start: 130, end: 300, title: 'Main topic' }];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		await player.play(item);
+		const bar = await mountBar();
+
+		await bar.get('[data-testid="player-chapter-marker"]').trigger('click');
+
+		expect(player.currentTime).toBe(150);
 	});
 
 	it('previous restarts the current episode beyond 3 seconds', async () => {
@@ -429,6 +526,43 @@ describe('PersistentPlayer controls', () => {
 		expect(track.attributes('tabindex')).toBeUndefined();
 		await track.trigger('click');
 		expect(player.currentTime).toBe(90);
+	});
+
+	it('renders matching non-interactive chapter markers on the compact track', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const wide = wrapper!.get('[data-testid="player-wide"]');
+		const compactMarkers = compact.findAll('[data-testid="player-chapter-marker"]');
+		const wideMarkers = wide.findAll('[data-testid="player-chapter-marker"]');
+		expect(compactMarkers).toHaveLength(2);
+		expect(compactMarkers[0].classes()).toContain('bg-chapter-marker');
+		expect(compactMarkers.map((marker) => marker.attributes('style'))).toEqual(
+			wideMarkers.map((marker) => marker.attributes('style'))
+		);
+		expect(compact.find('button[data-testid="player-chapter-marker"]').exists()).toBe(false);
+
+		await compactMarkers[1].trigger('click');
+		await compact.get('[data-testid="player-progress-compact"]').trigger('click');
+		expect(seekSpy).not.toHaveBeenCalled();
+	});
+
+	it('renders no chapter markers when the episode has no chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		expect(wrapper!.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
 	});
 	it('leaves the wide composition entirely unaffected by the expanded view', async () => {
 		const player = usePlayerStore();

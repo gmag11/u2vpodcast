@@ -59,7 +59,8 @@ function episode(overrides: Partial<Episode> = {}): Episode {
 		created_at: now,
 		updated_at: now,
 		playback_speed: 1,
-		...overrides
+		...overrides,
+		chapters: overrides.chapters ?? []
 	};
 }
 
@@ -482,6 +483,72 @@ describe('EpisodeCard playback indicators', () => {
 		expect(markers[0].attributes('style')).toContain('width: 25%');
 	});
 
+	it('shows chapter markers at their original timeline positions', () => {
+		const wrapper = mountCard(
+			episode({
+				position_seconds: 60,
+				chapters: [
+					{ start: 0, end: 900, title: 'Introduction' },
+					{ start: 900, end: 2700, title: 'Main topic' },
+					{ start: 2700, end: 3600, title: 'Wrap-up' }
+				]
+			})
+		);
+		const markers = wrapper.findAll('[data-testid="episode-chapter-marker"]');
+
+		expect(markers).toHaveLength(3);
+		expect(markers.map((marker) => marker.attributes('style'))).toEqual([
+			'left: 0%;',
+			'left: 25%;',
+			'left: 75%;'
+		]);
+		expect(markers.every((marker) => marker.classes().includes('bg-chapter-marker'))).toBe(true);
+	});
+
+	it('shows visually distinct chapter and SponsorBlock markers together', () => {
+		const wrapper = mountCard(
+			episode({
+				position_seconds: 60,
+				chapters: [{ start: 900, end: 1800, title: 'Main topic' }],
+				sponsorblock_segments: [{ start: 1200, end: 1500, category: 'sponsor', rejected: true }]
+			})
+		);
+		const chapterMarker = wrapper.get('[data-testid="episode-chapter-marker"]');
+		const sponsorMarker = wrapper.get('[data-testid="episode-sponsorblock-segment"]');
+
+		expect(chapterMarker.classes()).toContain('bg-chapter-marker');
+		expect(chapterMarker.classes()).not.toContain('bg-sponsorblock');
+		expect(sponsorMarker.classes()).toContain('bg-sponsorblock');
+		expect(sponsorMarker.classes()).not.toContain('bg-chapter-marker');
+	});
+
+	it('keeps the progress strip read-only when chapter markers are present', async () => {
+		const pinia = createPinia();
+		const player = usePlayerStore(pinia);
+		const seek = vi.spyOn(player, 'seek');
+		const play = vi.spyOn(player, 'play');
+		const togglePlay = vi.spyOn(player, 'togglePlay');
+		const wrapper = mount(EpisodeCard, {
+			props: {
+				episode: episode({
+					position_seconds: 60,
+					chapters: [{ start: 900, end: 1800, title: 'Main topic' }]
+				})
+			},
+			global: { plugins: [pinia, testI18n], stubs: { RouterLink: true } }
+		});
+		const strip = wrapper.get('[data-testid="episode-progress"]');
+
+		await strip.trigger('click');
+		await strip.trigger('pointerdown');
+		await strip.trigger('pointermove');
+		await strip.trigger('pointerup');
+
+		expect(seek).not.toHaveBeenCalled();
+		expect(play).not.toHaveBeenCalled();
+		expect(togglePlay).not.toHaveBeenCalled();
+	});
+
 	it('hides markers and the refresh action when SponsorBlock is disabled', async () => {
 		const wrapper = mountPlaylistCard(
 			episode({
@@ -492,6 +559,93 @@ describe('EpisodeCard playback indicators', () => {
 		expect(wrapper.find('[data-testid="episode-sponsorblock-segment"]').exists()).toBe(false);
 		await wrapper.get('[data-testid="playlist-actions-trigger"]').trigger('click');
 		expect(wrapper.find('[data-testid="playlist-refresh-sponsorblock"]').exists()).toBe(false);
+	});
+});
+
+describe('EpisodeCard chapter indicator', () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	it('renders only for episodes with stored chapters', () => {
+		const withChapters = mountCard(
+			episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] })
+		);
+		const withoutChapters = mountCard(episode({ chapters: [] }));
+
+		expect(withChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		const indicator = withChapters.find('[aria-label="Has chapters"]');
+		expect(indicator.attributes('role')).toBe('img');
+		expect(indicator.attributes('title')).toBeUndefined();
+		expect(withChapters.get(`#${indicator.attributes('aria-describedby')}`).text()).toBe(
+			'Has chapters'
+		);
+		expect(withoutChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(false);
+	});
+
+	it('places the chapter badge immediately before the favorite action', () => {
+		const wrapper = mountCard(
+			episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] })
+		);
+		const indicator = wrapper.get('[data-testid="episode-chapters-indicator"]');
+		const nextAction = indicator.element.nextElementSibling?.querySelector('button');
+
+		expect(nextAction?.getAttribute('aria-label')).toBe('Add to favorites');
+	});
+
+	it('renders in the default, compact, and playlist presentations', () => {
+		const ep = episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] });
+		const standard = mountCard(ep);
+		const compact = mount(EpisodeCard, {
+			props: { episode: ep, compact: true },
+			global: { plugins: [createPinia(), testI18n], stubs: { RouterLink: true } }
+		});
+		const playlist = mountPlaylistCard(ep);
+
+		expect(standard.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		expect(compact.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(true);
+		expect(
+			playlist
+				.get('[data-testid="playlist-status-column"]')
+				.find('[data-testid="episode-chapters-indicator"]')
+				.exists()
+		).toBe(true);
+		const playlistIndicator = playlist.get('[data-testid="episode-chapters-indicator"]');
+		expect(playlistIndicator.attributes('title')).toBeUndefined();
+		expect(playlist.get(`#${playlistIndicator.attributes('aria-describedby')}`).text()).toBe(
+			'Has chapters'
+		);
+	});
+
+	it('uses styled tooltips instead of native titles for card action icons', () => {
+		const wrapper = mountCard(
+			episode({
+				listen: true,
+				chapters: [{ start: 0, end: 60, title: 'Introduction' }]
+			})
+		);
+		const labels = ['Mark as not listened', 'Add to favorites', 'Add to playlist', 'Has chapters'];
+
+		for (const label of labels) {
+			const icon = wrapper.get(`[aria-label="${label}"]`);
+			expect(icon.attributes('title')).toBeUndefined();
+			const tooltipId = icon.attributes('aria-describedby');
+			expect(wrapper.get(`#${tooltipId}`).text()).toBe(label);
+			expect(wrapper.get(`#${tooltipId}`).attributes('role')).toBe('tooltip');
+		}
+	});
+
+	it('reserves a stable chapter slot in the mobile playlist status row', () => {
+		const withChapters = mountPlaylistCard(
+			episode({ chapters: [{ start: 0, end: 60, title: 'Introduction' }] })
+		);
+		const withoutChapters = mountPlaylistCard(episode({ chapters: [] }));
+
+		expect(withChapters.get('[data-testid="playlist-chapters-slot"]').classes()).toContain('h-3.5');
+		expect(withoutChapters.get('[data-testid="playlist-chapters-slot"]').classes()).toContain(
+			'h-3.5'
+		);
+		expect(withoutChapters.find('[data-testid="episode-chapters-indicator"]').exists()).toBe(false);
 	});
 });
 

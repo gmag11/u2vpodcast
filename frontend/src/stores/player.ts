@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
-import type { Episode, EpisodeProgress, SponsorBlockSegment } from '@/types';
+import type { Episode, EpisodeChapter, EpisodeProgress, SponsorBlockSegment } from '@/types';
 import { loadQueue, saveQueue, type RepeatMode } from '@/lib/utils/queue.storage';
 import { api } from '@/lib/api/client';
 import { usePlaylistStore } from '@/stores/playlists';
@@ -153,6 +153,43 @@ export function sponsorBlockTimelineMarkers(
 			}
 		];
 	});
+}
+
+export function chapterTimelineMarkers(
+	duration: number,
+	chapters: EpisodeChapter[] | null | undefined
+): Array<{ left: number; title: string; startSeconds: number }> {
+	if (!Number.isFinite(duration) || duration <= 0) return [];
+	return (chapters ?? []).flatMap(({ start, title }) => {
+		if (!Number.isFinite(start) || start < 0 || start > duration) return [];
+		return [{ left: (start / duration) * 100, title, startSeconds: start }];
+	});
+}
+
+export function currentChapterIndex(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number {
+	return (chapters ?? []).findIndex(({ start, end }) => currentTime >= start && currentTime < end);
+}
+
+export function nextChapterStart(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number | null {
+	const index = currentChapterIndex(currentTime, chapters);
+	return index >= 0 ? (chapters?.[index + 1]?.start ?? null) : null;
+}
+
+export function previousChapterSeekTarget(
+	currentTime: number,
+	chapters: EpisodeChapter[] | null | undefined
+): number | null {
+	const index = currentChapterIndex(currentTime, chapters);
+	if (index < 0 || !chapters) return null;
+	const currentChapter = chapters[index];
+	if (currentTime - currentChapter.start > 3) return currentChapter.start;
+	return chapters[index - 1]?.start ?? null;
 }
 
 export const usePlayerStore = defineStore('player', () => {

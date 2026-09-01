@@ -17,7 +17,11 @@
 		PhX
 	} from '@phosphor-icons/vue';
 	import {
+		chapterTimelineMarkers,
+		currentChapterIndex,
+		nextChapterStart,
 		parseDurationSeconds,
+		previousChapterSeekTarget,
 		sponsorBlockTimelineMarkers,
 		SPEED_MAX,
 		SPEED_MIN,
@@ -45,9 +49,38 @@
 			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
 		);
 	});
+	const chapterMarkers = computed(() => {
+		const episode = player.currentEpisode;
+		if (!episode) return [];
+		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
+		return chapterTimelineMarkers(duration, episode.chapters);
+	});
+	const activeChapterIndex = computed(() =>
+		currentChapterIndex(player.currentTime, player.currentEpisode?.chapters)
+	);
+	const currentChapterTitle = computed(() => {
+		const index = activeChapterIndex.value;
+		return index >= 0 ? player.currentEpisode?.chapters[index]?.title : undefined;
+	});
+	const nextChapterTarget = computed(() =>
+		nextChapterStart(player.currentTime, player.currentEpisode?.chapters)
+	);
+	const previousChapterTarget = computed(() =>
+		previousChapterSeekTarget(player.currentTime, player.currentEpisode?.chapters)
+	);
 
 	function speedLabel(value: number) {
 		return String(Math.round(value * 100) / 100);
+	}
+
+	function formatChapterStart(value: number) {
+		const hours = Math.floor(value / 3600);
+		const minutes = Math.floor((value % 3600) / 60);
+		const seconds = Math.floor(value % 60);
+		const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+		return hours > 0
+			? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+			: minuteSeconds;
 	}
 
 	function onSeek(event: MouseEvent) {
@@ -55,6 +88,10 @@
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
 		player.seek(ratio * player.duration);
+	}
+
+	function seekToChapter(target: number | null) {
+		if (target != null) player.seek(target);
 	}
 
 	// Next control: short press skips, long press (> 500ms) skips and marks
@@ -150,6 +187,13 @@
 						:text="player.currentEpisode?.title ?? $t('player.queueReady')"
 						:active="player.playing"
 					/>
+					<p
+						v-if="currentChapterTitle"
+						class="truncate text-sm text-text-muted"
+						data-testid="player-current-chapter"
+					>
+						{{ currentChapterTitle }}
+					</p>
 					<p v-if="player.currentEpisode" class="truncate text-sm text-text-muted">
 						{{ player.currentEpisode.channel_title }}
 					</p>
@@ -324,7 +368,7 @@
 						data-testid="player-progress-expanded"
 						@click="onSeek"
 					>
-						<div class="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
+						<div class="relative h-1.5 w-full rounded-full bg-surface-input">
 							<div
 								class="absolute inset-y-0 left-0 rounded-full bg-accent-400 transition-[width] duration-150"
 								:style="{ width: player.progress + '%' }"
@@ -338,6 +382,37 @@
 								data-testid="player-sponsorblock-segment"
 								:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
 							></div>
+							<button
+								v-for="(marker, index) in chapterMarkers"
+								:key="index"
+								type="button"
+								class="group absolute -inset-y-2 z-20 w-3 -translate-x-1/2"
+								data-testid="player-chapter-marker"
+								:data-start-seconds="marker.startSeconds"
+								:aria-label="marker.title"
+								:aria-describedby="`expanded-chapter-tooltip-${index}`"
+								:style="{ left: `${marker.left}%` }"
+								@click.stop="player.seek(marker.startSeconds)"
+							>
+								<span
+									class="absolute inset-y-2 left-1/2 w-0.5 -translate-x-1/2 bg-chapter-marker"
+									aria-hidden="true"
+								></span>
+								<span
+									:id="`expanded-chapter-tooltip-${index}`"
+									role="tooltip"
+									class="pointer-events-none absolute bottom-full z-30 mb-1 w-max max-w-64 rounded-md bg-surface-high px-2 py-1 text-left text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+									:class="
+										marker.left < 15
+											? 'left-1/2'
+											: marker.left > 85
+												? 'right-1/2'
+												: 'left-1/2 -translate-x-1/2'
+									"
+								>
+									{{ marker.title }}
+								</span>
+							</button>
 						</div>
 					</div>
 					<div class="flex items-center justify-between text-xs text-text-muted">
@@ -401,6 +476,59 @@
 						<PhSkipForward class="h-5 w-5" weight="fill" />
 					</button>
 				</div>
+
+				<section
+					v-if="player.currentEpisode?.chapters?.length"
+					class="w-full"
+					data-testid="player-chapters"
+				>
+					<div class="mb-2 flex items-center justify-between gap-3">
+						<h2 class="text-sm font-semibold text-text">{{ $t('player.chapters') }}</h2>
+						<div class="flex items-center gap-1">
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+								:aria-label="$t('player.previousChapter')"
+								:disabled="previousChapterTarget == null"
+								data-testid="player-previous-chapter"
+								@click="seekToChapter(previousChapterTarget)"
+							>
+								<PhSkipBack class="h-4 w-4" weight="regular" />
+							</button>
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+								:aria-label="$t('player.nextChapter')"
+								:disabled="nextChapterTarget == null"
+								data-testid="player-next-chapter"
+								@click="seekToChapter(nextChapterTarget)"
+							>
+								<PhSkipForward class="h-4 w-4" weight="regular" />
+							</button>
+						</div>
+					</div>
+					<ul class="max-h-64 space-y-1 overflow-y-auto" data-testid="player-chapter-list">
+						<li v-for="(chapter, index) in player.currentEpisode.chapters" :key="index">
+							<button
+								type="button"
+								class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors"
+								:class="
+									index === activeChapterIndex
+										? 'bg-accent-600/15 text-text'
+										: 'text-text-muted hover:bg-surface-input hover:text-text'
+								"
+								:aria-current="index === activeChapterIndex ? 'true' : undefined"
+								data-testid="player-chapter-row"
+								@click="player.seek(chapter.start)"
+							>
+								<span class="min-w-0 flex-1 truncate text-sm font-medium">{{ chapter.title }}</span>
+								<span class="shrink-0 text-xs tabular-nums text-text-muted">{{
+									formatChapterStart(chapter.start)
+								}}</span>
+							</button>
+						</li>
+					</ul>
+				</section>
 			</div>
 		</div>
 	</Transition>

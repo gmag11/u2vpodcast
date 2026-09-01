@@ -211,8 +211,11 @@ async fn refresh_sponsorblock_episode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::config::test_config;
     use crate::models::SponsorBlockCache;
+    use actix_session::{storage::CookieSessionStore, SessionMiddleware};
     use actix_web::http::StatusCode;
+    use actix_web::{cookie::Key, test, web, App};
     use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::{
         io::{Read, Write},
@@ -300,6 +303,69 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn episode_read_api_exposes_stored_and_empty_chapter_lists() {
+        let (pool, root) = fixture().await;
+        sqlx::query("UPDATE episodes SET chapters_json = $1 WHERE yt_id = 'old-favorite'")
+            .bind(r#"[{"start":0.0,"end":30.0,"title":"Intro"}]"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let channel_id: i64 = sqlx::query_scalar("SELECT id FROM channels LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO episodes (channel_id, title, yt_id, webpage_url, published_at, duration, created_at, updated_at) \
+             VALUES ($1, 'No chapters', 'no-chapters', 'https://example.com/none', $2, '00:01:00', $2, $2)",
+        )
+        .bind(channel_id)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config: test_config(),
+                    pool: pool.clone(),
+                }))
+                .wrap(
+                    SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        .cookie_secure(false)
+                        .build(),
+                )
+                .service(web::scope("/api/1.0").service(read_all)),
+        )
+        .await;
+
+        let response = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/1.0/episodes/")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(response).await;
+        let episodes = body["data"].as_array().unwrap();
+        let with_chapters = episodes
+            .iter()
+            .find(|episode| episode["yt_id"] == "old-favorite")
+            .unwrap();
+        assert_eq!(
+            with_chapters["chapters"],
+            serde_json::json!([{"start": 0.0, "end": 30.0, "title": "Intro"}])
+        );
+        let without_chapters = episodes
+            .iter()
+            .find(|episode| episode["yt_id"] == "no-chapters")
+            .unwrap();
+        assert_eq!(without_chapters["chapters"], serde_json::json!([]));
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -4,6 +4,41 @@ Defines a single app-wide audio player shared across the Vue 3 SPA. One `<audio>
 
 ## Requirements
 
+### Requirement: Timeline displays chapter markers on the original media timeline
+When an episode has stored chapters, the persistent player's progress track SHALL render a marker at each chapter's original start time, using the episode's stored, untranslated chapter times against the original media duration — consistent with the shared player always operating on the original timeline. This applies to the wide composition's interactive scrubber, the expanded view's scrubber, and the compact composition's read-only track. Chapter markers SHALL be visually distinct from SponsorBlock segment markers and from the playback-progress fill. On an interactive scrubber (wide or expanded), hovering or keyboard-focusing a chapter marker SHALL show an immediate styled tooltip containing the chapter title, and activating it SHALL seek playback to that chapter's start time, subject to the existing rejected-interval skip behavior when that time falls inside a segment marked as rejected. The compact composition's read-only track SHALL render chapter markers without accepting seek interaction, consistent with its existing no-seek behavior. An episode with no stored chapters SHALL render no chapter markers.
+
+#### Scenario: Chapter markers appear on the wide scrubber
+- **WHEN** the wide composition is displayed for an episode that has stored chapters
+- **THEN** a marker appears at each chapter's original start time along the scrubber, distinct from any SponsorBlock markers present
+
+#### Scenario: Chapter markers appear on the expanded scrubber
+- **WHEN** the expanded "now playing" view is open for an episode that has stored chapters
+- **THEN** the same chapter markers appear on its scrubber at the same relative positions as the wide composition
+
+#### Scenario: Chapter markers appear on the compact track
+- **WHEN** the compact composition is displayed for an episode that has stored chapters
+- **THEN** chapter markers appear on the read-only progress track and do not accept seek interaction
+
+#### Scenario: Activating a chapter marker seeks to its start
+- **WHEN** the user clicks or taps a chapter marker on the wide or expanded scrubber
+- **THEN** the shared player seeks to that chapter's original start time
+
+#### Scenario: Interactive chapter marker identifies its chapter
+- **WHEN** the user hovers or keyboard-focuses a chapter marker on the wide or expanded scrubber
+- **THEN** a styled tooltip immediately shows that chapter's title
+
+#### Scenario: Chapter marker falls inside a rejected SponsorBlock interval
+- **WHEN** the user activates a chapter marker whose start time falls inside a segment marked as rejected, and SponsorBlock is enabled
+- **THEN** the player applies the existing rejected-interval skip behavior after seeking, landing at the end of the complete overlapping rejected interval
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** the current episode has no stored chapters
+- **THEN** no chapter markers are rendered on any composition's track
+
+#### Scenario: Chapter and SponsorBlock markers are visually distinguishable
+- **WHEN** a progress track shows both chapter markers and SponsorBlock segment markers
+- **THEN** the two marker types use distinct visual treatments so neither is mistaken for the other
+
 ### Requirement: Single shared audio source owned by a global store
 
 The app SHALL own exactly one `<audio>` element managed by a global audio player Pinia store. The store SHALL hold the currently loaded episode (its media URL, title, thumbnail, channel slug, and yt_id) and the live playback state (playing, current time, duration, volume, muted, playback rate, loading). All player UI in the app SHALL drive and read this single store; there SHALL NOT be multiple concurrent `<audio>` elements playing different sources.
@@ -271,6 +306,41 @@ The shared player SHALL continue loading the original `/media/{slug}/{yt_id}.mp3
 - **WHEN** an episode payload has an empty or unavailable SponsorBlock snapshot
 - **THEN** the shared player behaves exactly as ordinary original-MP3 playback
 
+### Requirement: Expanded view lists chapters with jump-to-chapter interaction
+
+When the current episode has stored chapters, the expanded "now playing" view
+SHALL display a "Chapters" section listing every chapter's title and start time
+in order. Activating a chapter row SHALL seek playback to that chapter's start
+time, subject to the existing rejected-interval skip behavior when that time
+falls inside a segment marked as rejected. The row corresponding to the chapter
+containing the current playback position SHALL be visually highlighted and SHALL
+update as playback progresses. When the current episode has no stored chapters,
+the expanded view SHALL display no Chapters section.
+
+#### Scenario: Chapters section appears for an episode with chapters
+- **WHEN** the expanded view is open for an episode that has stored chapters
+- **THEN** a Chapters section lists every chapter's title and start time in order
+
+#### Scenario: Activating a chapter row seeks to its start
+- **WHEN** the user taps or clicks a chapter row
+- **THEN** the shared player seeks to that chapter's start time
+
+#### Scenario: Chapter row seek respects rejected intervals
+- **WHEN** the user activates a chapter row whose start time falls inside a segment marked as rejected, and SponsorBlock is enabled
+- **THEN** the player applies the existing rejected-interval skip behavior after seeking
+
+#### Scenario: Current chapter is highlighted
+- **WHEN** playback position falls within a chapter's time range
+- **THEN** that chapter's row is visually highlighted while no other row is
+
+#### Scenario: Highlight follows playback
+- **WHEN** playback advances past a chapter boundary
+- **THEN** the highlighted row updates to the new current chapter without user interaction
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** the current episode has no stored chapters
+- **THEN** the expanded view shows no Chapters section
+
 #### Scenario: SponsorBlock is disabled during playback
 - **WHEN** SponsorBlock is disabled regardless of stored snapshot or rejected-category configuration
 - **THEN** playback performs no SponsorBlock seek and episode-card and persistent-player tracks show no SponsorBlock markers
@@ -305,3 +375,75 @@ When SponsorBlock is enabled and an authenticated refresh returns changed Sponso
 #### Scenario: SponsorBlock is disabled for the current episode
 - **WHEN** the frontend receives episode data with SponsorBlock disabled
 - **THEN** no refresh action or active SponsorBlock segments remain while the source and playhead are retained
+
+### Requirement: Player compositions show the current chapter title
+
+When the current episode has stored chapters, the persistent player's compact
+and wide compositions and the expanded "now playing" view SHALL display the
+title of the chapter containing the current playback position as a secondary
+label near the episode title. The label SHALL update without requiring user
+interaction as playback crosses chapter boundaries. When the current episode has
+no stored chapters, or playback position is before the first chapter's start, no
+chapter label SHALL be shown, and no layout space SHALL be reserved for it. In
+the compact composition, the label SHALL appear between the episode title and
+the channel/playback-time line.
+
+#### Scenario: Chapter label shown for an episode with chapters
+- **WHEN** any player composition is displayed for an episode with stored chapters and playback is within a chapter's range
+- **THEN** that chapter's title is shown as a secondary label near the episode title
+
+#### Scenario: Label updates across chapter boundaries
+- **WHEN** playback advances from one chapter into the next
+- **THEN** the displayed label updates to the new current chapter's title without user interaction
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** the current episode has no stored chapters
+- **THEN** no chapter label is shown and no layout space is reserved for it
+
+#### Scenario: Compact composition places the chapter label between existing metadata
+- **WHEN** the compact composition (viewport narrower than 640px) is displayed
+- **THEN** the current chapter title is rendered between the episode title and the channel/playback-time line
+
+### Requirement: Expanded view offers chapter-level previous/next navigation
+
+When the current episode has stored chapters, the expanded "now playing" view
+SHALL display previous-chapter and next-chapter controls, distinct from the
+existing episode-level previous/next controls. Activating next-chapter SHALL
+seek to the start of the chapter immediately after the one containing the
+current playback position; if the current position is within the last chapter,
+the control SHALL be disabled. Activating previous-chapter SHALL restart the
+current chapter (seek to its start) when more than 3 seconds have elapsed since
+that chapter's start, and SHALL otherwise seek to the start of the preceding
+chapter; if the current position is within the first chapter and at or before 3
+seconds into it, the control SHALL be disabled. Both controls SHALL apply
+existing rejected-interval skip behavior after seeking when SponsorBlock is
+enabled. When the current episode has no stored chapters, neither control SHALL
+be rendered.
+
+#### Scenario: Next-chapter advances to the following chapter
+- **WHEN** the user activates next-chapter while playback is within a chapter that has a following chapter
+- **THEN** the player seeks to the start of the following chapter
+
+#### Scenario: Next-chapter is disabled in the last chapter
+- **WHEN** playback is within the episode's last chapter
+- **THEN** the next-chapter control is disabled
+
+#### Scenario: Previous-chapter restarts the current chapter
+- **WHEN** the user activates previous-chapter more than 3 seconds after the current chapter's start
+- **THEN** the player seeks to the start of the current chapter
+
+#### Scenario: Previous-chapter moves to the preceding chapter
+- **WHEN** the user activates previous-chapter within 3 seconds of the current chapter's start and a preceding chapter exists
+- **THEN** the player seeks to the start of the preceding chapter
+
+#### Scenario: Previous-chapter is disabled at the episode's first chapter start
+- **WHEN** playback is within 3 seconds of the first chapter's start
+- **THEN** the previous-chapter control is disabled
+
+#### Scenario: Chapter navigation respects rejected intervals
+- **WHEN** a chapter-navigation seek lands on a time inside a segment marked as rejected, and SponsorBlock is enabled
+- **THEN** the player applies the existing rejected-interval skip behavior after seeking
+
+#### Scenario: Episode has no stored chapters
+- **WHEN** the current episode has no stored chapters
+- **THEN** neither chapter-navigation control is rendered
