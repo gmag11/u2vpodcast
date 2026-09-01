@@ -1294,7 +1294,8 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function onWindowKeydown(event: KeyboardEvent) {
-		if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+		if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== ' ') return;
+		if (event.key === ' ' && event.repeat) return;
 		if (!document.hasFocus()) return;
 		if (!currentEpisode.value || !audio) return;
 		const target = event.target as HTMLElement | null;
@@ -1304,6 +1305,19 @@ export const usePlayerStore = defineStore('player', () => {
 			return;
 		}
 		if (typeof target.closest === 'function' && target.closest('[role=slider]')) {
+			return;
+		}
+		if (
+			event.key === ' ' &&
+			typeof target.closest === 'function' &&
+			target.closest('button, a, [role=button], [role=checkbox], [role=tab]')
+		) {
+			return;
+		}
+		if (event.key === ' ') {
+			if (stopped.value) return;
+			event.preventDefault();
+			void togglePlay();
 			return;
 		}
 		event.preventDefault();
