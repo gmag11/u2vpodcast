@@ -1457,6 +1457,34 @@ describe('player store keyboard seek', () => {
 		slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 		expect(el.currentTime).toBe(50);
 	});
+
+	it('spacebar toggles playing and paused audio', async () => {
+		const el = await loadedEpisode();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+		expect(el.paused).toBe(true);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(el.paused).toBe(false);
+	});
+
+	it('spacebar does not restart stopped audio', async () => {
+		const player = usePlayerStore();
+		const el = await loadedEpisode();
+		await player.stop();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+		expect(el.paused).toBe(true);
+	});
+
+	it('does not toggle when spacebar focus is inside a button', async () => {
+		const el = await loadedEpisode();
+		const button = document.createElement('button');
+		document.body.append(button);
+		el.currentTime = 50;
+		button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+		expect(el.paused).toBe(false);
+	});
 });
 
 describe('player store playback modes', () => {
