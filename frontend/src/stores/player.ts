@@ -34,15 +34,25 @@ const MEDIA_SESSION_ACTIONS: MediaSessionAction[] = [
 	'seekto'
 ];
 
-// Playback-progress debug traces only in development builds; production
-// carries no `[player]` console noise. Console: DevTools > Console (F12).
-const DEBUG_PLAYER = import.meta.env.DEV;
+// Playback-progress debug traces. Enabled in development builds, or at
+// runtime on any build via `localStorage.setItem('player-debug','1')` +
+// reload, or a `?player-debug` URL flag. Console: DevTools > Console (F12).
+function debugEnabled(): boolean {
+	if (import.meta.env.DEV) return true;
+	if (typeof localStorage !== 'undefined' && localStorage.getItem('player-debug') === '1') return true;
+	if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('player-debug')) return true;
+	return false;
+}
 
 function trace(...args: unknown[]) {
-	if (DEBUG_PLAYER) {
+	if (debugEnabled()) {
 		console.debug('[player]', ...args);
 	}
 }
+
+// Last integer second traced by `onTimeUpdate`, so the timeline of a
+// premature stop is visible without flooding the console.
+let lastTracedSecond = -1;
 
 // Injectable source of randomness for the shuffle (playback-modes). Tests
 // replace it with a seeded PRNG so shuffled orders are deterministic;
@@ -533,6 +543,24 @@ export const usePlayerStore = defineStore('player', () => {
 		}
 	}
 
+	// Dumps the shared element's full state so a premature stop can be
+	// correlated with the media pipeline (readyState/networkState/error)
+	// instead of guessed at.
+	function traceAudioState(label: string) {
+		if (!audio) return;
+		trace(label, {
+			src: audio.currentSrc || audio.src,
+			paused: audio.paused,
+			ended: audio.ended,
+			seeking: audio.seeking,
+			currentTime: audio.currentTime,
+			duration: audio.duration,
+			readyState: audio.readyState,
+			networkState: audio.networkState,
+			error: audio.error ? { code: audio.error.code, message: audio.error.message } : null
+		});
+	}
+
 	function ensureAudio(): HTMLAudioElement | null {
 		if (typeof window === 'undefined') return null;
 		ensureMediaSession();
@@ -547,6 +575,23 @@ export const usePlayerStore = defineStore('player', () => {
 			audio.addEventListener('waiting', onWaiting);
 			audio.addEventListener('canplay', onCanPlay);
 			audio.addEventListener('ended', onEnded);
+			// Diagnostic listeners: correlate a premature stop with the media
+			// pipeline (network/decoder errors, stalls, aborts, seeks).
+			for (const event of [
+				'error',
+				'stalled',
+				'suspend',
+				'emptied',
+				'abort',
+				'durationchange',
+				'seeked',
+				'seeking',
+				'loadeddata',
+				'canplaythrough',
+				'progress'
+			] as const) {
+				audio.addEventListener(event, () => traceAudioState(`event:${event}`));
+			}
 		}
 		return audio;
 	}
@@ -557,8 +602,18 @@ export const usePlayerStore = defineStore('player', () => {
 				audio.currentTime,
 				activeSponsorBlockSegments(currentEpisode.value)
 			);
-			if (target !== audio.currentTime) audio.currentTime = target;
+			if (target !== audio.currentTime) {
+				trace('sponsorblock skip', { from: audio.currentTime, to: target });
+				audio.currentTime = target;
+			}
 			currentTime.value = target;
+			// Trace once per integer second so the timeline of a premature
+			// stop is visible without flooding the console.
+			const second = Math.floor(audio.currentTime);
+			if (second !== lastTracedSecond) {
+				lastTracedSecond = second;
+				trace('timeupdate', { t: audio.currentTime, paused: audio.paused });
+			}
 		}
 		tryResumeSeek();
 		publishMediaPositionState();
@@ -574,6 +629,7 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function onLoadedMetadata() {
 		if (audio) duration.value = audio.duration;
+		traceAudioState('event:loadedmetadata');
 		// The duration became known: re-evaluate the pending resume.
 		tryResumeSeek();
 		publishMediaPositionState();
@@ -656,8 +712,12 @@ export const usePlayerStore = defineStore('player', () => {
 	async function seekResumeOnPlay(el: HTMLAudioElement): Promise<void> {
 		const current = currentEpisode.value;
 		const pending = resumePending && current != null && current.id === resumeEpisodeId;
+		trace('seekResumeOnPlay', { pending, resumeTarget });
 		if (!pending) {
-			await el.play().catch(() => {});
+			await el.play().then(
+				() => trace('play() resolved'),
+				(err) => trace('play() rejected', err)
+			);
 			return;
 		}
 		const effective = effectiveProgress(current!);
@@ -667,10 +727,14 @@ export const usePlayerStore = defineStore('player', () => {
 			trace('resume: playing from zero');
 			finishResume();
 		}
-		await el.play().catch(() => {});
+		await el.play().then(
+			() => trace('play() resolved'),
+			(err) => trace('play() rejected', err)
+		);
 	}
 
 	function onPlay() {
+		traceAudioState('event:play');
 		playing.value = true;
 		loading.value = false;
 		stopped.value = false;
@@ -679,6 +743,7 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function onPause() {
+		traceAudioState('event:pause');
 		playing.value = false;
 		persistProgress();
 		publishMediaPlaybackState(stopped.value ? 'none' : 'paused');
@@ -686,14 +751,17 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function onWaiting() {
+		traceAudioState('event:waiting');
 		loading.value = true;
 	}
 
 	function onCanPlay() {
+		traceAudioState('event:canplay');
 		loading.value = false;
 	}
 
 	function onEnded() {
+		traceAudioState('event:ended');
 		playing.value = false;
 		publishMediaPlaybackState('none');
 		publishMediaPositionState();
@@ -828,16 +896,19 @@ export const usePlayerStore = defineStore('player', () => {
 		// longer protects its completion position from live saves.
 		finalizedEpisodeId = null;
 		const reloading = !isSame || el.src === '';
+		trace('loadEpisode', { yt_id: episode.yt_id, isSame, reloading });
 		if (reloading) {
 			// Wait for the metadata before playback starts so the resume has the
 			// duration at hand (playback-progress).
 			const meta = waitForMetadata(el);
 			el.src = mediaUrl(episode);
 			el.load();
+			traceAudioState('loadEpisode:after-load');
 			// A freshly loaded source starts at elapsed 0; clear the store
 			// playhead so consumers never see the previous episode's position.
 			currentTime.value = 0;
 			await meta;
+			traceAudioState('loadEpisode:after-metadata');
 		}
 		// load() above resets the element's playbackRate to defaultPlaybackRate:
 		// the channel speed must be (re)applied only after any reload, right
@@ -886,6 +957,7 @@ export const usePlayerStore = defineStore('player', () => {
 		opts?: { fromStart?: boolean; queueSource?: 'playlist' | 'list' }
 	) {
 		const fromStart = opts?.fromStart ?? false;
+		trace('play()', { yt_id: episode.yt_id, fromStart, queueSource: opts?.queueSource });
 		// Re-seeded on every play: the queue source decides whether a finished
 		// episode also leaves the playlist (playlist-capability).
 		queueSource.value = opts?.queueSource ?? 'list';
@@ -1090,6 +1162,7 @@ export const usePlayerStore = defineStore('player', () => {
 	async function togglePlay() {
 		const el = ensureAudio();
 		if (!el || !currentEpisode.value) return;
+		trace('togglePlay()', { paused: el.paused, stopped: stopped.value });
 		if (el.paused) {
 			const wasStopped = stopped.value;
 			stopped.value = false;
@@ -1129,12 +1202,14 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	async function pause() {
+		trace('pause()');
 		if (audio) audio.pause();
 	}
 
 	// Halts playback and keeps the saved position (no reset). Used by the
 	// internal end-of-queue stop and the session-teardown stop.
 	function haltPlayback() {
+		traceAudioState('haltPlayback');
 		// Flush the final position before the element is reset to zero.
 		persistProgress();
 		finishResume();
@@ -1190,6 +1265,7 @@ export const usePlayerStore = defineStore('player', () => {
 	function stop(target?: Episode) {
 		const targetEpisode = target ?? currentEpisode.value;
 		if (!targetEpisode) return;
+		trace('stop()', { target: targetEpisode.yt_id, stopped: stopped.value });
 		const isCurrentTarget = target == null || targetEpisode.id === currentEpisode.value?.id;
 		const el = audio;
 		const reproducing = isCurrentTarget && !stopped.value && el != null && !el.paused;
