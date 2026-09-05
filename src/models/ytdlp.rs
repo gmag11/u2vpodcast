@@ -4,7 +4,7 @@ use tokio::process::Command;
 use tracing::{debug, info};
 // `timestamp_opt` / `Utc` are used only by the `#[cfg(test)]` network smoke
 // tests; gated on test builds so the release build stays warning-free.
-use super::Error;
+use super::{config::ytdlp_path, Error};
 use crate::utils::throttle::with_youtube_slot;
 #[cfg(test)]
 use crate::utils::throttle::with_youtube_slot_on;
@@ -278,26 +278,24 @@ impl Ytdlp {
     }
 
     pub async fn auto_update() -> Result<(), Error> {
-        let python3 = "python3";
-        let args = vec![
-            "-m",
-            "pip",
-            "install",
-            "--user",
-            "--upgrade",
-            "--break-system-packages",
-            "yt-dlp[default]",
-        ];
-        // Async process wait (non-blocking-update-paths): the pip run can take
-        // tens of seconds; a synchronous `std::process::Command::wait()` here
-        // would pin a tokio worker thread for the whole time.
+        // Self-update through yt-dlp's own updater, which pulls the latest
+        // official build from github.com/yt-dlp/yt-dlp releases. The Docker
+        // image installs the standalone binary (not a pip package), so
+        // `--update` works and replaces the binary in place. This keeps
+        // "always latest" while dropping the PyPI pip install as the update
+        // channel (supply-chain).
+        //
+        // Async process wait (non-blocking-update-paths): the update run can
+        // take tens of seconds; a synchronous `std::process::Command::wait()`
+        // here would pin a tokio worker thread for the whole time.
         //
         // Gated by the shared YouTube throttle too (the update check hits
         // GitHub, but every yt-dlp execution passes through the same slot so a
         // future update channel cannot bypass the throttle).
+        let args = vec!["--update"];
         let status = with_youtube_slot(|| async move {
             ProcessCommandRunner
-                .run(python3, &args)
+                .run(ytdlp_path(), &args)
                 .await
                 .map(|output| output.success)
         })

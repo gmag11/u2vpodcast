@@ -11,9 +11,14 @@ sleep_time: 4
 per_page: 10
 # Session signing key. MUST be exactly 64 characters (64 bytes); a shorter
 # value makes the server panic at startup (the cookie crate Key::from requires
-# 64 bytes). Generate a new random value for each deployment, e.g. with:
+# 64 bytes).
+#
+# IMPORTANT: this is a PLACEHOLDER for the example config. Replace it with a
+# fresh random value for EACH deployment BEFORE going live, e.g. with:
 #   openssl rand -base64 48 | tr -d '\n'
-secret_key: "Idz6CvGkPzEEbvwzNwp6adGodfjBPoRVUdIz5QVOyoi1Llff9o3Fz7NEScsh6tAH"
+# If you reuse this placeholder value, anyone who knows this repository can
+# forge valid session cookies and take over the deployment.
+secret_key: "REPLACE_THIS_WITH_YOUR_OWN_RANDOM_64_BYTE_SECRET_KEY_1234567890_"
 # If both admin_username and admin_password are present, the admin user is
 # recreated from these values on every startup. Because recreation produces a
 # new row id, existing login sessions DO NOT survive container restarts. To
