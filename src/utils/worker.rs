@@ -5,7 +5,7 @@ use super::super::models::{
 use super::sponsorblock::{reconcile_episode, SponsorBlockClient};
 use actix_web::http::StatusCode;
 use chrono::{naive::NaiveDate, DateTime, TimeZone, Utc};
-use rand::Rng;
+use rand::RngExt;
 use sqlx::SqlitePool;
 use std::time::Duration;
 use std::{
@@ -448,7 +448,10 @@ async fn process_episode(
         let _ = tokio::fs::remove_file(&filename).await;
         return Ok(());
     }
-    let delay = rand::thread_rng().gen_range(10..=20);
+    let delay = {
+        let mut rng = rand::rng();
+        rng.random_range(10..=20)
+    };
     info!("Pausing {delay} seconds before next download");
     sleep(Duration::from_secs(delay)).await;
     let title = if info.title.is_empty() {
