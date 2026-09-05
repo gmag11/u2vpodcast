@@ -33,6 +33,7 @@
 	import ScrollingText from '@/components/ScrollingText.vue';
 	import AppTooltip from '@/components/AppTooltip.vue';
 	import PersistentPlayerExpanded from '@/components/PersistentPlayerExpanded.vue';
+	import ProgressScrubber from '@/components/ProgressScrubber.vue';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
@@ -215,13 +216,6 @@
 		}
 	}
 
-	function onSeek(event: MouseEvent) {
-		if (player.duration <= 0) return;
-		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
-		player.seek(ratio * player.duration);
-	}
-
 	function onVolumeInput(event: Event) {
 		player.setVolume(Number((event.target as HTMLInputElement).value));
 	}
@@ -347,62 +341,15 @@
 			</div>
 
 			<div class="hidden sm:block" data-testid="player-wide">
-				<div
-					class="relative h-5 w-full cursor-pointer py-2"
-					role="slider"
+				<ProgressScrubber
+					thin
+					:progress="player.progress"
+					:duration="player.duration"
+					:sponsor-block-markers="sponsorBlockMarkers"
+					:chapter-markers="chapterMarkers"
 					:aria-label="$t('player.seek')"
-					:aria-valuenow="Math.round(player.progress)"
-					:aria-valuemin="0"
-					:aria-valuemax="100"
-					@click="onSeek"
-				>
-					<div class="relative h-1 w-full rounded-full bg-surface-input">
-						<div
-							class="absolute inset-y-0 left-0 rounded-full bg-accent-400 transition-[width] duration-150"
-							:style="{ width: player.progress + '%' }"
-						></div>
-						<div
-							v-for="(marker, index) in sponsorBlockMarkers"
-							:key="index"
-							class="absolute inset-y-0 z-10"
-							:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
-							:data-category="marker.category"
-							data-testid="player-sponsorblock-segment"
-							:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
-						></div>
-						<button
-							v-for="(marker, index) in chapterMarkers"
-							:key="index"
-							type="button"
-							class="group absolute -inset-y-2 z-20 w-3 -translate-x-1/2"
-							data-testid="player-chapter-marker"
-							:data-start-seconds="marker.startSeconds"
-							:aria-label="marker.title"
-							:aria-describedby="`wide-chapter-tooltip-${index}`"
-							:style="{ left: `${marker.left}%` }"
-							@click.stop="player.seek(marker.startSeconds)"
-						>
-							<span
-								class="absolute inset-y-2 left-1/2 w-0.5 -translate-x-1/2 bg-chapter-marker"
-								aria-hidden="true"
-							></span>
-							<span
-								:id="`wide-chapter-tooltip-${index}`"
-								role="tooltip"
-								class="pointer-events-none absolute bottom-full z-30 mb-1 w-max max-w-64 rounded-md bg-surface-high px-2 py-1 text-left text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-								:class="
-									marker.left < 15
-										? 'left-1/2'
-										: marker.left > 85
-											? 'right-1/2'
-											: 'left-1/2 -translate-x-1/2'
-								"
-							>
-								{{ marker.title }}
-							</span>
-						</button>
-					</div>
-				</div>
+					@seek="player.seek"
+				/>
 
 				<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-2 px-4 md:gap-4 md:px-8">
 					<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
