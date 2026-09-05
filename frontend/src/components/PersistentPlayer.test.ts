@@ -80,6 +80,34 @@ function episode(id: number, listen = false): Episode {
 	};
 }
 
+function mockMeasurements(viewportWidth: number, textWidth: number) {
+	const clientWidth = vi
+		.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'scrolling-text-viewport' ? viewportWidth : 0;
+		});
+	const scrollWidth = vi
+		.spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'scrolling-text-text' ? textWidth : 0;
+		});
+	return () => {
+		clientWidth.mockRestore();
+		scrollWidth.mockRestore();
+	};
+}
+
+function mockReducedMotion(matches: boolean) {
+	vi.stubGlobal(
+		'matchMedia',
+		vi.fn(() => ({
+			matches,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn()
+		}))
+	);
+}
+
 describe('PersistentPlayer controls', () => {
 	let wrapper: ReturnType<typeof mount> | null = null;
 
@@ -581,6 +609,205 @@ describe('PersistentPlayer controls', () => {
 
 		// Tapping the (non-button) wide thumbnail does not open the expanded view.
 		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+	});
+
+	it('wide scrubber spans the full bar width with an extended hit area and seeks', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.duration = 600;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+
+		const track = bar.get('[role="slider"]');
+		expect(track.classes()).toContain('w-full');
+		expect(track.classes()).toContain('py-2');
+		vi.spyOn(track.element, 'getBoundingClientRect').mockReturnValue({
+			left: 0,
+			width: 100
+		} as DOMRect);
+		await track.trigger('click', { clientX: 50 });
+		expect(seekSpy).toHaveBeenCalledWith(300);
+	});
+
+	it('wide time readout sits beside the thumbnail as elapsed / total', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			image: 'https://example.com/episode.jpg'
+		};
+		player.duration = 600;
+		player.currentTime = 120;
+		const bar = await mountBar();
+
+		const time = bar.get('[data-testid="player-wide-time"]');
+		expect(time.text()).toBe('2:00 / 10:00');
+		expect(time.classes()).toContain('tabular-nums');
+		expect(
+			bar.get('img').element.compareDocumentPosition(time.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	});
+
+	it('wide metadata shows title, chapter and channel on three lines', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 0, end: 300, title: 'Introduction' }],
+			channel_title: 'VisualPolitik'
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		expect(bar.text()).toContain('VisualPolitik');
+		expect(bar.get('[data-testid="scrolling-text-text"]').text()).toBe('Episode 1');
+
+		const chapter = bar.get('[data-testid="player-current-chapter"]');
+		const channel = bar.findAll('p').find((p) => p.text() === 'VisualPolitik');
+		expect(channel).toBeDefined();
+		expect(
+			bar
+				.get('[data-testid="scrolling-text-viewport"]')
+				.element.compareDocumentPosition(chapter.element) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			chapter.element.compareDocumentPosition(channel!.element) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	});
+
+	it('wide metadata shows channel on its own line when no chapter is active', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = { ...player.currentEpisode!, channel_title: 'VisualPolitik' };
+		const bar = await mountBar();
+
+		expect(bar.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+		expect(bar.findAll('p').some((p) => p.text() === 'VisualPolitik')).toBe(true);
+	});
+
+	it('wide thumbnail is a static non-clickable image', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			image: 'https://example.com/episode.jpg'
+		};
+		const bar = await mountBar();
+
+		const thumb = bar.get('img').element.parentElement!;
+		expect(thumb.tagName).toBe('DIV');
+		await thumb.dispatchEvent(new MouseEvent('click'));
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+	});
+
+	it('opens the chapters popover and lists chapters with active highlight', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		const toggle = bar.get('button[aria-label="Chapters"]');
+		await toggle.trigger('click');
+		const panel = bar.get('[data-testid="player-chapters-panel"]');
+		const rows = panel.findAll('[data-testid="player-chapter-row"]');
+		expect(rows).toHaveLength(2);
+		expect(rows[0].text()).toContain('Introduction');
+		expect(rows[0].text()).toContain('0:00');
+		expect(rows[1].text()).toContain('Main topic');
+		expect(rows[0].classes()).toContain('bg-accent-600/15');
+		expect(rows[0].attributes('aria-current')).toBe('true');
+		expect(rows[1].attributes('aria-current')).toBeUndefined();
+	});
+
+	it('chapter row in the wide popover seeks to its start', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+		await bar.get('button[aria-label="Chapters"]').trigger('click');
+
+		await bar.findAll('[data-testid="player-chapter-row"]')[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('wide chapter navigation mirrors the expanded behavior', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+		await bar.get('button[aria-label="Chapters"]').trigger('click');
+
+		player.currentTime = 60;
+		await flushPromises();
+		// more than 3s into the first chapter -> previous restarts the current chapter
+		await bar.get('[data-testid="player-previous-chapter"]').trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(0);
+
+		player.currentTime = 60;
+		await flushPromises();
+		await bar.get('[data-testid="player-next-chapter"]').trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(150);
+	});
+
+	it('renders no chapters popover control without stored chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		expect(bar.find('button[aria-label="Chapters"]').exists()).toBe(false);
+	});
+
+	it('wide title scrolls while playing and truncates when paused', async () => {
+		const restoreMeasurements = mockMeasurements(100, 200);
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await flushPromises();
+
+		const track = bar.get('[data-testid="scrolling-text-track"]');
+		expect(track.classes()).toContain('scrolling-text-track--active');
+
+		player.playing = false;
+		await flushPromises();
+		expect(track.classes()).toContain('truncate');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
+		restoreMeasurements();
+	});
+
+	it('wide title does not scroll with reduced motion', async () => {
+		const restoreMeasurements = mockMeasurements(100, 200);
+		mockReducedMotion(true);
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await flushPromises();
+
+		const track = bar.get('[data-testid="scrolling-text-track"]');
+		expect(track.classes()).toContain('truncate');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
+		restoreMeasurements();
 	});
 });
 
