@@ -57,7 +57,9 @@ The app SHALL render a persistent player bar fixed to the bottom of the viewport
 
 The bar SHALL provide two viewport-dependent compositions using the app's existing small breakpoint (640px) as the boundary.
 
-**Wide composition (viewport width >= 640px)** — unchanged from previous behavior. The bar SHALL display the current episode's thumbnail, title, and controls for play/pause, stop, position (interactive scrubber), volume (mute + level), and playback speed. The playback speed control SHALL offer the standard presets (0.5x, 1x, 1.25x, 1.5x, 2x) and a fine-grained stepper with + and − buttons that adjusts the rate in half-tenths (0.05 steps) within the supported range, so values such as 1.35x or 1.7x can be selected; both paths SHALL drive the shared player's speed state immediately. In addition, the bar SHALL expose a previous control and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability. The next control from the `auto-advance` capability is retained with its dual short/long press behavior.
+**Wide composition (viewport width >= 640px)** — the bar SHALL be a fixed-height (non-expandable) single row. Along its top edge the bar SHALL render an interactive progress track spanning the full width of the bar, showing elapsed playback proportion and, when present, chapter and SponsorBlock segment markers. The visual track SHALL be thin, but its interactive hit area SHALL extend beyond the visible track so it can be targeted and dragged for precise seeking across the full bar width; activating it SHALL seek playback to the chosen position. The thumbnail SHALL be rendered statically (not clickable). Beside the thumbnail the bar SHALL show the elapsed/total time readout (`elapsed / total`), using tabular numerals, and a three-line metadata block: the current episode's title on the first line, the current chapter title (when within a chapter) on the second line, and the channel name on the third line. The title SHALL use the shared scrolling text behavior: when the title is wider than the available space it SHALL scroll horizontally from right to left while playback is active, and SHALL be truncated rather than scrolled while playback is not active or when the user's system requests reduced motion. The bar SHALL display controls for play/pause, stop, position (the interactive scrubber), volume (mute + level), and playback speed. The playback speed control SHALL offer the standard presets (0.5x, 1x, 1.25x, 1.5x, 2x) and a fine-grained stepper with + and − buttons that adjusts the rate in half-tenths (0.05 steps) within the supported range, so values such as 1.35x or 1.7x can be selected; both paths SHALL drive the shared player's speed state immediately. In addition, the bar SHALL expose a previous control and an "Up next" queue panel (a toggle button opening an overlay or popover) listing the upcoming episodes with remove control, as specified by the `up-next-queue` capability. The next control from the `auto-advance` capability is retained with its dual short/long press behavior.
+
+When the current episode has stored chapters, the wide composition SHALL also expose a "Chapters" control that opens a popover (mirroring the queue panel pattern) with previous-chapter and next-chapter controls and the full chapter list. Activating a chapter row SHALL seek playback to that chapter's start, subject to the existing rejected-interval skip behavior when that time falls inside a segment marked as rejected. The row for the chapter containing the current playback position SHALL be visually highlighted and SHALL update as playback progresses. Previous-chapter and next-chapter SHALL behave as in the expanded view (restart the current chapter when more than 3 seconds in, otherwise jump to the preceding chapter; advance to the following chapter; disable at boundaries). When the current episode has no stored chapters, the wide composition SHALL render no Chapters control.
 
 **Compact composition (viewport width < 640px)** — the bar SHALL display exactly the following and nothing else:
 - a read-only progress track spanning the full width of the bar along its top edge, showing elapsed playback proportion and, when SponsorBlock data is available and enabled, its segment markers;
@@ -98,6 +100,50 @@ Switching between compositions SHALL be driven purely by viewport width and SHAL
 #### Scenario: Queue panel opens from the bar
 - **WHEN** the user presses the queue button in the visible bar on a viewport of at least 640px
 - **THEN** an "Up next" panel opens listing the upcoming episodes with a per-item remove action, and closes on a second press or outside interaction
+
+#### Scenario: Wide scrubber spans the full bar width
+- **WHEN** the wide composition is displayed and an episode is loaded
+- **THEN** the interactive progress track spans the full width of the bar along its top edge, and clicking or dragging anywhere on it seeks playback to that position
+
+#### Scenario: Wide scrubber has an extended hit area
+- **WHEN** the user targets the wide scrubber
+- **THEN** the clickable/draggable region extends above and below the thin visible track so the track is easy to target while remaining visually thin
+
+#### Scenario: Wide metadata shows title, chapter and channel lines
+- **WHEN** the wide composition is displayed for an episode with stored chapters and playback is within a chapter's range
+- **THEN** the metadata block shows the episode title on the first line, the current chapter title on the second line, and the channel name on the third line
+
+#### Scenario: Wide metadata omits chapter when absent
+- **WHEN** the wide composition is displayed and the current episode has no stored chapters or playback is before the first chapter's start
+- **THEN** the second metadata line is omitted and the channel name remains on its own line
+
+#### Scenario: Chapters popover opens from the wide bar
+- **WHEN** the wide composition is displayed for an episode that has stored chapters and the user activates the "Chapters" control
+- **THEN** a popover opens showing previous/next chapter controls and the full chapter list with title and start time in order
+
+#### Scenario: Chapter row seek from the wide popover
+- **WHEN** the user activates a chapter row in the wide popover
+- **THEN** the shared player seeks to that chapter's start time
+
+#### Scenario: Chapter row seek respects rejected intervals
+- **WHEN** the user activates a chapter row in the wide popover whose start time falls inside a segment marked as rejected, and SponsorBlock is enabled
+- **THEN** the player applies the existing rejected-interval skip behavior after seeking
+
+#### Scenario: Wide popover highlights the current chapter
+- **WHEN** playback position falls within a chapter's range and the wide popover is open
+- **THEN** that chapter's row is visually highlighted and the highlight follows playback across boundaries
+
+#### Scenario: Wide chapter navigation matches expanded behavior
+- **WHEN** the user activates previous/next chapter in the wide popover
+- **THEN** navigation behaves exactly as the expanded view: previous restarts the current chapter when more than 3 seconds in otherwise moves to the preceding chapter; next advances to the following chapter; controls disable at boundaries
+
+#### Scenario: No Chapters control without stored chapters
+- **WHEN** the wide composition is displayed and the current episode has no stored chapters
+- **THEN** no Chapters control is rendered
+
+#### Scenario: Wide time readout sits beside the thumbnail
+- **WHEN** the wide composition is displayed
+- **THEN** the elapsed/total time readout (for example `11:09 / 45:00`) is shown beside the thumbnail using tabular numerals
 
 #### Scenario: Compact bar shows only the reduced information set
 - **WHEN** an episode is loaded and the viewport is narrower than 640px
