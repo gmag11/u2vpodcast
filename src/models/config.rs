@@ -14,6 +14,10 @@ pub const SUPPORTED_SPONSORBLOCK_CATEGORIES: [&str; 8] = [
     "filler",
 ];
 
+// Allowed origin for the SPA's cover-image fetches; part of the shared CORS
+// allowlist (channel cover images come from the YouTube CDN).
+const YT_IMAGE_ORIGIN: &str = "https://yt3.googleusercontent.com";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub production: bool,
@@ -157,9 +161,41 @@ impl Config {
         let content = read_to_string("config.yml")
             .await
             .expect("Can't read config file `config.yml`");
-        debug!("Content: {content}");
-        Self::from_yaml(&content).unwrap_or_else(|error| panic!("{error}"))
+        let config = Self::from_yaml(&content).unwrap_or_else(|error| panic!("{error}"));
+        debug!("Content: {}", redact_secrets(&content, &config));
+        config
     }
+
+    // The CORS allowlist shared by the CORS layer and the CSRF origin check.
+    // Production restricts credentialed cross-origin requests to the configured
+    // URL; development also allows the local SPA dev origins. Never reflects
+    // any origin.
+    pub fn cors_origins(&self) -> Vec<String> {
+        let mut origins = vec![self.url.clone()];
+        if self.production {
+            origins.push(YT_IMAGE_ORIGIN.to_string());
+        } else {
+            origins.push(format!("http://localhost:{}", self.port));
+            origins.push(format!("http://127.0.0.1:{}", self.port));
+            origins.push(YT_IMAGE_ORIGIN.to_string());
+        }
+        origins
+    }
+}
+
+// Logs the raw config file with secret values redacted, so a DEBUG log level
+// can never leak the session signing key or admin credentials.
+fn redact_secrets(content: &str, config: &Config) -> String {
+    let mut out = content.to_string();
+    if !config.secret_key.is_empty() {
+        out = out.replace(&config.secret_key, "***");
+    }
+    if let Some(password) = config.admin_password.as_deref() {
+        if !password.is_empty() {
+            out = out.replace(password, "***");
+        }
+    }
+    out
 }
 
 // Minimal valid config for tests that need an `AppState` (handlers require
@@ -232,5 +268,33 @@ mod tests {
             Config::from_yaml(&yaml("sponsorblock_rejected_categories: [sponser]\n")).unwrap_err();
         assert!(error.contains("sponser"));
         assert!(error.contains("invalid SponsorBlock category"));
+    }
+
+    #[test]
+    fn redact_secrets_hides_key_and_password_but_keeps_structure() {
+        let content = "secret_key: \"super-secret-key-value\"\nadmin_username: admin\nadmin_password: nimda\nport: 6996";
+        let config = Config {
+            production: false,
+            url: "http://localhost:6996".to_string(),
+            port: 6996,
+            sleep_time: 1,
+            per_page: 3,
+            secret_key: "super-secret-key-value".to_string(),
+            admin_username: Some("admin".to_string()),
+            admin_password: Some("nimda".to_string()),
+            with_authentication: true,
+            html_path: String::new(),
+            log_level: "INFO".to_string(),
+            db_pool_max_connections: 5,
+            cooldown_seconds: 3,
+            sponsorblock_enabled: false,
+            sponsorblock_rejected_categories: vec!["sponsor".to_string()],
+        };
+        let redacted = redact_secrets(content, &config);
+        assert!(!redacted.contains("super-secret-key-value"));
+        assert!(!redacted.contains("nimda"));
+        assert!(redacted.contains("admin_username: admin"));
+        assert!(redacted.contains("port: 6996"));
+        assert!(redacted.contains("***"));
     }
 }

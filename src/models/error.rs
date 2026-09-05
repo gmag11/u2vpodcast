@@ -123,12 +123,56 @@ impl From<ActixError> for Error {
 
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
+        // Internal details (SQL errors, filesystem paths, library messages)
+        // must never reach the client: they leak the database schema and
+        // implementation internals. Log the detail server-side and return a
+        // generic body for 5xx; 4xx messages are intentional validation
+        // messages and are safe to expose.
+        if self.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
+            tracing::error!("Internal error: {}", self.details);
+        }
+        let message = if self.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
+            "Internal server error".to_string()
+        } else {
+            self.details.clone()
+        };
         let response: CustomResponse<Option<String>> = CustomResponse::new(
             self.status_code(),
-            &self.details,
+            &message,
             self.session.clone(),
             None,
         );
         HttpResponse::build(self.status_code()).json(response)
+    }
+}
+
+#[cfg(test)]
+mod error_response_tests {
+    use super::*;
+    use actix_web::{
+        body::to_bytes,
+        http::StatusCode,
+    };
+
+    #[actix_web::test]
+    async fn internal_error_returns_generic_message_not_internal_details() {
+        // A 500 from a SQL error must not leak the raw detail to the client.
+        let error = Error::default("SQLite error: no such table: secret_users");
+        let response = error.error_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["message"], "Internal server error");
+        assert!(!body.windows(6).any(|w| w == b"secret"));
+    }
+
+    #[actix_web::test]
+    async fn client_error_keeps_intentional_message() {
+        let error = Error::new_with_status_code("max must be >= 1", StatusCode::BAD_REQUEST);
+        let response = error.error_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body()).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["message"], "max must be >= 1");
     }
 }

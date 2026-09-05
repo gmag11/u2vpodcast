@@ -7,12 +7,12 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 
-use std::{env::var, path::PathBuf, str::FromStr};
+use std::{env::var, path::PathBuf, str::FromStr, sync::atomic::{AtomicU64, Ordering}};
 use tokio::{
     spawn,
     time::{sleep, Duration},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use actix_files as af;
@@ -24,7 +24,7 @@ use utils::worker::do_the_work;
 // `config.url` is validated at startup and appended by the CORS builder;
 // this host is allowed so the SPA can fetch cover images. No trailing slash:
 // origins are scheme://host[:port] only.
-const YT_IMAGE_ORIGIN: &str = "https://yt3.googleusercontent.com";
+// (The allowlist lives in `Config::cors_origins`; shared with the CSRF check.)
 
 // Validates that a CORS origin is a full `scheme://host[:port]` value with no
 // path and no trailing slash, so the allowlist can never silently match
@@ -67,6 +67,19 @@ fn validate_secret_key(key: &str) -> Result<(), String> {
     Ok(())
 }
 
+// True when the session key is still the placeholder shipped in the sample
+// config.yml. The placeholder is a known value: reusing it in production lets
+// anyone with the repository forge session cookies.
+fn is_placeholder_secret(key: &str) -> bool {
+    key.contains("REPLACE_THIS")
+}
+
+// Production requires the canonical origin (and therefore the Secure session
+// cookie) to be https; plain http breaks login silently behind the proxy.
+fn requires_https(production: bool, url: &str) -> bool {
+    production && url.starts_with("http://")
+}
+
 // Shared CORS builder: an explicit origin allowlist plus credential support in
 // every mode. A wildcard origin combined with credentials would let any site
 // read the API using the user's session cookie, so no mode may use
@@ -84,28 +97,50 @@ fn build_cors(origins: &[String]) -> Cors {
         .max_age(3600)
 }
 
+// Content-Security-Policy for the SPA and its API responses (defense in depth;
+// the frontend has no `v-html` on network data). `script-src` allows only
+// same-origin scripts plus the sha256 of the inline theme bootstrapper in
+// frontend/index.html — if that inline script changes, recompute its hash.
+// `style-src 'unsafe-inline'` is required by Vue inline style bindings; Google
+// Fonts is loaded from the stylesheet link in index.html. `frame-ancestors`
+// blocks clickjacking; `media-src`/`connect-src` keep playback and API on the
+// same origin.
+const CSP: &str = "default-src 'self'; \
+     script-src 'self' 'sha256-z8kQzMAgtRsSW0cXM+XkZvyyilr5edUUaKINvHCx0ss='; \
+     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+     font-src 'self' https://fonts.gstatic.com; \
+     img-src 'self' data: https:; \
+     media-src 'self' blob:; \
+     connect-src 'self'; \
+     object-src 'none'; \
+     frame-ancestors 'none'; \
+     base-uri 'self'; \
+     form-action 'self'";
+
+// Hardening response headers applied to every response (static files, media
+// and API alike). CSP only applies to HTML/document responses; the headers are
+// harmless on JSON/media payloads.
+fn security_headers() -> DefaultHeaders {
+    DefaultHeaders::new()
+        .add((header::CONTENT_SECURITY_POLICY, CSP))
+        .add(("X-Content-Type-Options", "nosniff"))
+        .add(("X-Frame-Options", "DENY"))
+        .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+        .add(("Permissions-Policy", "geolocation=(), microphone=(), camera=()"))
+        .add(("X-XSS-Protection", "0"))
+}
+
 // The CORS allowlist for the current mode. Development restricts credentialed
 // cross-origin requests to the configured URL plus the local SPA dev origins,
 // mirroring the production posture instead of reflecting any origin.
-fn cors_origins_for(config: &Config) -> Vec<String> {
-    if config.production {
-        vec![config.url.clone(), YT_IMAGE_ORIGIN.to_string()]
-    } else {
-        vec![
-            config.url.clone(),
-            format!("http://localhost:{}", config.port),
-            format!("http://127.0.0.1:{}", config.port),
-            YT_IMAGE_ORIGIN.to_string(),
-        ]
-    }
-}
+// Shared with the CSRF origin check via `Config::cors_origins`.
 
 use actix_cors::Cors;
 use actix_session::{config::PersistentSession, storage::CookieSessionStore, SessionMiddleware};
 use actix_web::{
     cookie::{Key, SameSite},
     http::header,
-    middleware::Logger,
+    middleware::{DefaultHeaders, Logger},
     web::Data,
     App, HttpServer,
 };
@@ -133,6 +168,19 @@ fn dev_root() -> PathBuf {
 
 static DDBB: &str = "u2vpodcast.db";
 static MIGRATIONS_DIR: &str = "migrations";
+
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// True when the periodic auto-update should run: at least `interval_secs` have
+// elapsed since the last run (`last`), or it never ran.
+fn update_due(now: u64, last: u64, interval_secs: u64) -> bool {
+    now.saturating_sub(last) >= interval_secs
+}
 
 #[actix_web::main]
 async fn main() -> Result<(), Error> {
@@ -177,7 +225,12 @@ async fn main() -> Result<(), Error> {
         .expect("valid sqlite URL derived from config")
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
-        .busy_timeout(std::time::Duration::from_secs(5));
+        .busy_timeout(std::time::Duration::from_secs(5))
+        // Enforce foreign keys explicitly. SQLite leaves them off by default
+        // per connection and sqlx turns them on by default — this makes the
+        // requirement explicit so the `ON DELETE CASCADE` on
+        // `sponsorblock_cache.episode_id` cannot silently regress.
+        .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(config.db_pool_max_connections.max(1))
@@ -212,9 +265,38 @@ async fn main() -> Result<(), Error> {
     // shorter than 64 bytes, so validate up front (crash-safety).
     validate_secret_key(&config.secret_key).map_err(|e| Error::default(&e))?;
 
+    // The sample config ships a placeholder session key; a deployment that
+    // reuses it lets anyone with the repository forge session cookies. Fail
+    // fast in production; warn in development so a local run is possible.
+    if is_placeholder_secret(&config.secret_key) {
+        if config.production {
+            return Err(Error::default(
+                "config.yml `secret_key` is still the sample placeholder — generate a random \
+                 64-byte key for this deployment before going live \
+                 (openssl rand -base64 48 | tr -d '\\n')",
+            ));
+        }
+        warn!(
+            "config.yml `secret_key` is the sample placeholder — generate a random 64-byte key \
+             for this deployment before going live (openssl rand -base64 48 | tr -d '\\n')"
+        );
+    }
+
+    // The production session cookie is `Secure`; without TLS in front of the
+    // app the browser never sends it and login silently breaks. Fail fast
+    // instead of deploying a deployment that cannot authenticate.
+    if requires_https(config.production, &config.url) {
+        return Err(Error::default(
+            "config.yml `url` must use https:// in production mode: the Secure \
+             session cookie requires HTTPS (and it is the CORS/feed origin). \
+             Terminate TLS at the reverse proxy and set `url` to the public \
+             https origin.",
+        ));
+    }
+
     // Validate the whole CORS allowlist up front in every mode: a dev origin
     // with a typo must not silently deploy a broader or broken policy.
-    let cors_origins = cors_origins_for(&config);
+    let cors_origins = config.cors_origins();
     for origin in &cors_origins {
         validate_origin(origin).map_err(|e| Error::default(&e))?;
     }
@@ -260,16 +342,29 @@ async fn main() -> Result<(), Error> {
     let pool2 = pool.clone();
     let worker_config = config.clone();
     spawn(async move {
-        //let auth = HttpAuthentication::bearer(validator);
+        // yt-dlp auto-update cadence: at most once a day per process. The
+        // worker loop runs every `sleep_time` hours; without a gate it would
+        // hit the update channel on every cycle. `LAST_AUTO_UPDATE` is
+        // per-process state (survives only until restart), which is enough to
+        // stop the loop hammering the update source.
+        static LAST_AUTO_UPDATE: AtomicU64 = AtomicU64::new(0);
+        const AUTO_UPDATE_INTERVAL_SECS: u64 = 24 * 3600;
         loop {
-            info!("**** Start updating yt-dlp ****");
-            match Ytdlp::auto_update().await {
-                Ok(()) => {}
-                Err(e) => error!("{}", e),
+            let now = unix_secs();
+            let last = LAST_AUTO_UPDATE.load(Ordering::Relaxed);
+            if update_due(now, last, AUTO_UPDATE_INTERVAL_SECS) {
+                info!("**** Start updating yt-dlp ****");
+                match Ytdlp::auto_update().await {
+                    Ok(()) => {}
+                    Err(e) => error!("{}", e),
+                }
+                LAST_AUTO_UPDATE.store(now, Ordering::Relaxed);
+            } else {
+                info!("Skipping yt-dlp auto-update (last run < 24h ago)");
             }
-            info!("**** Finish updating yt-dlp ****");
+            info!("**** Start updating channels ****");
             match do_the_work(&pool2, &worker_config).await {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(e) => {
                     error!("Error doing the work: {e}");
                 }
@@ -313,6 +408,7 @@ async fn main() -> Result<(), Error> {
                 .build()
             })
             .wrap(build_cors(&cors_origins))
+            .wrap(security_headers())
             .app_data(Data::clone(&data))
             .service(
                 af::Files::new("/app", static_files.clone())
@@ -374,6 +470,50 @@ mod cors_tests {
         let key = "x".repeat(64);
         assert!(validate_secret_key(&key).is_ok());
         assert!(validate_secret_key(&format!("  {}  ", key)).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod deployment_guard_tests {
+    use super::{is_placeholder_secret, requires_https, update_due};
+
+    #[test]
+    fn placeholder_secret_is_detected() {
+        assert!(is_placeholder_secret("REPLACE_THIS_WITH_YOUR_OWN_RANDOM_64_BYTE_SECRET_KEY_1234567890_"));
+        assert!(is_placeholder_secret("prefix REPLACE_THIS suffix"));
+        assert!(!is_placeholder_secret(&"x".repeat(64)));
+        assert!(!is_placeholder_secret(""));
+    }
+
+    #[test]
+    fn production_requires_https_url() {
+        assert!(requires_https(true, "http://localhost:6996"));
+        assert!(requires_https(true, "http://podcasts.example.com"));
+        assert!(!requires_https(true, "https://podcasts.example.com"));
+        assert!(!requires_https(false, "http://localhost:6996"));
+    }
+
+    #[test]
+    fn auto_update_runs_at_most_once_per_interval() {
+        let interval = 24 * 3600;
+        // Never ran (last = 0, far in the past) -> due.
+        assert!(update_due(1_700_000_000, 0, interval));
+        // Ran recently -> not due.
+        assert!(!update_due(100, 50, interval));
+        assert!(!update_due(interval - 1, 0, interval));
+        // Interval elapsed -> due.
+        assert!(update_due(interval, 0, interval));
+        assert!(update_due(interval + 10, 0, interval));
+    }
+
+    #[test]
+    fn shipped_sample_config_still_uses_placeholder_key() {
+        // The checked-in sample config.yml must keep a 64-byte placeholder
+        // secret_key so copy-paste deployments cannot silently run with a
+        // known signing key (main() fails fast in production on it).
+        let sample = include_str!("../config.yml");
+        assert!(sample.contains("REPLACE_THIS"));
+        assert!(sample.contains("secret_key:"));
     }
 }
 
