@@ -64,7 +64,7 @@ export const api = {
 	},
 
 	async logout() {
-		return request<null>('/api/1.0/logout/', { method: 'GET' });
+		return request<null>('/api/1.0/logout/', { method: 'POST' });
 	},
 
 	async getSession() {

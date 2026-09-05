@@ -15,6 +15,7 @@ use actix_web::web;
 use tracing::info;
 
 use super::models::{images_dir, AppState, Credentials};
+use super::utils::csrf::CsrfProtection;
 use super::utils::middleware::{RequireSession, SessionOrBasicAuth};
 use feed::web_feed;
 
@@ -27,7 +28,14 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("/api").service(
                     web::scope("/1.0")
-                        .service(web::resource("/logout/").route(web::get().to(logout::get_logout)))
+                        // CSRF protection for cookie-authenticated state
+                        // changes: rejects cross-site (Origin not in the
+                        // allowlist) non-GET/HEAD/OPTIONS requests.
+                        .wrap(CsrfProtection)
+                        // Logout mutates state (session purge), so it must be
+                        // a POST: GET is exempt from the CSRF origin check and
+                        // a cross-site GET would let any site log the user out.
+                        .service(web::resource("/logout/").route(web::post().to(logout::post_logout)))
                         .service(web::resource("/status/").route(web::get().to(status::get_status)))
                         .service(web::resource("/login/").route(web::post().to(login::post_login)))
                         .service(
