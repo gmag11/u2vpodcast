@@ -553,11 +553,16 @@ export const usePlayerStore = defineStore('player', () => {
 
 	function onTimeUpdate() {
 		if (audio) {
+			// Read the playhead ONCE and reuse it: on iOS the media pipeline can
+			// advance `currentTime` between two reads of the same property, so
+			// comparing a target computed from one read against a fresh read
+			// would spuriously seek back on every tick and stall playback.
+			const current = audio.currentTime;
 			const target = sponsorBlockSkipTarget(
-				audio.currentTime,
+				current,
 				activeSponsorBlockSegments(currentEpisode.value)
 			);
-			if (target !== audio.currentTime) audio.currentTime = target;
+			if (target !== current) audio.currentTime = target;
 			currentTime.value = target;
 		}
 		tryResumeSeek();

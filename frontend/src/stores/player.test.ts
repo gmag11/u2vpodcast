@@ -45,12 +45,19 @@ vi.mock('@/lib/api/client', () => ({
 class MockAudioElement {
 	static instances: MockAudioElement[] = [];
 	static defaultClamp = 0;
+	// When > 0 the playhead advances by this amount on every `currentTime`
+	// read, mimicking a live iOS media pipeline that ticks media time between
+	// two reads of the same property within one handler invocation.
+	static advanceOnRead = 0;
 
 	src = '';
 	_currentTime = 0;
 	// Simulates a browser that only allows seeking within its buffered prefix:
 	// while `seekClampEnd > 0`, currentTime is clamped to it (like `seekable`).
 	seekClampEnd = MockAudioElement.defaultClamp;
+	// Counts explicit seek writes (`currentTime` assignments) so tests can
+	// assert that a handler did not rewind the playhead.
+	seekWrites = 0;
 	duration = 0;
 	volume = 1;
 	muted = false;
@@ -61,10 +68,15 @@ class MockAudioElement {
 	preload = 'metadata';
 
 	get currentTime() {
-		return this._currentTime;
+		const value = this._currentTime;
+		if (MockAudioElement.advanceOnRead > 0) {
+			this._currentTime += MockAudioElement.advanceOnRead;
+		}
+		return value;
 	}
 
 	set currentTime(v: number) {
+		this.seekWrites += 1;
 		this._currentTime = this.seekClampEnd > 0 && v > this.seekClampEnd ? this.seekClampEnd : v;
 	}
 
@@ -309,6 +321,39 @@ describe('SponsorBlock playback', () => {
 		player.seek(130);
 		expect(audio.currentTime).toBe(150);
 		expect(player.currentTime).toBe(150);
+	});
+
+	it('does not rewind the playhead when media time ticks between reads (iOS)', async () => {
+		// Regression: iOS advances `currentTime` continuously, so a handler
+		// that computes a target from one read and then compares it against a
+		// *fresh* read spuriously sees a mismatch and rewinds the playhead on
+		// every `timeupdate`, freezing playback near t=0 on ALL episodes.
+		MockAudioElement.advanceOnRead = 0.001;
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		item.sponsorblock_hash = 'hash-a';
+		await player.play(item);
+		const audio = MockAudioElement.instances[0];
+
+		// Position the playhead outside any segment.
+		audio.currentTime = 5;
+		const seeksBefore = audio.seekWrites;
+		for (let i = 0; i < 200; i++) {
+			audio.emit('timeupdate');
+		}
+		// Outside a rejected interval the target equals the current time, so no
+		// explicit seek must ever be issued (each one would stall playback).
+		expect(audio.seekWrites).toBe(seeksBefore);
+
+		// Even inside a rejected interval the skip must go strictly forward and
+		// happen once, not loop forever re-seeking to the segment end.
+		audio.currentTime = 121;
+		const seeksAtSegment = audio.seekWrites;
+		audio.emit('timeupdate');
+		expect(audio.currentTime).toBe(150);
+		expect(audio.seekWrites).toBe(seeksAtSegment + 1);
+		MockAudioElement.advanceOnRead = 0;
 	});
 
 	it('uses rejected intervals for resume and relative seeks but bypasses them when disabled', async () => {
