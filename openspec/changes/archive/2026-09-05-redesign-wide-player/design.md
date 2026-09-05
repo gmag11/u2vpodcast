@@ -37,8 +37,11 @@ The wide bar restructures from one dense row to: (top) the full-width scrubber s
 ### D4: Use `ScrollingText` for the wide episode title
 The compact bar uses the existing `ScrollingText` component (`ScrollingText.vue`) for the marquee. The wide title will use the same component so overflowing titles scroll while playing and truncate while paused/reduced-motion — identical behavior to the compact bar.
 
-### D5: `Chapter · Channel` secondary line
-The second metadata line shows the current chapter title (when within a chapter, via the existing `currentChapterTitle` computed) followed by the channel name (`channel_title`). When no chapter is active, only the channel name shows. Rationale: satisfies the requested vertical order (title, chapter, channel) in two lines.
+### D5: Three-line metadata (title, chapter, channel)
+The metadata block stacks three lines: the episode title (`ScrollingText`), the current chapter title (via the existing `currentChapterTitle` computed, rendered only when within a chapter), and the channel name. When no chapter is active the middle line is omitted. The third line is always shown when an episode is loaded. Rationale: matches the requested vertical order and reads cleanly; the compact bar already fits three short lines.
+
+### D6: Chapters popover instead of a full-screen expanded view
+The wide bar adds a "Chapters" toggle that opens a popover (same pattern as the "Up next" queue panel) containing previous/next chapter controls and the full chapter list with jump-to-chapter and active-row highlighting. It reuses the `nextChapterStart` / `previousChapterSeekTarget` helpers and the `formatChapterStart` logic already used by the mobile expanded view, mirroring its chapter behavior exactly without an expandable/desktop now-playing view. Rationale: satisfies the user's request for chapter navigation and the list while honoring the fixed non-expandable bar.
 
 ## Risks / Trade-offs
 
@@ -46,6 +49,7 @@ The second metadata line shows the current chapter title (when within a chapter,
 - [Wide bar height growth] → The strip sits on the top border and the content row keeps the current height, so the bar should not grow meaningfully; verify no layout shift.
 - [Marquee on desktop could feel distracting] → Same `ScrollingText` reduced-motion/paused truncation already used on mobile; consistent behavior.
 - [Chapter·Channel line truncation] → Long channel names truncate (`truncate`), consistent with current behavior.
+- [Chapters popover may crowd the bar] → Same compact toggle pattern as the queue panel; hidden entirely when the episode has no chapters.
 - [Test churn] → `PersistentPlayer.test.ts` references `player-wide` selectors and metadata; update assertions to the new structure and add wide-specific scenarios.
 
 ## Migration Plan

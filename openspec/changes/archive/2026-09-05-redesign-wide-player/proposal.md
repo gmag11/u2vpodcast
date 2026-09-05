@@ -5,10 +5,11 @@ The desktop (wide, viewport >= 640px) persistent player bar has not followed the
 ## What Changes
 
 - Move the interactive progress scrubber (with chapter and SponsorBlock markers) to a full-width strip along the top edge of the wide bar, maximizing horizontal seek precision while taking almost no vertical space. The visual strip stays thin; the interactive hit area extends beyond it for easier targeting.
-- Reorganize the left metadata block from one title + chapter + `label / duration` line to two lines: the episode title (now using the existing scrolling/`ScrollingText` marquee when it overflows, matching the compact bar) and a secondary `Chapter · Channel` line.
+- Reorganize the left metadata block from one title + chapter + `label / duration` line to three lines: the episode title (using the existing scrolling/`ScrollingText` marquee when it overflows, matching the compact bar), the current chapter title (optional), and the channel name.
 - Move the elapsed/total time readout (`currentLabel / durationLabel`) to sit beside the thumbnail, using tabular numerals.
 - Keep the thumbnail static (not clickable) and keep all existing controls in their current horizontal position: previous, play/pause, stop, next, speed, shuffle, repeat, mute/volume, and the "Up next" queue panel.
-- No new capabilities; no change to playback state, transport behavior, or the compact/expanded compositions.
+- Add a "Chapters" toggle that opens a popover (mirroring the queue panel pattern) exposing previous/next chapter navigation and the full chapter list with jump-to-chapter and active-chapter highlighting, matching the mobile expanded view's chapter behavior without a full-screen expanded view.
+- No new capabilities; no change to playback state or transport behavior, and the compact/expanded compositions are unchanged.
 
 ## Capabilities
 
