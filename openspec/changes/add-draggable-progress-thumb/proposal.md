@@ -4,21 +4,21 @@ The persistent player's progress track only supports jump-by-click (and drag for
 
 ## What Changes
 
-- Add a visible draggable thumb (dot) on the progress track of the **wide** and **expanded** player compositions, rendered at the current playback position, using the same accent color as the progress fill.
+- Add a visible draggable thumb (dot) on the progress track of the **wide** (desktop) and **expanded** (mobile expanded) player compositions, rendered at the current playback position, using the same accent color as the progress fill.
 - While dragging the thumb, show a tooltip above it displaying the time (current label format, `elapsed / total`) of the position that will be sought on release.
 - While dragging, update the thumb position and tooltip to follow the pointer, without committing a seek; on release, seek playback to the chosen position (subject to existing SponsorBlock skip behavior).
-- Make the **compact** (mobile) progress track interactive: show the same draggable thumb and tooltip so users can scrub from the collapsed mobile player.
 - Keep the existing click-to-seek behavior working alongside the thumb.
+- The **compact** (mobile collapsed) progress track remains read-only and unchanged.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `draggable-progress-thumb`: A reusable draggable thumb on the player progress track, with drag-preview tooltip showing target time, applied consistently across the compact, wide, and expanded player compositions.
+- `draggable-progress-thumb`: A reusable draggable thumb on the player progress track, with drag-preview tooltip showing target time, applied to the wide (desktop) and expanded (mobile expanded) player compositions.
 
 ### Modified Capabilities
 
-- `persistent-audio-player`: The interactive scrubber requirements change so that all player compositions (compact included) render a draggable thumb with a drag-preview time tooltip and support scrubbing by drag, not just click.
+<!-- No existing requirements change: the wide scrubber already requires a draggable hit area (persistent-audio-player), and the expanded view's scrubber inherits it. The thumb + tooltip are new behavior covered by the new capability above. -->
 
 ## Impact
 
