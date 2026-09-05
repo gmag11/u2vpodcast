@@ -151,7 +151,50 @@ fn image_fetch_blocking(dest: &str, remote_url: &str) -> Result<ImageFetchOutcom
 // failed — in which case the caller keeps the previous `channel.image`
 // untouched (channel-image-cache).
 pub async fn cache_image(slug: &str, remote_url: &str) -> Result<Option<String>, Error> {
+    // SSRF defense in depth: `remote_url` is the `og:image` value scraped from
+    // a channel's HTML page (external, not channel-URL validated). Restrict it
+    // to YouTube's image CDNs over https before any HEAD/GET is issued; a
+    // bogus value means "no image", never a fetch to an arbitrary host.
+    if !image_url_is_allowed(remote_url) {
+        warn!(
+            "Rejecting cover image URL for `{slug}`: not an https URL on a YouTube image host"
+        );
+        return Ok(None);
+    }
     cache_image_in_dir(images_dir(), slug, remote_url).await
+}
+
+// YouTube `og:image` covers are served from these CDNs over https only.
+fn image_url_is_allowed(raw: &str) -> bool {
+    let url = raw.trim();
+    let rest = match url.split_once("://") {
+        Some(("https", rest)) => rest,
+        _ => return false,
+    };
+    if rest.contains('@') {
+        return false;
+    }
+    let hostport = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_lowercase();
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(p) => (h, p),
+            Err(_) => return false,
+        },
+        None => (hostport.as_str(), 443),
+    };
+    if host.is_empty() || port != 443 {
+        return false;
+    }
+    host == "ytimg.com"
+        || host.ends_with(".ytimg.com")
+        || host == "googleusercontent.com"
+        || host.ends_with(".googleusercontent.com")
+        || host.ends_with(".ggpht.com")
 }
 
 // Directory-injectable variant used by production (`images_dir()`) and by the
@@ -785,4 +828,37 @@ async fn test_info_video() {
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
     assert!(ytinfo.is_ok())
+}
+
+#[cfg(test)]
+mod image_url_validation_tests {
+    use super::image_url_is_allowed;
+
+    #[test]
+    fn accepts_youtube_image_cdn_hosts() {
+        for url in [
+            "https://yt3.googleusercontent.com/ytc/photo.jpg",
+            "https://i.ytimg.com/vi/abc/maxresdefault.jpg",
+            "https://yt3.ggpht.com/photo.jpg",
+            "https://i.ytimg.com/vi/x.jpg?w=120",
+        ] {
+            assert!(image_url_is_allowed(url), "{url} must be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_internal_and_foreign_hosts() {
+        for url in [
+            "http://yt3.googleusercontent.com/x.jpg",
+            "http://169.254.169.254/latest/meta-data/",
+            "https://internal.local/x.jpg",
+            "https://example.com/x.jpg",
+            "https://youtube.com.evil.com/x.jpg",
+            "file:///etc/passwd",
+            "https://i.ytimg.com:8080/x.jpg",
+            "https://user:pass@i.ytimg.com/x.jpg",
+        ] {
+            assert!(!image_url_is_allowed(url), "{url} must be rejected");
+        }
+    }
 }

@@ -79,6 +79,53 @@ fn slugify(title: &str) -> String {
     slug.trim_matches('_').to_string()
 }
 
+// SSRF guard for channel URLs (channel-url-validation). The URL is fetched by
+// the server (ureq metadata fetch + yt-dlp) on every sync, so it must be
+// restricted to YouTube hosts only: scheme must be https, the host must be
+// youtube.com (or a subdomain) or youtu.be, no credentials in the URL, no
+// custom ports, and no IP-literal hosts (a DNS-rebinding attack would require
+// the attacker to control one of these domains, which they cannot).
+fn validate_channel_url(raw: &str) -> Result<String, Error> {
+    let url = raw.trim();
+    let invalid = || {
+        Error::new_with_status_code(
+            "Invalid channel URL: must be an https:// URL on youtube.com or youtu.be",
+            StatusCode::BAD_REQUEST,
+        )
+    };
+    let (scheme, rest) = url.split_once("://").ok_or_else(invalid)?;
+    if scheme != "https" {
+        return Err(invalid());
+    }
+    let hostport = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('.');
+    // Reject embedded credentials (userinfo), checked on the authority part
+    // only: `@` inside the path is a valid YouTube channel handle.
+    if hostport.is_empty() || hostport.contains('@') {
+        return Err(invalid());
+    }
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().map_err(|_| invalid())?),
+        None => (hostport, 443),
+    };
+    if host.is_empty() || port != 443 || host.parse::<std::net::IpAddr>().is_ok() {
+        return Err(invalid());
+    }
+    let host = host.to_lowercase();
+    let allowed = host == "youtube.com"
+        || host == "youtu.be"
+        || host == "m.youtube.com"
+        || host == "music.youtube.com"
+        || host.ends_with(".youtube.com");
+    if !allowed {
+        return Err(invalid());
+    }
+    Ok(url.to_string())
+}
+
 impl Channel {
     fn from_row(row: SqliteRow) -> Self {
         info!("from_row");
@@ -110,9 +157,10 @@ impl Channel {
                 StatusCode::BAD_REQUEST,
             ));
         }
+        let url = validate_channel_url(&channel.url)?;
         let created_at = Utc::now();
         let updated_at = created_at;
-        let ytinfo = match YTInfo::new(&channel.url).await {
+        let ytinfo = match YTInfo::new(&url).await {
             Ok(ytinfo) => ytinfo,
             Err(_) => YTInfo::default(),
         };
@@ -135,7 +183,7 @@ impl Channel {
                 format!("{}-{}", base_slug, attempt + 1)
             };
             match query(sql)
-                .bind(&channel.url)
+                .bind(&url)
                 .bind(&ytinfo.title)
                 .bind(&slug)
                 .bind(channel.active)
@@ -316,13 +364,14 @@ impl Channel {
                 StatusCode::BAD_REQUEST,
             ));
         }
+        let url = validate_channel_url(&channel.url)?;
         let updated_at = Utc::now();
         // The slug stays immutable: renaming a channel must not change its slug
         // or audio directory (see channel-slugs spec).
         let sql = "UPDATE channels SET url = $1, active = $2, first = $3, max = $4,
                    title = $5, updated_at = $6 WHERE id = $7 RETURNING *";
         query(sql)
-            .bind(&channel.url)
+            .bind(&url)
             .bind(channel.active)
             .bind(channel.first)
             .bind(channel.max)
@@ -790,5 +839,63 @@ mod playback_speed_tests {
             .await
             .expect_err("must not find the channel");
         assert_eq!(error.status_code(), StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod channel_url_validation_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_youtube_channel_playlist_and_video_urls() {
+        for url in [
+            "https://www.youtube.com/@atareao/videos",
+            "https://youtube.com/c/atareao",
+            "https://m.youtube.com/user/atareao",
+            "https://music.youtube.com/channel/UCxxx",
+            "https://www.youtube.com/playlist?list=PL3lTiK2rXrUFdTzriDsmNCG28T8u7bhEd",
+            "https://youtu.be/2A1abiQJAiM",
+        ] {
+            assert!(validate_channel_url(url).is_ok(), "{url} must be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_schemes() {
+        for url in [
+            "http://www.youtube.com/@atareao",
+            "file:///etc/passwd",
+            "ftp://youtube.com/channel",
+            "javascript://youtube.com/x",
+        ] {
+            assert!(validate_channel_url(url).is_err(), "{url} must be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_internal_and_ip_hosts() {
+        for url in [
+            "https://169.254.169.254/latest/meta-data/",
+            "https://127.0.0.1/",
+            "https://localhost/admin",
+            "https://10.0.0.1:443/x",
+            "https://192.168.1.1/",
+        ] {
+            assert!(validate_channel_url(url).is_err(), "{url} must be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_lookalike_and_custom_ports() {
+        for url in [
+            "https://youtube.com.evil.com/@x",
+            "https://evilyoutube.com/@x",
+            "https://notyoutube.com/@x",
+            "https://www.youtube.com:8080/@x",
+            "https://user:pass@www.youtube.com/@x",
+            "https://",
+        ] {
+            assert!(validate_channel_url(url).is_err(), "{url} must be rejected");
+        }
     }
 }
