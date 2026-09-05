@@ -176,6 +176,18 @@ fn unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+// True when the process runs as a real deployment (RUST_ENV=production, set by
+// the docker-compose files). Local `cargo run` development leaves it unset, and
+// the deployment-only safety guards below relax to warnings in that case so the
+// sample config (placeholder key, http url) keeps working locally.
+fn deployment_mode(rust_env: Option<&str>) -> bool {
+    rust_env == Some("production")
+}
+
+fn is_deployment_runtime() -> bool {
+    deployment_mode(var("RUST_ENV").ok().as_deref())
+}
+
 // True when the periodic auto-update should run: at least `interval_secs` have
 // elapsed since the last run (`last`), or it never ran.
 fn update_due(now: u64, last: u64, interval_secs: u64) -> bool {
@@ -267,9 +279,10 @@ async fn main() -> Result<(), Error> {
 
     // The sample config ships a placeholder session key; a deployment that
     // reuses it lets anyone with the repository forge session cookies. Fail
-    // fast in production; warn in development so a local run is possible.
+    // fast only in a real deployment (RUST_ENV=production); in local
+    // development the sample config keeps working with a warning.
     if is_placeholder_secret(&config.secret_key) {
-        if config.production {
+        if is_deployment_runtime() {
             return Err(Error::default(
                 "config.yml `secret_key` is still the sample placeholder — generate a random \
                  64-byte key for this deployment before going live \
@@ -283,9 +296,9 @@ async fn main() -> Result<(), Error> {
     }
 
     // The production session cookie is `Secure`; without TLS in front of the
-    // app the browser never sends it and login silently breaks. Fail fast
-    // instead of deploying a deployment that cannot authenticate.
-    if requires_https(config.production, &config.url) {
+    // app the browser never sends it and login silently breaks. Fail fast in a
+    // real deployment; local development may run over plain http.
+    if requires_https(is_deployment_runtime(), &config.url) {
         return Err(Error::default(
             "config.yml `url` must use https:// in production mode: the Secure \
              session cookie requires HTTPS (and it is the CORS/feed origin). \
@@ -475,7 +488,7 @@ mod cors_tests {
 
 #[cfg(test)]
 mod deployment_guard_tests {
-    use super::{is_placeholder_secret, requires_https, update_due};
+    use super::{deployment_mode, is_placeholder_secret, requires_https, update_due};
 
     #[test]
     fn placeholder_secret_is_detected() {
@@ -483,6 +496,14 @@ mod deployment_guard_tests {
         assert!(is_placeholder_secret("prefix REPLACE_THIS suffix"));
         assert!(!is_placeholder_secret(&"x".repeat(64)));
         assert!(!is_placeholder_secret(""));
+    }
+
+    #[test]
+    fn deployment_mode_detects_production_env_only() {
+        assert!(deployment_mode(Some("production")));
+        assert!(!deployment_mode(Some("development")));
+        assert!(!deployment_mode(Some("")));
+        assert!(!deployment_mode(None));
     }
 
     #[test]
