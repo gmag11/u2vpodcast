@@ -149,6 +149,7 @@
 		"speedDecrease": "Reducir velocidad",
 		"collapse": "Cerrar vista ampliada",
 		"expand": "Ampliar reproductor",
+		"showPlayer": "Mostrar reproductor",
 		"seekBack10": "Retroceder 10 segundos",
 		"seekForward10": "Avanzar 10 segundos",
 		"mobileModeNormal": "Orden normal"

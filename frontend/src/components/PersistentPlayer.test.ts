@@ -392,27 +392,37 @@ describe('PersistentPlayer controls', () => {
 		startPlayback(player);
 		player.upNext = [episode(2), episode(3)];
 		await mountBar();
-		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(true);
 
 		// stop playback with items still queued -> the bar still auto-hides
 		player.playing = false;
 		player.stopped = true;
 		await flushPromises();
-		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(true);
 
 		await vi.advanceTimersByTimeAsync(10050);
 		await flushPromises();
-		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(false);
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(false);
 	});
 
-	it('shows the bar in queue-only mode after a reload with no current episode', async () => {
+	it('keeps a queue-only bar hidden on reload and restores it via the reopen control', async () => {
 		const player = usePlayerStore();
 		player.currentEpisode = null;
 		player.upNext = [episode(2)];
 		player.stopped = true;
 
-		const bar = await mountBar();
-		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+
+		// queue-only stopped bar is hidden: the reopen control is the path back
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(false);
+		expect(wrapper!.find('[data-testid="player-reopen"]').exists()).toBe(true);
+
+		await wrapper!.get('[data-testid="player-reopen"]').trigger('click');
+		await flushPromises();
+		const bar = wrapper!.get('[data-testid="player-wide"]');
 		expect(bar.text()).toContain('Queue ready');
 
 		const playBtn = bar.get('button[aria-label="Play"]');
@@ -919,5 +929,172 @@ describe('PersistentPlayer speed control', () => {
 
 		await openPanel(bar);
 		expect(bar.get('[data-testid="speed-value"]').text()).toBe('1.7x');
+	});
+});
+
+describe('PersistentPlayer reopen control', () => {
+	let wrapper: ReturnType<typeof mount> | null = null;
+
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		localStorage.clear();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		wrapper?.unmount();
+		wrapper = null;
+		vi.useRealTimers();
+	});
+
+	async function mountPlayer() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+	}
+
+	async function mountBar() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+		return wrapper.get('[data-testid="player-wide"]');
+	}
+
+	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
+		player.currentEpisode = episode(1);
+		player.playing = true;
+		player.stopped = false;
+	}
+
+	function stop(player: ReturnType<typeof usePlayerStore>) {
+		player.playing = false;
+		player.stopped = true;
+	}
+
+	const reopenControl = () => wrapper!.find('[data-testid="player-reopen"]');
+	const barEl = () => wrapper!.find('[data-testid="player-bar"]');
+
+	it('renders no reopen control while the bar is visible', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+
+		await mountBar();
+		expect(barEl().exists()).toBe(true);
+		expect(reopenControl().exists()).toBe(false);
+	});
+
+	it('shows the reopen control once the bar auto-hides after a stop', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		expect(reopenControl().exists()).toBe(false);
+
+		stop(player);
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('restores the bar without starting playback or mutating state', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+		await mountBar();
+		stop(player);
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(reopenControl().exists()).toBe(true);
+
+		await reopenControl().trigger('click');
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+		expect(player.playing).toBe(false);
+		expect(player.stopped).toBe(true);
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.upNext.map((e) => e.id)).toEqual([2]);
+	});
+
+	it('re-arms the hide timer when reopening a stopped bar', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		stop(player);
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(reopenControl().exists()).toBe(true);
+
+		// reopening a stopped bar shows it again and arms a fresh 10 s delay
+		await reopenControl().trigger('click');
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+		expect(player.playing).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('renders no reopen control with no current episode and an empty queue', async () => {
+		usePlayerStore();
+		await mountPlayer();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(false);
+	});
+
+	it('auto-hides a stopped queue-only bar and restores it with the queue intact', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+		await mountPlayer();
+
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+
+		await reopenControl().trigger('click');
+		await flushPromises();
+		const bar = wrapper!.get('[data-testid="player-wide"]');
+		expect(bar.text()).toContain('Queue ready');
+		expect(player.currentEpisode).toBeNull();
+		expect(player.upNext.map((e) => e.id)).toEqual([2]);
+		expect(player.playing).toBe(false);
+
+		// reopened stopped bar auto-hides again after the delay
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('renders the bar hidden and the reopen control visible on a queue-only cold load', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+		await mountPlayer();
+
+		// a restored stopped queue starts hidden: the reopen control is the
+		// only path back, and no hide timer reveals the bar while nothing plays
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+		expect(reopenControl().attributes('aria-label')).toBe('Show player');
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
 	});
 });

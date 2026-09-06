@@ -1,6 +1,7 @@
 <script setup lang="ts">
 	import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 	import {
+		PhCaretUp,
 		PhGauge,
 		PhList,
 		PhListDashes,
@@ -43,6 +44,10 @@
 	const expanded = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
 	let compactMediaQuery: MediaQueryList | null = null;
+
+	// Whether the player holds content the reopen control can restore: a
+	// current episode or a non-empty up-next queue (add-player-reopen-control).
+	const canRestore = computed(() => player.currentEpisode != null || player.upNext.length > 0);
 
 	function onCompactMediaQueryChange(event: MediaQueryListEvent) {
 		// The expanded view only exists for the compact composition
@@ -128,11 +133,26 @@
 		}, 10000);
 	}
 
+	// Reopen control activation (add-player-reopen-control): restores the bar
+	// without touching the player state (no play, no queue/current-episode
+	// mutation). A stopped player re-arms the auto-hide timer so the reopened
+	// stopped bar hides again after the usual delay, exactly as if it had
+	// become visible through any other path.
+	function restoreBar() {
+		visible.value = true;
+		if (player.stopped) {
+			clearHideTimer();
+			armHideTimer();
+		}
+	}
+
 	watch(
 		() =>
 			[player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
 		([playing, stopped, episodeId, queueLength]) => {
 			if (episodeId == null && queueLength === 0) {
+				// Nothing to restore: the bar stays hidden and no hide timer
+				// is armed while nothing plays (add-player-reopen-control).
 				visible.value = false;
 				clearHideTimer();
 				return;
@@ -142,14 +162,11 @@
 				clearHideTimer();
 				return;
 			}
-			if (episodeId == null) {
-				// Queue-only mode (e.g. right after a reload that restored the
-				// queue but no current episode): the bar exists so the queue
-				// stays reachable until the user plays something.
-				visible.value = true;
-				clearHideTimer();
-				return;
-			}
+			// Every stopped state with restorable content (an episode or a
+			// queue) auto-hides on the same delay — including the queue-only
+			// case (a restored queue without a current episode), which used to
+			// keep the bar visible (add-player-reopen-control). The reopen
+			// control is the path back without starting playback.
 			if (stopped && !playing) {
 				armHideTimer();
 			}
@@ -244,8 +261,9 @@
 		leave-to-class="translate-y-full"
 	>
 		<div
-			v-if="visible && (player.currentEpisode != null || player.upNext.length > 0)"
+			v-if="visible && canRestore"
 			class="fixed bottom-0 left-0 right-0 z-30 border-t border-outline bg-surface/95 shadow-[0_-4px_20px_var(--glow)] backdrop-blur-xl"
+			data-testid="player-bar"
 		>
 			<div class="sm:hidden" data-testid="player-compact">
 				<div
@@ -706,6 +724,17 @@
 			</div>
 		</div>
 	</Transition>
+
+	<button
+		v-if="!visible && canRestore"
+		type="button"
+		class="fixed bottom-0 left-1/2 z-30 flex h-9 -translate-x-1/2 items-center justify-center rounded-t-xl border border-b-0 border-outline bg-surface-card px-3 text-text shadow-card transition-colors hover:text-accent-400"
+		:aria-label="$t('player.showPlayer')"
+		data-testid="player-reopen"
+		@click="restoreBar"
+	>
+		<PhCaretUp class="h-4 w-4" weight="bold" />
+	</button>
 
 	<PersistentPlayerExpanded :open="expanded" @close="closeExpanded" />
 </template>
