@@ -52,18 +52,18 @@ Clicking the control sets `visible.value = true`. The existing `watch` on player
 
 ### Decision 4: Positioning and presentation
 
-Render a single compact circular button, fixed near the bottom edge, centered or right-aligned depending on composition:
+Render a single discrete drawer tab anchored to the bottom edge, centered horizontally, replacing the visual slot the bar occupies when shown. It carries only a caret-up glyph (no text label) so it reads as "expand the player" without competing with page content:
 
-- Desktop: a pill anchored bottom-center/right above where the bar would sit.
-- Mobile compact: bottom-right above the tab bar / safe area.
+- A small rounded-top tab pinned at the screen bottom (`fixed bottom-0`, `left-1/2` + `-translate-x-1/2`, `rounded-t-xl`), with `border-outline` top corners and `bg-surface-card`, matching where the hidden bar would sit.
+- Consistent across both compositions (wide and compact): same centered tab, no responsive reflow.
+- The icon is a re-used chevron glyph `PhCaretUp`. It uses existing design tokens (`bg-surface-card`, `border-outline`, `shadow-card`) and sits at `z-30`, matching the bar. An `aria-label` from i18n describes the action ("Show player") for assistive tech.
 
-The icon is a re-used play/chevron glyph (e.g. `PhCaretUp`) to signal "expand the player". It uses existing design tokens (`bg-surface-card`, `border-outline`, `shadow-card`) and sits at `z-30`, matching the bar. A `title`/`aria-label` from i18n describes the action ("Show player").
-
-- **Why**: the existing design system already defines the surface/shadow tokens; no new styling primitives needed.
+- **Why**: a minimal, always-visible affordance reads clearly as "the player is collapsed here" and never overlaps content — unlike a floating right-corner pill it stays on the same bottom edge the bar owns, so it is unobtrusive yet obviously interactive.
+- **Why no text**: the user asked for a discreet control without text; the caret-up glyph plus the same bottom-edge position is enough to signal the collapsed player. Wide and compact get identical affordances, so a single element (no `sm:` variants) is enough.
 
 ### Decision 5: Data-testid for the control
 
-Expose a stable `data-testid="player-reopen"` so component tests can target it (mirroring existing `data-testid="player-wide"`, `player-compact`, `player-expanded`).
+Expose a stable `data-testid="player-reopen"` so component tests can target it (mirroring existing `data-testid="player-wide"`, `player-compact`, `player-expanded`). The bar element also carries `data-testid="player-bar"` so tests distinguish it from the reopen tab (both sit at `fixed bottom-0`).
 
 ## Risks / Trade-offs
 
