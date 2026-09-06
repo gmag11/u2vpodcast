@@ -283,10 +283,10 @@ When the user starts playback on an episode that is not the current one, the sha
 
 ### Requirement: Animated auto-hide on stop
 
-When playback stops (user presses stop, or the audio reaches its end) and the up-next queue is empty, the persistent bar SHALL remain visible for 10 seconds and then disappear with a downward slide animation. When the queue is not empty the bar SHALL NOT auto-hide: it SHALL stay visible so the queue stays accessible for inspection and management. Any new play action SHALL bring the bar back with an upward slide animation. While audio is playing or paused mid-track (not stopped), the bar SHALL remain visible.
+When playback stops (user presses stop, or the audio reaches its end), the persistent bar SHALL remain visible for 10 seconds and then disappear with a downward slide animation, regardless of whether the up-next queue still holds episodes. Any new play action SHALL bring the bar back with an upward slide animation. While audio is playing or paused mid-track (not stopped), the bar SHALL remain visible.
 
 #### Scenario: Bar hides after stop with delay and animation
-- **WHEN** the user presses stop with an empty queue and no new playback starts
+- **WHEN** the user presses stop and no new playback starts
 - **THEN** the bar stays visible for 10 seconds, then animates downward and is removed from view
 
 #### Scenario: Play resumes before the hide delay
@@ -297,13 +297,9 @@ When playback stops (user presses stop, or the audio reaches its end) and the up
 - **WHEN** the user pauses an episode without stopping it
 - **THEN** the bar remains visible and shows the paused state; it does not auto-hide
 
-#### Scenario: Bar stays visible with queued episodes
+#### Scenario: Bar auto-hides even with queued episodes
 - **WHEN** the user stops playback while the up-next queue still holds episodes
-- **THEN** the bar remains visible indefinitely (no auto-hide) so the queue panel stays reachable
-
-#### Scenario: Hide resumes once the queue empties
-- **WHEN** the queue becomes empty (removed or cleared) while the bar is stopped
-- **THEN** the bar starts its 10-second auto-hide delay as usual
+- **THEN** the bar starts its 10-second auto-hide delay like any other stop
 
 ### Requirement: Stop action clears playback
 

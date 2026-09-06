@@ -150,13 +150,6 @@
 				clearHideTimer();
 				return;
 			}
-			if (stopped && queueLength > 0) {
-				// A non-empty queue must stay reachable: keep the bar visible so
-				// the user can inspect and manage up-next without playing.
-				visible.value = true;
-				clearHideTimer();
-				return;
-			}
 			if (stopped && !playing) {
 				armHideTimer();
 			}

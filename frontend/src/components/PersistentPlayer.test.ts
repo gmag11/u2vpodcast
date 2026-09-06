@@ -386,7 +386,7 @@ describe('PersistentPlayer controls', () => {
 		expect(bar.text()).toContain('No episodes queued');
 	});
 
-	it('keeps the bar visible after stop while the queue is non-empty, then hides when it empties', async () => {
+	it('hides the bar after stop even while the queue is non-empty', async () => {
 		vi.useFakeTimers();
 		const player = usePlayerStore();
 		startPlayback(player);
@@ -394,14 +394,12 @@ describe('PersistentPlayer controls', () => {
 		await mountBar();
 		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
 
-		// stop playback with items still queued -> stays visible
+		// stop playback with items still queued -> the bar still auto-hides
 		player.playing = false;
 		player.stopped = true;
 		await flushPromises();
 		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(true);
 
-		// empty the queue -> the 10s hide timer arms and the bar leaves
-		player.clearQueue();
 		await vi.advanceTimersByTimeAsync(10050);
 		await flushPromises();
 		expect(wrapper!.find('.fixed.bottom-0').exists()).toBe(false);
