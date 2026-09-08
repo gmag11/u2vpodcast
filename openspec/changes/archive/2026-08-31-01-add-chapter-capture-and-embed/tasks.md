@@ -1,0 +1,22 @@
+## 1. Data model: capture raw chapters at download time
+
+- [x] 1.1 Add a `Chapter` type (`start_time: f64`, `end_time: Option<f64>`, `title: String`) and a `chapters: Option<Vec<Chapter>>` field to `YtVideo` in `src/models/ytdlp.rs`; verify with a unit test that `parse_dump_output` on a fixture containing a `chapters` array populates it, and that a fixture without `chapters` (or with an empty array) yields `None`/empty
+- [x] 1.2 Add a migration (`migrations/<timestamp>_add_episode_chapters.up.sql` / `.down.sql`) adding a nullable `chapters_json TEXT` column to `episodes`; verify `cargo sqlx migrate run` (or the project's equivalent) applies cleanly against a fresh and an existing database
+- [x] 1.3 Add `chapters: Vec<EpisodeChapter>` (or equivalent) to the `Episode` struct in `src/models/episode.rs`, serialized as `start`, `end`, `title`, sourced from `chapters_json`; verify existing `Episode` read/update queries still compile and existing tests pass unchanged
+- [x] 1.4 In `src/utils/worker.rs`, thread the parsed `YtVideo.chapters` through to `Episode::new(...)` so newly downloaded episodes persist their chapters (defensively handling a missing `end_time` on the last chapter by falling back to the episode duration, and dropping any chapter with `start_time >= end_time`); verify with a unit/integration test that downloading a fixture video with chapters creates an episode row whose `chapters_json` matches
+- [x] 1.5 Verify episode read APIs (`src/handlers/episodes.rs`) include the new `chapters` field in their JSON payload for an episode with stored chapters and an empty list for one without, via an integration test
+
+## 2. Chapter translation for SponsorBlock-derived media
+
+- [x] 2.1 Add a pure `translate_chapter_time(t: f64, retained: &[SponsorBlockSegment]) -> f64` function in `src/utils/sponsorblock.rs` implementing the monotonic step function described in design.md; verify with unit tests covering: a time before any removal, a time after all removals, a time exactly at a retained interval boundary, and a time strictly inside a removed interval
+- [x] 2.2 Add a `translate_chapters(chapters: &[Chapter], retained: &[SponsorBlockSegment]) -> Vec<Chapter>` function that applies `translate_chapter_time` to each chapter's start and end and drops any chapter whose translated start equals its translated end; verify with unit tests covering: all chapters retained, one chapter fully inside a removed interval (dropped), one chapter boundary snapped forward, and an empty chapter list (returns empty)
+- [x] 2.3 Add an FFMETADATA1 sidecar writer that renders translated chapters (escaping `;`, `#`, `\`, and newlines per the FFMETADATA1 format) to a temporary file; verify with a unit test asserting the exact rendered text for a small chapter list, including an escaped title
+- [x] 2.4 Extend `generate_processed_mp3_blocking` to write the FFMETADATA1 sidecar (when the episode has stored chapters) and add `-i <sidecar> -map_metadata 1 -map_chapters 1` to the existing `ffmpeg` invocation, clean up the sidecar file alongside the existing manifest cleanup; verify with an integration test that runs `ffmpeg`/`ffprobe` against a real fixture MP3 with chapters and rejected intervals, asserting the produced file's `ffprobe -show_chapters` output has the expected translated start/end/title values
+- [x] 2.5 Verify (integration test) that generating a derived MP3 for an episode with no stored chapters produces a file with no embedded chapters, unchanged from current behavior
+- [x] 2.6 Verify (integration test) that a chapter-embedding failure (e.g., malformed sidecar) is treated as a processing failure: no partial derived file is published, `SponsorBlockCache::record_failure` is invoked, and the previously active representation remains selected
+
+## 3. Wiring and regression checks
+
+- [x] 3.1 Run the full backend test suite (`cargo test`) and confirm no existing SponsorBlock or episode-persistence tests regress
+- [x] 3.2 Manually verify end-to-end against a real fixture: download (or reuse) an episode with known chapters and an active rejected SponsorBlock interval, confirm via `ffprobe -show_chapters` on the resulting `{yt_id}.sponsorblock.*.mp3` that chapter times match the expected translated values
+- [x] 3.3 Update `frontend/src/types.ts`'s `Episode` interface to add the `chapters` field (matching the API shape from task 1.5) so the change is ready for the frontend player-markers change to consume; verify the frontend type-checks (`npm run type-check` or equivalent) with no errors

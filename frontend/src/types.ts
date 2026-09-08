@@ -15,9 +15,13 @@ export interface Channel {
 	image: string;
 	first: Date;
 	max: number;
+	playback_speed: number;
 	created_at: Date;
 	updated_at: Date;
 	last_date: string | null;
+	last_sync_at: string | null;
+	last_sync_ok: boolean | null;
+	last_sync_error: string | null;
 }
 
 export interface Episode {
@@ -25,6 +29,7 @@ export interface Episode {
 	channel_id: number;
 	channel_slug: string;
 	channel_title: string;
+	playback_speed: number;
 	title: string;
 	description: string;
 	yt_id: string;
@@ -33,8 +38,36 @@ export interface Episode {
 	duration: string;
 	image: string;
 	listen: boolean;
+	position_seconds: number;
+	listened_at: string | null;
+	favorite: boolean;
+	chapters: EpisodeChapter[];
+	sponsorblock_enabled?: boolean;
+	sponsorblock_segments?: SponsorBlockSegment[];
+	sponsorblock_hash?: string | null;
 	created_at: Date;
 	updated_at: Date;
+}
+
+export interface EpisodeChapter {
+	start: number;
+	end: number;
+	title: string;
+}
+
+export interface SponsorBlockSegment {
+	start: number;
+	end: number;
+	category: string;
+	rejected: boolean;
+}
+
+export interface EpisodeProgress {
+	id: number;
+	yt_id: string;
+	position_seconds: number;
+	listen: boolean;
+	listened_at: string | null;
 }
 
 export interface Response {

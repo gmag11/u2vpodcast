@@ -26,12 +26,23 @@ The `<item>` entries in a feed SHALL be ordered by episode `published_at` descen
 
 ### Requirement: Feed enclosure URLs point at the channel's own media
 
-For each `<item>`, the `<enclosure>` URL SHALL be `{url}/media/{slug}/{yt_id}.mp3` where `slug` is the requested channel's slug and `yt_id` is that item's own episode identifier. Because items are filtered by channel and the audio directory is named by slug, every enclosure URL corresponds to a real media file for that channel.
+For each `<item>`, the system SHALL select the active processed SponsorBlock MP3 when SponsorBlock is enabled and one exists; otherwise it SHALL select the original MP3. The `<enclosure>` URL SHALL be `{url}/media/{slug}/{selected_filename}` where `slug` is the episode's canonical channel slug. An original filename SHALL be `{yt_id}.mp3`; a processed filename SHALL be `{yt_id}.sponsorblock.{hash-prefix}.mp3`. Every enclosure URL SHALL correspond to an existing file owned by that episode.
 
 #### Scenario: Enclosure matches the item's channel
-- **WHEN** a client requests `/channels/confesiones_de_gasolinera/feed.xml` and the feed contains an episode with `yt_id` `abc123`
-- **THEN** that episode's `<enclosure>` URL is `{url}/media/confesiones_de_gasolinera/abc123.mp3`
+- **WHEN** SponsorBlock is enabled and a feed contains episode `abc123` with active processed file `abc123.sponsorblock.a81f302c.mp3`
+- **THEN** its enclosure URL is `{url}/media/{slug}/abc123.sponsorblock.a81f302c.mp3`
 
+#### Scenario: Enclosure falls back to the original episode
+- **WHEN** a feed contains episode `abc123` without an eligible active processed file
+- **THEN** its enclosure URL is `{url}/media/{slug}/abc123.mp3`
+
+#### Scenario: Legacy id feed emits the canonical selected enclosure
+- **WHEN** a client requests `/channels/3/feed.xml` for a channel whose canonical slug is `confesiones_de_gasolinera`
+- **THEN** every enclosure uses `/media/confesiones_de_gasolinera/{selected_filename}` rather than the numeric id
+
+#### Scenario: Disabled SponsorBlock ignores processed media
+- **WHEN** SponsorBlock is disabled and episode `abc123` has an existing processed file
+- **THEN** its enclosure URL is `{url}/media/{slug}/abc123.mp3`
 ### Requirement: Episodes are ordered by precise YouTube timestamp
 
 The `<item>` entries in a feed SHALL be ordered by the YouTube video's Unix epoch `timestamp` (second precision) descending, so the most recent episode appears first and episodes published on the same day are ordered in the exact sequence they appeared on YouTube.
@@ -90,7 +101,7 @@ The system SHALL serve a channel's RSS feed both at `/channels/{slug}/feed.xml` 
 
 ### Requirement: Feed is served at the legacy id URL
 
-The system SHALL resolve the feed path segment in `/channels/{key}/feed.xml` as a channel id when the segment consists only of digits, and as a channel slug otherwise. The short `/{slug}/feed.xml` alias SHALL keep resolving by slug only. When the segment is a numeric id, the system SHALL return the identical RSS document as the same channel's slug-based URL, with `<enclosure>` URLs built from the channel's canonical slug so episodes resolve to the on-disk audio directory.
+The system SHALL resolve the feed path segment in `/channels/{key}/feed.xml` as a channel id when the segment consists only of digits, and as a channel slug otherwise. The short `/{slug}/feed.xml` alias SHALL keep resolving by slug only. When the segment is a numeric id, the system SHALL return the identical RSS document as the same channel's slug-based URL, with `<enclosure>` URLs built from the channel's canonical slug and selected original or processed media filename.
 
 #### Scenario: Legacy id URL returns the same feed as the slug URL
 
@@ -99,8 +110,8 @@ The system SHALL resolve the feed path segment in `/channels/{key}/feed.xml` as 
 
 #### Scenario: Legacy id URL emits canonical slug enclosures
 
-- **WHEN** a client requests `/channels/3/feed.xml` for a channel whose slug is `confesiones_de_gasolinera` and the feed contains an episode with `yt_id` `abc123`
-- **THEN** that episode's `<enclosure>` URL is `{url}/media/confesiones_de_gasolinera/abc123.mp3`, using the canonical slug and not the numeric id
+- **WHEN** a client requests `/channels/3/feed.xml` for a channel whose slug is `confesiones_de_gasolinera` and an episode selects `{selected_filename}`
+- **THEN** that episode's `<enclosure>` URL is `{url}/media/confesiones_de_gasolinera/{selected_filename}`, using the canonical slug and not the numeric id
 
 #### Scenario: Unknown numeric id returns 404
 
@@ -111,3 +122,14 @@ The system SHALL resolve the feed path segment in `/channels/{key}/feed.xml` as 
 
 - **WHEN** a client requests `/channels/confesiones_de_gasolinera/feed.xml`
 - **THEN** the system responds `200 OK` with that channel's feed, unchanged by the legacy id alias
+
+### Requirement: Feed duration matches the selected media representation
+Each feed item's iTunes duration SHALL describe the actual selected enclosure. A processed enclosure SHALL use its measured processed duration; an original enclosure SHALL use the episode's original duration.
+
+#### Scenario: Processed enclosure publishes processed duration
+- **WHEN** a processed MP3 measured at 540 seconds is selected for an episode whose original duration is 600 seconds
+- **THEN** the feed item publishes an iTunes duration representing 540 seconds
+
+#### Scenario: Original enclosure publishes original duration
+- **WHEN** an episode has no active processed MP3
+- **THEN** its feed item retains the original episode duration

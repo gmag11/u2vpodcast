@@ -3,6 +3,7 @@ import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HistoryView from '@/views/HistoryView.vue';
+import { testI18n } from '@/test/i18n';
 import { api } from '@/lib/api/client';
 import type { Episode } from '@/types';
 
@@ -11,6 +12,7 @@ const router = createRouter({
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
 		{ path: '/history', name: 'history', component: HistoryView },
+		{ path: '/playlist', name: 'playlist', component: { template: '<div />' } },
 		{ path: '/:channelId(\\d+)', name: 'episodes', component: { template: '<div />' } }
 	]
 });
@@ -22,6 +24,7 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		channel_id: 1,
 		channel_slug: 'c',
 		channel_title: channelTitle,
+		playback_speed: 1,
 		title,
 		description: 'Description',
 		yt_id: `yt${id}`,
@@ -30,6 +33,10 @@ function episode(id: number, title: string, channelTitle = ''): Episode {
 		duration: '00:10:00',
 		image: '',
 		listen: false,
+		position_seconds: 0,
+		listened_at: null,
+		favorite: false,
+		chapters: [],
 		created_at: now,
 		updated_at: now
 	};
@@ -48,7 +55,7 @@ async function mountView() {
 	await router.push('/history');
 	await router.isReady();
 	const wrapper = mount(HistoryView, {
-		global: { plugins: [router, createPinia()] }
+		global: { plugins: [router, createPinia(), testI18n] }
 	});
 	await flushPromises();
 	return wrapper;
@@ -132,5 +139,45 @@ describe('HistoryView', () => {
 		await input.setValue('');
 		expect(wrapper.text()).toContain('Episodio 10');
 		expect(wrapper.text()).toContain('Episodio 42');
+	});
+
+	it('favorites-only filter shows only favorited episodes', async () => {
+		const fav = episode(7, 'Favorited', 'Canal');
+		fav.favorite = true;
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(
+			okResult([episode(1, 'Episodio 10'), fav]) as never
+		);
+		const wrapper = await mountView();
+		expect(wrapper.text()).toContain('Episodio 10');
+		const filter = wrapper.get('button[aria-describedby="history-favorites-filter-tooltip"]');
+		expect(filter.attributes('title')).toBeUndefined();
+		expect(wrapper.get('#history-favorites-filter-tooltip').text()).toBe('Favorites only');
+		await filter.trigger('click');
+		expect(wrapper.text()).toContain('Favorited');
+		expect(wrapper.text()).not.toContain('Episodio 10');
+	});
+
+	it('favorites-only filter combines with the search query', async () => {
+		const fav = episode(7, 'Favorited 42', 'Canal');
+		fav.favorite = true;
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(
+			okResult([episode(1, 'Episodio 42'), fav]) as never
+		);
+		const wrapper = await mountView();
+		await wrapper
+			.get('button[aria-describedby="history-favorites-filter-tooltip"]')
+			.trigger('click');
+		await wrapper.find('input[placeholder="Search episodes…"]').setValue('42');
+		expect(wrapper.text()).toContain('Favorited 42');
+		expect(wrapper.text()).not.toContain('Episodio 42');
+	});
+
+	it('shows the favorites empty state when nothing is favorited', async () => {
+		vi.mocked(api.getAllEpisodes).mockResolvedValue(okResult([episode(1, 'Episodio 10')]) as never);
+		const wrapper = await mountView();
+		await wrapper
+			.get('button[aria-describedby="history-favorites-filter-tooltip"]')
+			.trigger('click');
+		expect(wrapper.text()).toContain('No favorites yet');
 	});
 });

@@ -1,42 +1,88 @@
 use regex::Regex;
-use ureq;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tracing::{info, warn};
+use ureq::Agent;
 
-use super::Error;
+use super::{images_dir, Error};
+use crate::utils::throttle::{with_youtube_slot, YoutubeGuard};
 
+// Upper bound for the metadata fetch so a hung upstream cannot stall blocking
+// threads (or the async workers waiting on them) indefinitely.
+const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 
+// Upper bound for a cached cover image. Covers are small JPEGs; any body
+// beyond this cap is treated as a failed download and the previous cached
+// file (if any) is kept (channel-image-cache / disk-growth risk).
+const IMAGE_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+// Bounded timeout for the image probe/download, like the metadata fetch, so a
+// hung upstream cannot stall blocking threads indefinitely.
+const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
+
+// Stable local URL for a channel's cached cover; derived from the slug so it
+// stays the same across API responses until the cache is refreshed. The
+// filenames are slug-derived (`[a-z0-9_]+`), so no URL escaping is needed.
+pub fn image_local_url(slug: &str) -> String {
+    format!("/images/{slug}.jpg")
+}
 
 #[derive(Debug, Clone)]
-pub struct YTInfo{
+pub struct YTInfo {
     pub title: String,
     pub description: String,
     pub image: String,
 }
 
-impl YTInfo{
+impl YTInfo {
     pub fn default() -> Self {
-        Self{
+        Self {
             title: "".to_string(),
             description: "".to_string(),
             image: "".to_string(),
         }
     }
 
-    pub async fn new(url: &str) -> Result<Self, Error>{
-
-        let html: String = ureq::get(url)
-            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .call()
-            .map_err(|e| Error::default(&e.to_string()))?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| Error::default(&e.to_string()))?;
+    pub async fn new(url: &str) -> Result<Self, Error> {
+        // The upstream HTTP fetch is fully synchronous; run it on the blocking
+        // thread pool so two slow/hung fetches can never stall the few tokio
+        // worker threads that serve the whole API. The closure returns a plain
+        // String error because this crate's `Error` wraps a non-Send `Session`.
+        //
+        // The whole fetch runs inside the single-connection YouTube throttle:
+        // the slot is acquired before the blocking fetch and held through its
+        // cooldown, so a metadata fetch can never overlap a yt-dlp run or a
+        // cover-image fetch (youtube-throttling / limit-youtube-concurrency).
+        let url = url.to_string();
+        let html = with_youtube_slot(move || async move {
+            actix_web::rt::task::spawn_blocking(move || -> Result<String, String> {
+                let agent: Agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(METADATA_TIMEOUT))
+                    .build()
+                    .into();
+                agent.get(&url)
+                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .call()
+                    .map_err(|e| e.to_string())?
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| e.to_string())
+            })
+            // The slot closure only transports Send types (String errors), so
+            // the exposed `Error` (which wraps a non-Send session) is rebuilt
+            // here, after the slot and cooldown are released.
+            .await
+            .map_err(|e| e.to_string())?
+        })
+        .await
+        .map_err(|e| Error::default(&e))?;
 
         let title = get_metadata(&html, "og:title");
         let description = get_metadata(&html, "og:description");
         let image = get_image(&html);
 
-        Ok(Self{
+        Ok(Self {
             title,
             description,
             image,
@@ -44,41 +90,732 @@ impl YTInfo{
     }
 }
 
-fn get_image(html: &str) -> String{
-    let pattern = r#"meta\s+property="og:image"\s+content="(?P<content>[^"]*)""#;
-    let re = Regex::new(pattern).unwrap();
-    re.captures(html)
-        .map(|c| {
-            let part = c["content"].to_string();
-            part.find('?')
-            .map(|pos| part[..pos].to_string())
-            .unwrap_or(part)
-        })
-        .unwrap_or("".to_string())
+// Outcome of the blocking probe + download.
+#[derive(Debug)]
+enum ImageFetchOutcome {
+    // An existing cached file already matches the remote `Content-Length` from
+    // the HEAD probe; no download is needed.
+    Skip,
+    // Fresh bytes to store atomically.
+    Bytes(Vec<u8>),
 }
 
-fn get_metadata(html: &str, metadata: &str) -> String{
-    let pattern = format!(r#"meta\s+property="{}"\s+content="(?P<content>[^"]*)""#,
-        metadata);
-    let re = Regex::new(&pattern).unwrap();
-    re.captures(html)
-        .map(|c| c["content"].to_string())
-        .unwrap_or("".to_string())
-        
+// Blocking ureq HEAD probe + bounded GET, run inside `spawn_blocking` (see
+// `cache_image` below). Uses the exact same fetch mechanism as `YTInfo::new`
+// (a ureq agent with a global timeout on the blocking pool), so the
+// single-connection YouTube throttle (`limit-youtube-concurrency`) can wrap
+// this code path exactly like the metadata fetch once implemented (task 2.5).
+fn image_fetch_blocking(dest: &str, remote_url: &str) -> Result<ImageFetchOutcome, String> {
+    let agent: Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(IMAGE_TIMEOUT))
+        .build()
+        .into();
+
+    // Size probe first: when a cached file already exists and its on-disk size
+    // equals the reported `Content-Length`, skip the download entirely (most
+    // sync cycles cost one cheap HEAD). A failed/absent probe or missing
+    // `Content-Length` falls through to the bounded GET below.
+    let probe_len = match agent.head(remote_url).call() {
+        Ok(resp) => resp
+            .headers()
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok()),
+        Err(_) => None,
+    };
+    if let Some(reported) = probe_len {
+        if let Ok(meta) = std::fs::metadata(dest) {
+            if meta.len() == reported {
+                return Ok(ImageFetchOutcome::Skip);
+            }
+        }
+    }
+
+    let mut resp = agent.get(remote_url).call().map_err(|e| e.to_string())?;
+    let bytes = resp
+        .body_mut()
+        .with_config()
+        .limit(IMAGE_MAX_BYTES)
+        .read_to_vec()
+        .map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("image body is empty".to_string());
+    }
+    Ok(ImageFetchOutcome::Bytes(bytes))
 }
 
+// Cache a channel's cover image as `{slug}.jpg`: HEAD probe (skip when the
+// cached size matches), then a bounded GET with an atomic temp-file + rename
+// write. Returns the stable local URL (`/images/{slug}.jpg`) when the cache is
+// populated/current, or `None` when there is no remote image or the fetch
+// failed — in which case the caller keeps the previous `channel.image`
+// untouched (channel-image-cache).
+pub async fn cache_image(slug: &str, remote_url: &str) -> Result<Option<String>, Error> {
+    // SSRF defense in depth: `remote_url` is the `og:image` value scraped from
+    // a channel's HTML page (external, not channel-URL validated). Restrict it
+    // to YouTube's image CDNs over https before any HEAD/GET is issued; a
+    // bogus value means "no image", never a fetch to an arbitrary host.
+    if !image_url_is_allowed(remote_url) {
+        warn!(
+            "Rejecting cover image URL for `{slug}`: not an https URL on a YouTube image host"
+        );
+        return Ok(None);
+    }
+    cache_image_in_dir(images_dir(), slug, remote_url).await
+}
 
+// YouTube `og:image` covers are served from these CDNs over https only.
+fn image_url_is_allowed(raw: &str) -> bool {
+    let url = raw.trim();
+    let rest = match url.split_once("://") {
+        Some(("https", rest)) => rest,
+        _ => return false,
+    };
+    if rest.contains('@') {
+        return false;
+    }
+    let hostport = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_lowercase();
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(p) => (h, p),
+            Err(_) => return false,
+        },
+        None => (hostport.as_str(), 443),
+    };
+    if host.is_empty() || port != 443 {
+        return false;
+    }
+    host == "ytimg.com"
+        || host.ends_with(".ytimg.com")
+        || host == "googleusercontent.com"
+        || host.ends_with(".googleusercontent.com")
+        || host.ends_with(".ggpht.com")
+}
+
+// Directory-injectable variant used by production (`images_dir()`) and by the
+// integration tests (an isolated temp directory) so `cache_image`'s full
+// probe + download + atomic-write flow is exercised against a real cache dir.
+async fn cache_image_in_dir(
+    dir: &str,
+    slug: &str,
+    remote_url: &str,
+) -> Result<Option<String>, Error> {
+    if remote_url.trim().is_empty() {
+        return Ok(None);
+    }
+    let dest = format!("{dir}/{slug}.jpg");
+    let remote_url = remote_url.to_string();
+    let tmp = format!(
+        "{dest}.{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros())
+            .unwrap_or(0)
+    );
+    let probe_dest = dest.clone();
+    // The probe + download occupies the single YouTube slot (the whole
+    // HEAD-then-GET image operation counts as one connection); the permit is
+    // released after the cooldown so image traffic serializes with metadata
+    // fetches and yt-dlp runs (youtube-throttling).
+    let permit = YoutubeGuard::acquire().await;
+    let outcome = match actix_web::rt::task::spawn_blocking(move || {
+        image_fetch_blocking(&probe_dest, &remote_url)
+    })
+    .await
+    {
+        // Probe/download failure (timeout, HTTP error, oversized body, ...):
+        // keep the previous cached file and let the caller keep the previous
+        // `channel.image` (channel-image-cache).
+        Ok(Err(reason)) => {
+            warn!("Keeping previous cached image for `{slug}`: {reason}");
+            permit.cooldown_and_release().await;
+            return Ok(None);
+        }
+        // Blocking-pool join failure: unrecoverable.
+        Err(e) => {
+            permit.cooldown_and_release().await;
+            return Err(Error::default(&e.to_string()));
+        }
+        Ok(Ok(outcome)) => outcome,
+    };
+    permit.cooldown_and_release().await;
+
+    match outcome {
+        ImageFetchOutcome::Skip => {
+            info!("Cached image for `{slug}` unchanged (probe size matches); skipping download");
+            Ok(Some(image_local_url(slug)))
+        }
+        ImageFetchOutcome::Bytes(bytes) => {
+            // Atomic write: temp file + rename so a concurrent reader never
+            // sees a half-written image. A unique temp suffix (pid + micros)
+            // avoids two concurrent refreshes of the same slug fighting over a
+            // single temp path.
+            tokio::fs::write(&tmp, &bytes)
+                .await
+                .map_err(|e| Error::default(&e.to_string()))?;
+            tokio::fs::rename(&tmp, &dest)
+                .await
+                .map_err(|e| Error::default(&e.to_string()))?;
+            info!("Cached cover image for `{slug}` ({} bytes)", bytes.len());
+            Ok(Some(image_local_url(slug)))
+        }
+    }
+}
+
+// The upstream OCR-style og metadata is fetched with attribute order and quote
+// style varying in the wild: `property` may come after `content`, attributes
+// may use single quotes, and extra attributes can sit between them. The regex
+// crate has no lookaround, so we compile one pattern per attribute order and
+// scan each until the requested property matches (youtube-scan-reliability).
+static META_PROPERTY_FIRST: OnceLock<Regex> = OnceLock::new();
+static META_CONTENT_FIRST: OnceLock<Regex> = OnceLock::new();
+
+// <meta ... property="X" ... content="Y" ...>
+const PROPERTY_FIRST: &str = r#"(?i)<meta\b[^>]*\bproperty\s*=\s*(?:"(?P<prop>[^"]*)"|'(?P<props>[^']*)')[^>]*\bcontent\s*=\s*(?:"(?P<content>[^"]*)"|'(?P<contents>[^']*)')[^>]*>"#;
+// <meta ... content="Y" ... property="X" ...>
+const CONTENT_FIRST: &str = r#"(?i)<meta\b[^>]*\bcontent\s*=\s*(?:"(?P<content>[^"]*)"|'(?P<contents>[^']*)')[^>]*\bproperty\s*=\s*(?:"(?P<prop>[^"]*)"|'(?P<props>[^']*)')[^>]*>"#;
+
+fn scan_metadata(re: &Regex, html: &str, key: &str) -> Option<String> {
+    for caps in re.captures_iter(html) {
+        let prop = caps
+            .name("prop")
+            .or_else(|| caps.name("props"))
+            .map(|m| m.as_str())
+            .unwrap_or_default();
+        if prop.eq_ignore_ascii_case(key) {
+            if let Some(content) = caps.name("content").or_else(|| caps.name("contents")) {
+                return Some(content.as_str().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn get_image(html: &str) -> String {
+    let image = get_metadata(html, "og:image");
+    match image.find('?') {
+        // og:image URLs carry size/quality query params; strip them.
+        Some(pos) => image[..pos].to_string(),
+        None => image,
+    }
+}
+
+fn get_metadata(html: &str, metadata: &str) -> String {
+    scan_metadata(
+        META_PROPERTY_FIRST.get_or_init(|| Regex::new(PROPERTY_FIRST).unwrap()),
+        html,
+        metadata,
+    )
+    .or_else(|| {
+        scan_metadata(
+            META_CONTENT_FIRST.get_or_init(|| Regex::new(CONTENT_FIRST).unwrap()),
+            html,
+            metadata,
+        )
+    })
+    .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod metadata_parsing_tests {
+    use super::{get_image, get_metadata};
+
+    #[test]
+    fn canonical_double_quoted() {
+        let html = r#"<meta property="og:title" content="Canal X">"#;
+        assert_eq!(get_metadata(html, "og:title"), "Canal X");
+    }
+
+    #[test]
+    fn reversed_order_single_quoted() {
+        let html = r#"<meta content='Canal Y' property="og:title">"#;
+        assert_eq!(get_metadata(html, "og:title"), "Canal Y");
+    }
+
+    #[test]
+    fn extra_attribute_in_between() {
+        let html = r#"<meta property="og:title" data-x="1" content="Zed">"#;
+        assert_eq!(get_metadata(html, "og:title"), "Zed");
+    }
+
+    #[test]
+    fn property_first_single_quotes() {
+        let html = r#"<meta property='og:title' content="Alpha">"#;
+        assert_eq!(get_metadata(html, "og:title"), "Alpha");
+    }
+
+    #[test]
+    fn missing_returns_empty() {
+        assert_eq!(get_metadata("<html></html>", "og:title"), "");
+    }
+
+    #[test]
+    fn unclosed_meta_returns_empty() {
+        assert_eq!(
+            get_metadata(r#"<meta property="og:title" content="broken"#, "og:title"),
+            ""
+        );
+    }
+
+    #[test]
+    fn case_insensitive_property() {
+        let html = r#"<meta property="OG:TITLE" content="Upper">"#;
+        assert_eq!(get_metadata(html, "og:title"), "Upper");
+    }
+
+    #[test]
+    fn wrong_key_is_ignored() {
+        let html =
+            r#"<meta property="og:title" content="T"><meta property="og:description" content="D">"#;
+        assert_eq!(get_metadata(html, "og:description"), "D");
+    }
+
+    #[test]
+    fn image_suffix_stripped() {
+        let html = r#"<meta property="og:image" content="https://x/img.jpg?w=120&h=120">"#;
+        assert_eq!(get_image(html), "https://x/img.jpg");
+    }
+
+    #[test]
+    fn image_without_params_kept() {
+        let html = r#"<meta content="https://x/img.png" property="og:image">"#;
+        assert_eq!(get_image(html), "https://x/img.png");
+    }
+}
+
+#[cfg(test)]
+mod image_cache_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "u2v-image-test-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    // Minimal HTTP server (HEAD + GET) so probe/download logic is exercised
+    // against a real TCP conversation instead of YouTube's live CDN. It counts
+    // HEAD and GET requests so the integration tests can assert "unchanged
+    // image performs no GET" and "changed size triggers one GET".
+    #[derive(Default)]
+    struct ServerCounters {
+        heads: usize,
+        gets: usize,
+    }
+
+    struct TestServer {
+        addr: std::net::SocketAddr,
+        counters: Arc<Mutex<ServerCounters>>,
+    }
+
+    impl TestServer {
+        fn spawn(body: Vec<u8>, fail_head: bool) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+            let addr = listener.local_addr().expect("local addr");
+            let counters = Arc::new(Mutex::new(ServerCounters::default()));
+            let thread_counters = Arc::clone(&counters);
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    let mut buf = [0u8; 4096];
+                    if stream.read(&mut buf).unwrap_or(0) == 0 {
+                        continue;
+                    }
+                    let request = String::from_utf8_lossy(&buf);
+                    let method = request.split_whitespace().next().unwrap_or("").to_string();
+                    if method == "HEAD" {
+                        thread_counters.lock().unwrap().heads += 1;
+                        if fail_head {
+                            let _ = stream.write_all(
+                                b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n",
+                            );
+                            continue;
+                        }
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                    } else {
+                        thread_counters.lock().unwrap().gets += 1;
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(&body);
+                    }
+                }
+            });
+            TestServer { addr, counters }
+        }
+
+        fn url(&self) -> String {
+            format!("http://{}/ch.jpg", self.addr)
+        }
+
+        fn heads(&self) -> usize {
+            self.counters.lock().unwrap().heads
+        }
+
+        fn gets(&self) -> usize {
+            self.counters.lock().unwrap().gets
+        }
+    }
+
+    #[test]
+    fn local_url_is_stable_per_slug() {
+        assert_eq!(image_local_url("mi_canal"), "/images/mi_canal.jpg");
+        assert_eq!(image_local_url("ch-2"), "/images/ch-2.jpg");
+    }
+
+    #[tokio::test]
+    async fn empty_remote_url_returns_none_without_network() {
+        assert!(cache_image("cualquier", "").await.unwrap().is_none());
+        assert!(cache_image("cualquier", "   ").await.unwrap().is_none());
+    }
+
+    #[test]
+    fn skip_when_head_size_matches_cached_file() {
+        let body = vec![0xAB; 512];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("skip");
+        let dest = dir.join("ch.jpg");
+        std::fs::write(&dest, &body).expect("seed cached file");
+        let url = server.url();
+        match image_fetch_blocking(dest.to_str().unwrap(), &url) {
+            Ok(ImageFetchOutcome::Skip) => {}
+            other => panic!("expected Skip, got {other:?}"),
+        }
+        // The cached file must be untouched.
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changed_size_triggers_download() {
+        let body = vec![0xAB; 512];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("changed");
+        let dest = dir.join("ch.jpg");
+        std::fs::write(&dest, vec![0u8; 64]).expect("seed smaller file");
+        let url = server.url();
+        match image_fetch_blocking(dest.to_str().unwrap(), &url) {
+            Ok(ImageFetchOutcome::Bytes(bytes)) => assert_eq!(bytes, body),
+            other => panic!("expected fresh Bytes, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn download_when_no_cached_file() {
+        let body = vec![0xCD; 256];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("none");
+        let dest = dir.join("ch.jpg"); // does not exist
+        let url = server.url();
+        match image_fetch_blocking(dest.to_str().unwrap(), &url) {
+            Ok(ImageFetchOutcome::Bytes(bytes)) => assert_eq!(bytes, body),
+            other => panic!("expected Bytes, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_failure_falls_back_to_bounded_download() {
+        let body = vec![0xEF; 128];
+        let server = TestServer::spawn(body.clone(), true); // HEAD -> 503
+        let dir = temp_dir("probefail");
+        let dest = dir.join("ch.jpg");
+        let url = server.url();
+        match image_fetch_blocking(dest.to_str().unwrap(), &url) {
+            Ok(ImageFetchOutcome::Bytes(bytes)) => assert_eq!(bytes, body),
+            other => panic!("expected Bytes after probe failure, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn oversized_body_is_rejected() {
+        let body = vec![0x11u8; (IMAGE_MAX_BYTES + 1024) as usize];
+        let server = TestServer::spawn(body, false);
+        let dir = temp_dir("oversize");
+        let dest = dir.join("ch.jpg");
+        let url = server.url();
+        let result = image_fetch_blocking(dest.to_str().unwrap(), &url);
+        assert!(result.is_err(), "oversized body must be rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- Integration tests (channel-image-cache tasks 3.2 / 3.4) ----
+    //
+    // These exercise the full `cache_image` pipeline (probe + bounded GET +
+    // atomic write on a real cache directory) against a local HTTP server,
+    // asserting the wire behavior spec requires: an unchanged image performs
+    // no download (only HEAD), a changed image is re-downloaded, and a failed
+    // refresh keeps the previous file untouched (persistence).
+
+    #[tokio::test]
+    async fn integ_unchanged_image_performs_no_download() {
+        let body = vec![0x42; 1024];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("integ-skip");
+        let slug = "mi_canal";
+        let url = server.url();
+
+        // First fetch: HEAD probe + one bounded GET, file lands in the cache.
+        let local = cache_image_in_dir(dir.to_str().unwrap(), slug, &url)
+            .await
+            .expect("first fetch must succeed");
+        assert_eq!(local.as_deref(), Some("/images/mi_canal.jpg"));
+        assert_eq!(server.heads(), 1, "one HEAD probe on first fetch");
+        assert_eq!(server.gets(), 1, "one GET download on first fetch");
+        let path = dir.join("mi_canal.jpg");
+        let file = std::fs::read(&path).expect("cached file on disk");
+        assert_eq!(file, body);
+
+        // Second fetch, same remote size: HEAD only, no new GET.
+        let local2 = cache_image_in_dir(dir.to_str().unwrap(), slug, &url)
+            .await
+            .expect("second fetch must succeed");
+        assert_eq!(local2, Some("/images/mi_canal.jpg".to_string()));
+        assert_eq!(server.heads(), 2, "second refresh probes again");
+        assert_eq!(
+            server.gets(),
+            1,
+            "unchanged image must NOT be downloaded again"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), file, "cached file untouched");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn integ_changed_size_triggers_redownload() {
+        let body = vec![0x42; 1024];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("integ-changed");
+        let slug = "otro_canal";
+        let url = server.url();
+
+        cache_image_in_dir(dir.to_str().unwrap(), slug, &url)
+            .await
+            .expect("first fetch");
+        assert_eq!(server.gets(), 1);
+
+        // Remote image grows: a second server serves a different size, and the
+        // refresh must replace the cached file.
+        let bigger = vec![0x43; 4096];
+        let server2 = TestServer::spawn(bigger.clone(), false);
+        let local = cache_image_in_dir(dir.to_str().unwrap(), slug, &server2.url())
+            .await
+            .expect("refresh after size change");
+        assert_eq!(local.as_deref(), Some("/images/otro_canal.jpg"));
+        let path = dir.join("otro_canal.jpg");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bigger,
+            "cached file replaced"
+        );
+        assert_eq!(server2.gets(), 1, "exactly one GET for the changed image");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn integ_failed_refresh_keeps_previous_file() {
+        let body = vec![0x99; 300];
+        let server = TestServer::spawn(body.clone(), false);
+        let dir = temp_dir("integ-fail");
+        let slug = "tercero";
+        let url = server.url();
+
+        cache_image_in_dir(dir.to_str().unwrap(), slug, &url)
+            .await
+            .expect("first fetch");
+        let path = dir.join("tercero.jpg");
+        let before = std::fs::read(&path).unwrap();
+
+        // Unreachable upstream: probe fails and the fallback GET fails too.
+        // The cache must be left intact and `None` returned (previous image
+        // URL is kept by callers).
+        let dead = "http://127.0.0.1:1/ch.jpg";
+        let res = cache_image_in_dir(dir.to_str().unwrap(), slug, dead)
+            .await
+            .expect("failed refresh must not surface an error");
+        assert!(res.is_none(), "failed refresh signals no new local URL");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "previous file persisted"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn real_youtube_atareao_image_caches_and_probe_skips_unchanged() {
+        // True end-to-end against the atareao channel: fetch its metadata (the
+        // same call the app makes), cache the real cover, then re-probe the
+        // real CDN. The second probe MUST report Skip (probe size == cached
+        // size => no download), which is exactly the 3.2 "skip-if-same"
+        // guarantee on the real upstream.
+        let ytinfo = YTInfo::new("https://www.youtube.com/c/atareao")
+            .await
+            .expect("atareao metadata must be fetchable (same as test_info_channel)");
+        assert!(
+            !ytinfo.image.is_empty(),
+            "atareao channel must expose an og:image URL"
+        );
+        let url = ytinfo.image;
+        let dir = temp_dir("real-atareao");
+        let dest = dir.join("atareao.jpg");
+
+        let seeded = match image_fetch_blocking(dest.to_str().unwrap(), &url) {
+            Ok(ImageFetchOutcome::Bytes(bytes)) => {
+                assert!(bytes.len() >= 4, "real cover must not be empty");
+                std::fs::write(&dest, &bytes).expect("seed cache from real CDN");
+                bytes
+            }
+            Ok(ImageFetchOutcome::Skip) => {
+                // Cannot happen: no cache file existed before the first call.
+                panic!("first probe skipped although no cache file existed");
+            }
+            Err(e) => panic!("real image fetch failed: {e}"),
+        };
+
+        let second = image_fetch_blocking(dest.to_str().unwrap(), &url).unwrap();
+        match second {
+            ImageFetchOutcome::Skip => {}
+            ImageFetchOutcome::Bytes(bytes) => {
+                panic!(
+                    "unchanged real cover was downloaded again ({} != {} bytes)",
+                    seeded.len(),
+                    bytes.len()
+                );
+            }
+        }
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            seeded,
+            "cached file untouched after skip"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod metadata_throttle_tests {
+    use super::*;
+    use crate::utils::throttle::init_throttle;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
+    // Serves one HTML page per incoming connection (a thread per connection so
+    // true concurrency is observable) and tracks the peak number of concurrent
+    // requests. If the caller serializes, the peak stays 1.
+    fn spawn_html_server() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let thread_active = Arc::clone(&active);
+        let thread_max = Arc::clone(&max_active);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let active = Arc::clone(&thread_active);
+                let max_active = Arc::clone(&thread_max);
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let mut buf = [0u8; 4096];
+                    if stream.read(&mut buf).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(now, Ordering::SeqCst);
+                    // Hold the connection briefly so overlap would be visible.
+                    std::thread::sleep(Duration::from_millis(30));
+                    let html = r#"<html><head><meta property="og:title" content="Canal X"></head><body></body></html>"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        html.len(),
+                        html
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    active.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        (addr, max_active)
+    }
+
+    #[tokio::test]
+    async fn concurrent_metadata_fetches_never_overlap() {
+        // Same cooldown value as every other throttle test: `init_throttle`
+        // is first-call-wins, so all modules must agree.
+        init_throttle(Duration::from_millis(30));
+        let (addr, max_active) = spawn_html_server();
+        let url = format!("http://{addr}/channel");
+        let barrier = Arc::new(tokio::sync::Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let url = url.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                YTInfo::new(&url).await.expect("local metadata fetch")
+            }));
+        }
+        for handle in handles {
+            let info = handle.await.expect("fetch task completed");
+            assert_eq!(info.title, "Canal X");
+        }
+        let peak = max_active.load(Ordering::SeqCst);
+        assert_eq!(
+            peak, 1,
+            "metadata fetches overlapped on the server (peak {peak} concurrent requests)"
+        );
+    }
+}
 
 #[tokio::test]
-async fn test_info_channel(){
+async fn test_info_channel() {
     let url = "https://www.youtube.com/c/atareao";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
-    assert!(ytinfo.is_ok())
+    assert!(ytinfo.is_ok());
+    // The robust parser must extract a non-empty title from real YouTube HTML
+    // (youtube-scan-reliability); empty titles degrade to generic channel slugs.
+    let info = ytinfo.unwrap();
+    assert!(
+        !info.title.trim().is_empty(),
+        "title must be parsed from real HTML"
+    );
 }
 
 #[tokio::test]
-async fn test_info_playlist(){
+async fn test_info_playlist() {
     let url = "https://www.youtube.com/playlist?list=PL3lTiK2rXrUFdTzriDsmNCG28T8u7bhEd";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
@@ -86,9 +823,42 @@ async fn test_info_playlist(){
 }
 
 #[tokio::test]
-async fn test_info_video(){
+async fn test_info_video() {
     let url = "https://www.youtube.com/watch?v=2A1abiQJAiM";
     let ytinfo = YTInfo::new(url).await;
     println!("{:?}", ytinfo);
     assert!(ytinfo.is_ok())
+}
+
+#[cfg(test)]
+mod image_url_validation_tests {
+    use super::image_url_is_allowed;
+
+    #[test]
+    fn accepts_youtube_image_cdn_hosts() {
+        for url in [
+            "https://yt3.googleusercontent.com/ytc/photo.jpg",
+            "https://i.ytimg.com/vi/abc/maxresdefault.jpg",
+            "https://yt3.ggpht.com/photo.jpg",
+            "https://i.ytimg.com/vi/x.jpg?w=120",
+        ] {
+            assert!(image_url_is_allowed(url), "{url} must be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_internal_and_foreign_hosts() {
+        for url in [
+            "http://yt3.googleusercontent.com/x.jpg",
+            "http://169.254.169.254/latest/meta-data/",
+            "https://internal.local/x.jpg",
+            "https://example.com/x.jpg",
+            "https://youtube.com.evil.com/x.jpg",
+            "file:///etc/passwd",
+            "https://i.ytimg.com:8080/x.jpg",
+            "https://user:pass@i.ytimg.com/x.jpg",
+        ] {
+            assert!(!image_url_is_allowed(url), "{url} must be rejected");
+        }
+    }
 }

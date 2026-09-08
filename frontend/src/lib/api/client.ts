@@ -1,4 +1,12 @@
-import type { Channel, ConfigResponse, Episode, LoginRequestBody, Response, User } from '@/types';
+import type {
+	Channel,
+	ConfigResponse,
+	Episode,
+	EpisodeProgress,
+	LoginRequestBody,
+	Response,
+	User
+} from '@/types';
 
 export const baseEndpoint: string = '';
 
@@ -56,7 +64,7 @@ export const api = {
 	},
 
 	async logout() {
-		return request<null>('/api/1.0/logout/', { method: 'GET' });
+		return request<null>('/api/1.0/logout/', { method: 'POST' });
 	},
 
 	async getSession() {
@@ -103,6 +111,62 @@ export const api = {
 
 	async getAllEpisodes() {
 		return request<Array<Episode>>('/api/1.0/episodes/');
+	},
+
+	async getEpisodeProgress(ytId: string) {
+		return request<EpisodeProgress>(`/api/1.0/episodes/${ytId}/progress/`);
+	},
+
+	async updateEpisodeProgress(ytId: string, body: { position_seconds: number; listened: boolean }) {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/episodes/${ytId}/progress/`, {
+			method: 'PUT',
+			body: JSON.stringify(body)
+		});
+	},
+
+	async getPlaylist() {
+		return request<Array<Episode>>('/api/1.0/playlist/');
+	},
+
+	async setEpisodeFavorite(ytId: string, favorite: boolean) {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/episodes/${ytId}/favorite/`, {
+			method: 'PUT',
+			body: JSON.stringify({ favorite })
+		});
+	},
+
+	async setChannelPlaybackSpeed(slug: string, playbackSpeed: number) {
+		// The endpoint answers 204 without a body; there is no data to unwrap.
+		return request<null>(`/api/1.0/channels/${slug}/playback_speed/`, {
+			method: 'PUT',
+			body: JSON.stringify({ playback_speed: playbackSpeed })
+		});
+	},
+
+	async refreshEpisodeSponsorBlock(ytId: string) {
+		return request<Episode>(`/api/1.0/episodes/${ytId}/sponsorblock/refresh/`, {
+			method: 'POST'
+		});
+	},
+
+	async addEpisodeToPlaylist(episodeId: number) {
+		return request<Episode>('/api/1.0/playlist/', {
+			method: 'POST',
+			body: JSON.stringify({ episode_id: episodeId })
+		});
+	},
+
+	async removeEpisodeFromPlaylist(episodeId: number) {
+		return request<null>(`/api/1.0/playlist/${episodeId}/`, { method: 'DELETE' });
+	},
+
+	async reorderPlaylist(episodeIds: number[]) {
+		return request<null>('/api/1.0/playlist/reorder/', {
+			method: 'PUT',
+			body: JSON.stringify({ episode_ids: episodeIds })
+		});
 	},
 
 	async getConfig() {

@@ -3,6 +3,7 @@ import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import AppHeader from '@/components/AppHeader.vue';
+import { testI18n } from '@/test/i18n';
 import { useAuthStore } from '@/stores/auth';
 import type { User } from '@/types';
 
@@ -10,7 +11,8 @@ const router = createRouter({
 	history: createMemoryHistory(),
 	routes: [
 		{ path: '/', name: 'channels', component: { template: '<div />' } },
-		{ path: '/history', name: 'history', component: { template: '<div />' } }
+		{ path: '/history', name: 'history', component: { template: '<div />' } },
+		{ path: '/playlist', name: 'playlist', component: { template: '<div />' } }
 	]
 });
 
@@ -22,7 +24,7 @@ async function mountHeader() {
 	await router.push('/');
 	await router.isReady();
 	return mount(AppHeader, {
-		global: { plugins: [router, pinia] },
+		global: { plugins: [router, pinia, testI18n] },
 		slots: { 'brand-icon': '<span class="brand-icon" />' }
 	});
 }

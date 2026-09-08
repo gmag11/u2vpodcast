@@ -1,12 +1,16 @@
-use serde::{Serialize, Deserialize};
-use sqlx::{sqlite::{SqlitePool, SqliteRow}, query, Row};
 use chrono::{DateTime, Utc};
-use tracing::{info, debug};
+use serde::{Deserialize, Serialize};
+use sqlx::{
+    query,
+    sqlite::{SqlitePool, SqliteRow},
+    Row,
+};
+use tracing::{debug, info};
 
 use super::Error;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Param{
+pub struct Param {
     id: i64,
     key: String,
     value: String,
@@ -14,25 +18,24 @@ pub struct Param{
     updated_at: DateTime<Utc>,
 }
 
-
-impl Param{
+impl Param {
     #[allow(dead_code)]
-    pub fn get_id(&self) -> i64{
+    pub fn get_id(&self) -> i64 {
         self.id
     }
 
-    pub fn get_key(&self) -> &str{
+    pub fn get_key(&self) -> &str {
         debug!("get {}", &self.key);
         &self.key
     }
 
-    pub fn get_value(&self) -> &str{
+    pub fn get_value(&self) -> &str {
         &self.value
     }
 
-    fn from_row(row: SqliteRow) -> Self{
+    fn from_row(row: SqliteRow) -> Self {
         info!("from_row");
-        Self{
+        Self {
             id: row.get("id"),
             key: row.get("key"),
             value: row.get("value"),
@@ -41,7 +44,7 @@ impl Param{
         }
     }
 
-    pub async fn set(pool: &SqlitePool, key: &str, value: &str) -> Result<Param, Error>{
+    pub async fn set(pool: &SqlitePool, key: &str, value: &str) -> Result<Param, Error> {
         debug!("set {key}={value}");
         let current_ts = Utc::now();
         let sql = "INSERT INTO config(key, value, updated_at) \
@@ -60,6 +63,3 @@ impl Param{
             .map_err(|e| e.into())
     }
 }
-
-
-

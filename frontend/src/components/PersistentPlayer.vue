@@ -1,21 +1,122 @@
 <script setup lang="ts">
-	import { onBeforeUnmount, ref, watch } from 'vue';
+	import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 	import {
+		PhCaretUp,
 		PhGauge,
+		PhList,
+		PhListDashes,
+		PhMinus,
 		PhPause,
 		PhPlay,
+		PhPlus,
+		PhRepeat,
+		PhRepeatOnce,
+		PhShuffle,
+		PhSkipBack,
+		PhSkipForward,
 		PhSpeakerHigh,
 		PhSpeakerSlash,
-		PhStop
+		PhStop,
+		PhX
 	} from '@phosphor-icons/vue';
-	import { usePlayerStore } from '@/stores/player';
+	import {
+		chapterTimelineMarkers,
+		currentChapterIndex,
+		nextChapterStart,
+		parseDurationSeconds,
+		previousChapterSeekTarget,
+		sponsorBlockTimelineMarkers,
+		SPEED_MAX,
+		SPEED_MIN,
+		SPEED_STEP,
+		usePlayerStore
+	} from '@/stores/player';
+	import ScrollingText from '@/components/ScrollingText.vue';
+	import AppTooltip from '@/components/AppTooltip.vue';
+	import PersistentPlayerExpanded from '@/components/PersistentPlayerExpanded.vue';
+	import ProgressScrubber from '@/components/ProgressScrubber.vue';
 
 	const player = usePlayerStore();
 	const showSpeed = ref(false);
+	const queueOpen = ref(false);
+	const chaptersOpen = ref(false);
 	const visible = ref(false);
+	const expanded = ref(false);
 	const speeds = [0.5, 1, 1.25, 1.5, 2];
+	let compactMediaQuery: MediaQueryList | null = null;
+
+	// Whether the player holds content the reopen control can restore: a
+	// current episode or a non-empty up-next queue (add-player-reopen-control).
+	const canRestore = computed(() => player.currentEpisode != null || player.upNext.length > 0);
+
+	function onCompactMediaQueryChange(event: MediaQueryListEvent) {
+		// The expanded view only exists for the compact composition
+		// (expand-mobile-player-view): crossing into the wide breakpoint (query
+		// matches) force-closes it so the wide composition takes over without a
+		// stale overlay.
+		if (event.matches) expanded.value = false;
+	}
+
+	function openExpanded() {
+		expanded.value = true;
+	}
+
+	function closeExpanded() {
+		expanded.value = false;
+	}
+	const sponsorBlockMarkers = computed(() => {
+		const episode = player.currentEpisode;
+		if (!episode) return [];
+		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
+		return sponsorBlockTimelineMarkers(
+			duration,
+			episode.sponsorblock_enabled === true ? episode.sponsorblock_segments : []
+		);
+	});
+	const chapterMarkers = computed(() => {
+		const episode = player.currentEpisode;
+		if (!episode) return [];
+		const duration = player.duration || parseDurationSeconds(episode.duration) || 0;
+		return chapterTimelineMarkers(duration, episode.chapters);
+	});
+	const currentChapterTitle = computed(() => {
+		const episode = player.currentEpisode;
+		const index = currentChapterIndex(player.currentTime, episode?.chapters);
+		return index >= 0 ? episode?.chapters[index]?.title : undefined;
+	});
+	const nextChapterTarget = computed(() =>
+		nextChapterStart(player.currentTime, player.currentEpisode?.chapters)
+	);
+	const previousChapterTarget = computed(() =>
+		previousChapterSeekTarget(player.currentTime, player.currentEpisode?.chapters)
+	);
+	const activeChapterIndex = computed(() =>
+		currentChapterIndex(player.currentTime, player.currentEpisode?.chapters)
+	);
+
+	function formatChapterStart(value: number) {
+		const hours = Math.floor(value / 3600);
+		const minutes = Math.floor((value % 3600) / 60);
+		const seconds = Math.floor(value % 60);
+		const minuteSeconds = `${minutes}:${String(seconds).padStart(2, '0')}`;
+		return hours > 0
+			? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+			: minuteSeconds;
+	}
+
+	function seekToChapter(target: number | null) {
+		if (target != null) player.seek(target);
+	}
+
+	// Formats a rate for display without float artifacts, trimming trailing
+	// zeros: 1.35 → "1.35", 1.7 → "1.7", 1 → "1" (per-channel-playback-speed).
+	function speedLabel(value: number) {
+		return String(Math.round(value * 100) / 100);
+	}
 
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
+	let nextTimer: ReturnType<typeof setTimeout> | null = null;
+	let nextClickSuppress = false;
 
 	function clearHideTimer() {
 		if (hideTimer) {
@@ -32,10 +133,26 @@
 		}, 10000);
 	}
 
+	// Reopen control activation (add-player-reopen-control): restores the bar
+	// without touching the player state (no play, no queue/current-episode
+	// mutation). A stopped player re-arms the auto-hide timer so the reopened
+	// stopped bar hides again after the usual delay, exactly as if it had
+	// become visible through any other path.
+	function restoreBar() {
+		visible.value = true;
+		if (player.stopped) {
+			clearHideTimer();
+			armHideTimer();
+		}
+	}
+
 	watch(
-		() => [player.playing, player.stopped, player.currentEpisode?.id] as const,
-		([playing, stopped, episodeId]) => {
-			if (episodeId == null) {
+		() =>
+			[player.playing, player.stopped, player.currentEpisode?.id, player.upNext.length] as const,
+		([playing, stopped, episodeId, queueLength]) => {
+			if (episodeId == null && queueLength === 0) {
+				// Nothing to restore: the bar stays hidden and no hide timer
+				// is armed while nothing plays (add-player-reopen-control).
 				visible.value = false;
 				clearHideTimer();
 				return;
@@ -45,6 +162,11 @@
 				clearHideTimer();
 				return;
 			}
+			// Every stopped state with restorable content (an episode or a
+			// queue) auto-hides on the same delay — including the queue-only
+			// case (a restored queue without a current episode), which used to
+			// keep the bar visible (add-player-reopen-control). The reopen
+			// control is the path back without starting playback.
 			if (stopped && !playing) {
 				armHideTimer();
 			}
@@ -52,18 +174,81 @@
 		{ immediate: true }
 	);
 
-	function onSeek(event: MouseEvent) {
-		if (player.duration <= 0) return;
-		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-		const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
-		player.seek(ratio * player.duration);
+	// Next control: short press skips, long press (> 500ms) skips and marks
+	// the finished episode listened. Keyboard activation (Enter/Space) resolves
+	// to a native click and keeps the short behavior.
+	function nextPointerDown() {
+		if (player.upNext.length === 0) return;
+		nextClickSuppress = false;
+		nextTimer = setTimeout(() => {
+			nextTimer = null;
+			nextClickSuppress = true;
+			player.skipNext(true);
+		}, 500);
+	}
+
+	function nextPointerUp() {
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+			nextClickSuppress = true;
+			player.skipNext();
+		}
+	}
+
+	function nextPointerLeave() {
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+		}
+	}
+
+	function onNextClick() {
+		if (nextClickSuppress) {
+			nextClickSuppress = false;
+			return;
+		}
+		player.skipNext();
+	}
+
+	function onDocumentPointerDown(event: Event) {
+		const target = event.target as HTMLElement;
+		if (queueOpen.value && !target.closest('[data-queue-panel]')) queueOpen.value = false;
+		if (showSpeed.value && !target.closest('[data-speed-panel]')) showSpeed.value = false;
+		if (chaptersOpen.value && !target.closest('[data-chapters-panel]')) chaptersOpen.value = false;
+	}
+
+	function onDocumentKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			queueOpen.value = false;
+			showSpeed.value = false;
+			chaptersOpen.value = false;
+		}
 	}
 
 	function onVolumeInput(event: Event) {
 		player.setVolume(Number((event.target as HTMLInputElement).value));
 	}
 
-	onBeforeUnmount(clearHideTimer);
+	onBeforeUnmount(() => {
+		clearHideTimer();
+		if (nextTimer) {
+			clearTimeout(nextTimer);
+			nextTimer = null;
+		}
+		document.removeEventListener('pointerdown', onDocumentPointerDown);
+		document.removeEventListener('keydown', onDocumentKeydown);
+		compactMediaQuery?.removeEventListener('change', onCompactMediaQueryChange);
+	});
+
+	document.addEventListener('pointerdown', onDocumentPointerDown);
+	document.addEventListener('keydown', onDocumentKeydown);
+
+	onMounted(() => {
+		if (typeof window.matchMedia !== 'function') return;
+		compactMediaQuery = window.matchMedia('(min-width: 640px)');
+		compactMediaQuery.addEventListener('change', onCompactMediaQueryChange);
+	});
 </script>
 
 <template>
@@ -76,121 +261,480 @@
 		leave-to-class="translate-y-full"
 	>
 		<div
-			v-if="visible && player.currentEpisode"
+			v-if="visible && canRestore"
 			class="fixed bottom-0 left-0 right-0 z-30 border-t border-outline bg-surface/95 shadow-[0_-4px_20px_var(--glow)] backdrop-blur-xl"
+			data-testid="player-bar"
 		>
-			<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-4 px-4 md:px-8">
-				<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
-					<img
-						v-if="player.currentEpisode.image"
-						:src="player.currentEpisode.image"
-						:alt="player.currentEpisode.title"
-						class="h-full w-full object-cover"
-					/>
-				</div>
-
-				<div class="hidden min-w-0 flex-col sm:flex">
-					<p class="max-w-60 truncate text-sm font-semibold text-text">
-						{{ player.currentEpisode.title }}
-					</p>
-					<p class="max-w-60 truncate text-xs text-text-muted">
-						{{ player.currentLabel }} / {{ player.durationLabel }}
-					</p>
-				</div>
-
-				<button
-					type="button"
-					class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
-					:aria-label="player.playing ? 'Pause' : 'Play'"
-					:disabled="player.loading"
-					@click="player.togglePlay()"
-				>
-					<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />
-					<PhPlay v-else class="ml-0.5 h-5 w-5 text-white" weight="fill" />
-				</button>
-
-				<button
-					type="button"
-					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text"
-					aria-label="Stop"
-					@click="player.stop()"
-				>
-					<PhStop class="h-4 w-4" weight="fill" />
-				</button>
-
+			<div class="sm:hidden" data-testid="player-compact">
 				<div
-					class="relative h-5 min-w-0 flex-1 cursor-pointer py-2"
-					role="slider"
-					aria-label="Seek"
-					:aria-valuenow="Math.round(player.progress)"
-					:aria-valuemin="0"
-					:aria-valuemax="100"
-					@click="onSeek"
+					class="relative h-1 w-full bg-surface-input"
+					data-testid="player-progress-compact"
+					aria-hidden="true"
 				>
-					<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-input">
-						<div
-							class="h-full rounded-full bg-accent-400 transition-[width] duration-150"
-							:style="{ width: player.progress + '%' }"
-						></div>
+					<div
+						class="absolute inset-y-0 left-0 bg-accent-400 transition-all duration-150"
+						:style="{ width: player.progress + '%' }"
+					></div>
+					<div
+						v-for="(marker, index) in sponsorBlockMarkers"
+						:key="index"
+						class="absolute inset-y-0 z-10"
+						:class="marker.category === 'sponsor' ? 'bg-sponsorblock' : 'bg-sponsorblock-other'"
+						:data-category="marker.category"
+						data-testid="player-sponsorblock-segment"
+						:style="{ left: `${marker.left}%`, width: `${marker.width}%` }"
+					></div>
+					<div
+						v-for="(marker, index) in chapterMarkers"
+						:key="index"
+						class="group absolute inset-y-0 z-20 w-0.5 bg-chapter-marker"
+						data-testid="player-chapter-marker"
+						:data-start-seconds="marker.startSeconds"
+						:style="{ left: `${marker.left}%` }"
+					>
+						<span
+							role="tooltip"
+							class="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-64 -translate-x-1/2 rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100"
+						>
+							{{ marker.title }}
+						</span>
 					</div>
 				</div>
 
-				<span class="shrink-0 text-xs text-text-muted sm:hidden">
-					{{ player.currentLabel }}
-				</span>
-
-				<div class="relative shrink-0">
+				<div class="flex min-w-0 items-center gap-3 px-4 py-3">
 					<button
 						type="button"
-						class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition-colors hover:text-text"
-						@click="showSpeed = !showSpeed"
+						class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface-input"
+						:aria-label="$t('player.expand')"
+						@click="openExpanded"
 					>
-						<PhGauge class="h-4 w-4" weight="regular" />
-						{{ player.speed }}x
+						<img
+							v-if="player.currentEpisode?.image"
+							:src="player.currentEpisode.image"
+							:alt="player.currentEpisode.title"
+							class="h-full w-full object-cover"
+						/>
 					</button>
+
+					<div class="flex min-w-0 flex-1 flex-col">
+						<ScrollingText
+							class="text-sm font-semibold text-text"
+							:text="player.currentEpisode?.title ?? $t('player.queueReady')"
+							:active="player.playing"
+						/>
+						<p
+							v-if="currentChapterTitle"
+							class="truncate text-xs text-text-muted"
+							data-testid="player-current-chapter"
+						>
+							{{ currentChapterTitle }}
+						</p>
+						<p
+							v-if="player.currentEpisode"
+							class="truncate text-xs text-text-muted"
+							data-testid="player-compact-metadata"
+						>
+							{{ player.currentEpisode.channel_title }} &bull; {{ player.currentLabel }}
+						</p>
+					</div>
+
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
+						:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
+						:disabled="player.loading || player.currentEpisode == null"
+						@click="player.togglePlay()"
+					>
+						<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />
+						<PhPlay v-else class="ml-0.5 h-5 w-5 text-white" weight="fill" />
+					</button>
+				</div>
+			</div>
+
+			<div class="hidden sm:block" data-testid="player-wide">
+				<ProgressScrubber
+					thin
+					:progress="player.progress"
+					:duration="player.duration"
+					:sponsor-block-markers="sponsorBlockMarkers"
+					:chapter-markers="chapterMarkers"
+					:aria-label="$t('player.seek')"
+					@seek="player.seek"
+				/>
+
+				<div class="mx-auto flex h-20 max-w-[1440px] items-center gap-2 px-4 md:gap-4 md:px-8">
+					<div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-surface-input">
+						<img
+							v-if="player.currentEpisode?.image"
+							:src="player.currentEpisode.image"
+							:alt="player.currentEpisode.title"
+							class="h-full w-full object-cover"
+						/>
+					</div>
+
+					<span
+						v-if="player.currentEpisode"
+						class="shrink-0 text-xs tabular-nums text-text-muted"
+						data-testid="player-wide-time"
+					>
+						{{ player.currentLabel }} / {{ player.durationLabel }}
+					</span>
+
+					<div class="hidden min-w-0 flex-1 flex-col sm:flex">
+						<ScrollingText
+							class="text-sm font-semibold text-text"
+							:text="player.currentEpisode?.title ?? $t('player.queueReady')"
+							:active="player.playing"
+						/>
+						<p
+							v-if="currentChapterTitle"
+							class="truncate text-xs text-text-muted"
+							data-testid="player-current-chapter"
+						>
+							{{ currentChapterTitle }}
+						</p>
+						<p v-if="player.currentEpisode" class="truncate text-xs text-text-muted">
+							{{ player.currentEpisode.channel_title }}
+						</p>
+					</div>
+
 					<div
-						v-if="showSpeed"
-						class="absolute bottom-full right-0 z-10 mb-2 flex flex-col rounded-lg border border-outline bg-surface-card p-1 shadow-card"
+						v-if="player.currentEpisode?.chapters?.length"
+						class="relative shrink-0"
+						data-chapters-panel
 					>
 						<button
-							v-for="s in speeds"
-							:key="s"
 							type="button"
-							class="rounded-md px-3 py-1.5 text-left text-xs font-medium transition-colors"
-							:class="
-								s === player.speed ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'
-							"
-							@click="
-								player.setSpeed(s);
-								showSpeed = false;
-							"
+							class="flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text"
+							:aria-label="$t('player.chapters')"
+							:aria-expanded="chaptersOpen"
+							@click="chaptersOpen = !chaptersOpen"
 						>
-							{{ s }}x
+							<PhListDashes class="h-5 w-5" weight="regular" />
 						</button>
-					</div>
-				</div>
 
-				<div class="hidden shrink-0 items-center gap-2 sm:flex">
+						<div
+							v-if="chaptersOpen"
+							class="absolute bottom-full right-0 z-10 mb-2 w-80 max-h-80 overflow-y-auto rounded-lg border border-outline bg-surface-card p-2 shadow-card"
+							data-testid="player-chapters-panel"
+						>
+							<div class="mb-2 flex items-center justify-between gap-3">
+								<p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+									{{ $t('player.chapters') }}
+								</p>
+								<div class="flex items-center gap-1">
+									<button
+										type="button"
+										class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+										:aria-label="$t('player.previousChapter')"
+										:disabled="previousChapterTarget == null"
+										data-testid="player-previous-chapter"
+										@click="seekToChapter(previousChapterTarget)"
+									>
+										<PhSkipBack class="h-4 w-4" weight="regular" />
+									</button>
+									<button
+										type="button"
+										class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+										:aria-label="$t('player.nextChapter')"
+										:disabled="nextChapterTarget == null"
+										data-testid="player-next-chapter"
+										@click="seekToChapter(nextChapterTarget)"
+									>
+										<PhSkipForward class="h-4 w-4" weight="regular" />
+									</button>
+								</div>
+							</div>
+							<ul class="flex flex-col gap-1">
+								<li v-for="(chapter, index) in player.currentEpisode?.chapters" :key="index">
+									<button
+										type="button"
+										class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors"
+										:class="
+											index === activeChapterIndex
+												? 'bg-accent-600/15 text-text'
+												: 'text-text-muted hover:bg-surface-input hover:text-text'
+										"
+										:aria-current="index === activeChapterIndex ? 'true' : undefined"
+										data-testid="player-chapter-row"
+										@click="player.seek(chapter.start)"
+									>
+										<span class="min-w-0 flex-1 truncate text-xs font-medium">{{
+											chapter.title
+										}}</span>
+										<span class="shrink-0 text-[11px] tabular-nums text-text-muted">{{
+											formatChapterStart(chapter.start)
+										}}</span>
+									</button>
+								</li>
+							</ul>
+						</div>
+					</div>
+
 					<button
 						type="button"
-						class="rounded-md p-1 text-text-muted transition-colors hover:text-text"
-						:aria-label="player.muted ? 'Unmute' : 'Mute'"
-						@click="player.toggleMute()"
+						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+						:aria-label="$t('player.previous')"
+						:disabled="player.currentEpisode == null"
+						@click="player.playPrevious()"
 					>
-						<PhSpeakerSlash v-if="player.muted" class="h-4 w-4" weight="regular" />
-						<PhSpeakerHigh v-else class="h-4 w-4" weight="regular" />
+						<PhSkipBack class="h-4 w-4" weight="fill" />
 					</button>
-					<input
-						class="h-1 w-20 cursor-pointer accent-accent-500"
-						type="range"
-						min="0"
-						max="1"
-						step="0.05"
-						:value="player.volume"
-						@input="onVolumeInput"
-					/>
+
+					<button
+						type="button"
+						class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white shadow-lg transition-transform hover:scale-105"
+						:aria-label="player.playing ? $t('player.pause') : $t('player.play')"
+						:disabled="player.loading || player.currentEpisode == null"
+						@click="player.togglePlay()"
+					>
+						<PhPause v-if="player.playing" class="h-5 w-5 text-white" weight="fill" />
+						<PhPlay v-else class="ml-0.5 h-5 w-5 text-white" weight="fill" />
+					</button>
+
+					<button
+						type="button"
+						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+						:aria-label="$t('player.stop')"
+						@click="player.stop()"
+					>
+						<PhStop class="h-4 w-4" weight="fill" />
+					</button>
+
+					<button
+						type="button"
+						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-outline text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-text-muted"
+						:aria-label="$t('player.next')"
+						:disabled="player.upNext.length === 0"
+						@pointerdown="nextPointerDown"
+						@pointerup="nextPointerUp"
+						@pointerleave="nextPointerLeave"
+						@click="onNextClick"
+					>
+						<PhSkipForward class="h-4 w-4" weight="fill" />
+					</button>
+
+					<div class="relative shrink-0" data-speed-panel>
+						<button
+							type="button"
+							class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition-colors hover:text-text"
+							:aria-label="$t('player.speed')"
+							:aria-expanded="showSpeed"
+							@click="showSpeed = !showSpeed"
+						>
+							<PhGauge class="h-4 w-4" weight="regular" />
+							{{ speedLabel(player.speed) }}x
+						</button>
+						<div
+							v-if="showSpeed"
+							class="absolute bottom-full right-0 z-10 mb-2 flex flex-col gap-1 rounded-lg border border-outline bg-surface-card p-1 shadow-card"
+							data-testid="speed-panel"
+						>
+							<div class="flex items-center justify-between gap-1 px-1">
+								<button
+									type="button"
+									class="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+									:disabled="player.speed <= SPEED_MIN"
+									:aria-label="$t('player.speedDecrease')"
+									@click="player.setSpeed(player.speed - SPEED_STEP)"
+								>
+									<PhMinus class="h-4 w-4" weight="bold" />
+								</button>
+								<span
+									class="min-w-[3rem] text-center text-xs font-semibold text-text"
+									data-testid="speed-value"
+									>{{ speedLabel(player.speed) }}x</span
+								>
+								<button
+									type="button"
+									class="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+									:disabled="player.speed >= SPEED_MAX"
+									:aria-label="$t('player.speedIncrease')"
+									@click="player.setSpeed(player.speed + SPEED_STEP)"
+								>
+									<PhPlus class="h-4 w-4" weight="bold" />
+								</button>
+							</div>
+							<button
+								v-for="s in speeds"
+								:key="s"
+								type="button"
+								class="rounded-md px-3 py-1.5 text-left text-xs font-medium transition-colors"
+								:class="
+									s === player.speed
+										? 'bg-accent-600 text-white'
+										: 'text-text-muted hover:text-text'
+								"
+								@click="
+									player.setSpeed(s);
+									showSpeed = false;
+								"
+							>
+								{{ speedLabel(s) }}x
+							</button>
+						</div>
+					</div>
+
+					<div class="flex shrink-0 items-center gap-1">
+						<AppTooltip
+							id="player-shuffle-tooltip"
+							v-slot="{ describedby }"
+							:text="$t('player.shuffle')"
+						>
+							<button
+								type="button"
+								class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+								:class="
+									player.shuffle ? 'bg-accent-600 text-white' : 'text-text-muted hover:text-text'
+								"
+								:aria-label="$t('player.shuffle')"
+								:aria-pressed="player.shuffle"
+								:aria-describedby="describedby"
+								@click="player.toggleShuffle()"
+							>
+								<PhShuffle class="h-5 w-5" weight="regular" />
+							</button>
+						</AppTooltip>
+						<AppTooltip
+							id="player-repeat-tooltip"
+							v-slot="{ describedby }"
+							:text="
+								player.repeat === 'none'
+									? $t('player.repeatOff')
+									: player.repeat === 'all'
+										? $t('player.repeatAll')
+										: $t('player.repeatOne')
+							"
+						>
+							<button
+								type="button"
+								class="flex h-9 w-9 items-center justify-center rounded-md transition-colors"
+								:class="
+									player.repeat !== 'none'
+										? 'bg-accent-600 text-white'
+										: 'text-text-muted hover:text-text'
+								"
+								:aria-label="
+									player.repeat === 'none'
+										? $t('player.repeatOff')
+										: player.repeat === 'all'
+											? $t('player.repeatAll')
+											: $t('player.repeatOne')
+								"
+								:aria-describedby="describedby"
+								@click="player.cycleRepeat()"
+							>
+								<PhRepeat v-if="player.repeat !== 'one'" class="h-5 w-5" weight="regular" />
+								<PhRepeatOnce v-else class="h-5 w-5" weight="regular" />
+							</button>
+						</AppTooltip>
+					</div>
+
+					<div class="hidden shrink-0 items-center gap-2 sm:flex">
+						<button
+							type="button"
+							class="rounded-md p-1 text-text-muted transition-colors hover:text-text"
+							:aria-label="player.muted ? $t('player.unmute') : $t('player.mute')"
+							@click="player.toggleMute()"
+						>
+							<PhSpeakerSlash v-if="player.muted" class="h-4 w-4" weight="regular" />
+							<PhSpeakerHigh v-else class="h-4 w-4" weight="regular" />
+						</button>
+						<input
+							class="h-1 w-20 cursor-pointer accent-accent-500"
+							type="range"
+							min="0"
+							max="1"
+							step="0.05"
+							:value="player.volume"
+							@input="onVolumeInput"
+						/>
+					</div>
+
+					<div class="relative shrink-0" data-queue-panel>
+						<button
+							type="button"
+							class="relative flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition-colors hover:text-text"
+							:aria-label="$t('player.queue')"
+							:aria-expanded="queueOpen"
+							@click="queueOpen = !queueOpen"
+						>
+							<PhList class="h-5 w-5" weight="regular" />
+							<span
+								v-if="player.upNext.length > 0"
+								class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-600 px-1 text-[10px] font-semibold text-white"
+							>
+								{{ player.upNext.length }}
+							</span>
+						</button>
+
+						<div
+							v-if="queueOpen"
+							class="absolute bottom-full right-0 z-10 mb-2 w-80 max-h-80 overflow-y-auto rounded-lg border border-outline bg-surface-card p-2 shadow-card"
+						>
+							<p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+								{{ $t('player.upNext') }} ({{ player.upNext.length }})
+							</p>
+							<p v-if="player.upNext.length === 0" class="px-2 py-3 text-sm text-text-muted">
+								{{ $t('player.emptyQueue') }}
+							</p>
+							<ul v-else class="flex flex-col gap-1">
+								<li
+									v-for="(ep, index) in player.upNext"
+									:key="ep.id"
+									class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-input"
+								>
+									<span class="w-4 shrink-0 text-center text-xs text-text-muted">{{
+										index + 1
+									}}</span>
+									<img
+										v-if="ep.image"
+										:src="ep.image"
+										alt=""
+										class="h-8 w-12 shrink-0 rounded object-cover"
+									/>
+									<div class="min-w-0 flex-1">
+										<p class="truncate text-xs font-medium text-text">{{ ep.title }}</p>
+										<p class="truncate text-[11px] text-text-muted">{{ ep.channel_title }}</p>
+									</div>
+									<button
+										type="button"
+										class="shrink-0 rounded p-1 text-text-muted transition-colors hover:text-text"
+										:aria-label="$t('player.removeFromQueue')"
+										@click="player.removeFromQueue(ep.id)"
+									>
+										<PhX class="h-4 w-4" weight="bold" />
+									</button>
+								</li>
+							</ul>
+							<button
+								v-if="player.upNext.length > 0"
+								type="button"
+								class="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-text-muted transition-colors hover:bg-surface-input hover:text-text"
+								@click="
+									player.clearQueue();
+									queueOpen = false;
+								"
+							>
+								{{ $t('player.clearQueue') }}
+							</button>
+						</div>
+					</div>
 				</div>
 			</div>
 		</div>
 	</Transition>
+
+	<button
+		v-if="!visible && canRestore"
+		type="button"
+		class="fixed bottom-0 left-1/2 z-30 flex h-9 -translate-x-1/2 items-center justify-center rounded-t-xl border border-b-0 border-outline bg-surface-card px-3 text-text shadow-card transition-colors hover:text-accent-400"
+		:aria-label="$t('player.showPlayer')"
+		data-testid="player-reopen"
+		@click="restoreBar"
+	>
+		<PhCaretUp class="h-4 w-4" weight="bold" />
+	</button>
+
+	<PersistentPlayerExpanded :open="expanded" @close="closeExpanded" />
 </template>

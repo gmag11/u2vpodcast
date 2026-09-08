@@ -1,38 +1,54 @@
 <script setup lang="ts">
 	import { computed, onMounted, ref } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { useRoute, useRouter } from 'vue-router';
-	import { PhArrowLeft, PhArrowsClockwise } from '@phosphor-icons/vue';
+	import { PhArrowLeft, PhArrowsClockwise, PhStar } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
 	import { useAuthStore } from '@/stores/auth';
+	import { usePlayerStore } from '@/stores/player';
 	import { useNotificationStore } from '@/stores/notification';
-	import { filterBySearchWords } from '@/lib/utils/list.filter';
+	import { useFavoritesStore } from '@/stores/favorites';
+	import { filterBySearchWords, filterByFavorites } from '@/lib/utils/list.filter';
 	import type { Channel, Episode } from '@/types';
 	import AppButton from '@/components/AppButton.vue';
 	import AppHeader from '@/components/AppHeader.vue';
+	import AppTooltip from '@/components/AppTooltip.vue';
 	import EpisodeCard from '@/components/EpisodeCard.vue';
 	import SearchInput from '@/components/SearchInput.vue';
 
 	const route = useRoute();
 	const router = useRouter();
 	const auth = useAuthStore();
+	const player = usePlayerStore();
 	const notification = useNotificationStore();
+	const favorites = useFavoritesStore();
+	const { t } = useI18n();
 
 	const episodes = ref<Episode[]>([]);
 	const channels = ref<Channel[]>([]);
 	const channelTitle = ref('');
 	const channelDescription = ref('');
 	const searchQuery = ref('');
+	const favoritesOnly = ref(false);
 	const refreshing = ref(false);
 
-	const filteredEpisodes = computed(() =>
-		filterBySearchWords(episodes.value, searchQuery.value, (e) =>
+	// Search first, then the favorites-only filter (episode-favorites): an
+	// episode stays visible only when it matches the words AND is favorited
+	// while the filter is on. The store's id set drives the predicate so a
+	// toggle in any card is reflected immediately.
+	const filteredEpisodes = computed(() => {
+		const searched = filterBySearchWords(episodes.value, searchQuery.value, (e) =>
 			[e.title, e.description, e.yt_id].join(' ')
-		)
-	);
+		);
+		if (!favoritesOnly.value) return searched;
+		return filterByFavorites(searched, (id) => favorites.favoriteIdSet.has(id));
+	});
 
 	const noSearchResults = computed(
 		() => searchQuery.value.trim() !== '' && filteredEpisodes.value.length === 0
 	);
+
+	const favoritesEmpty = computed(() => favoritesOnly.value && filteredEpisodes.value.length === 0);
 
 	const channelSlug = computed(() => {
 		if (episodes.value.length > 0) return episodes.value[0].channel_slug;
@@ -53,12 +69,18 @@
 		auth.setUser(episodesResult.user);
 		if (episodesResult.data) {
 			episodes.value = episodesResult.data as Array<Episode>;
+			// The list payload carries each episode's playback progress; seed the
+			// player store so resume works without per-episode requests.
+			player.seedProgress(episodes.value);
+			// Merge the stored favorite flags so the filter is correct before the
+			// cards mount (episode-favorites).
+			for (const episode of episodes.value) favorites.sync(episode);
 		}
 		if (channelsResult.ok && channelsResult.data) {
 			channels.value = channelsResult.data as Array<Channel>;
 		}
 		const channel = channels.value.find((c) => c.id === channelId);
-		channelTitle.value = channel?.title ?? 'Episodes';
+		channelTitle.value = channel?.title ?? t('episodes.titleFallback');
 		channelDescription.value = channel?.description ?? '';
 	}
 
@@ -71,20 +93,20 @@
 	async function refreshChannel() {
 		const slug = await resolveSlugFallback();
 		if (!slug) {
-			notification.show('Unable to identify the channel', 'error');
+			notification.show(t('episodes.unidentified'), 'error');
 			return;
 		}
 		refreshing.value = true;
 		try {
 			const result = await api.refreshChannel(slug);
 			if (result.ok) {
-				notification.show('Channel update started', 'success');
+				notification.show(t('episodes.updateStarted'), 'success');
 			} else {
-				notification.show(result.message || 'Failed to start channel update', 'error');
+				notification.show(t('episodes.updateFailed'), 'error');
 			}
 		} catch (err) {
 			console.error(err);
-			notification.show('Failed to start channel update', 'error');
+			notification.show(t('episodes.updateFailed'), 'error');
 		} finally {
 			refreshing.value = false;
 		}
@@ -118,7 +140,7 @@
 					weight="regular"
 					:class="refreshing ? 'animate-spin' : ''"
 				/>
-				<span class="hidden sm:inline">Refresh</span>
+				<span class="hidden sm:inline">{{ $t('episodes.refresh') }}</span>
 			</AppButton>
 		</template>
 	</AppHeader>
@@ -127,7 +149,7 @@
 		<div class="mb-8 flex w-full max-w-3xl items-center gap-4">
 			<button
 				type="button"
-				aria-label="Back to channels"
+				aria-label="$t('header.backChannels')"
 				class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-outline text-text-muted transition-colors hover:text-text"
 				@click="router.push({ name: 'channels' })"
 			>
@@ -144,21 +166,58 @@
 			{{ channelDescription }}
 		</p>
 
-		<div class="mb-10 w-full max-w-3xl">
-			<SearchInput v-model="searchQuery" placeholder="Search episodes…" />
+		<div class="mb-10 flex w-full max-w-3xl items-center justify-between gap-3">
+			<div class="flex-1">
+				<SearchInput v-model="searchQuery" :placeholder="$t('episodes.searchPlaceholder')" />
+			</div>
+			<AppTooltip
+				id="episodes-favorites-filter-tooltip"
+				v-slot="{ describedby }"
+				:text="$t('favorites.filterLabel')"
+				align="right"
+			>
+				<button
+					type="button"
+					class="flex h-11 shrink-0 items-center gap-2 rounded-full border border-outline px-4 text-sm font-medium transition-colors"
+					:class="
+						favoritesOnly
+							? 'border-accent-500 bg-accent-500/10 text-accent-500'
+							: 'bg-surface-input text-text-muted hover:text-text'
+					"
+					:aria-pressed="favoritesOnly"
+					:aria-describedby="describedby"
+					@click="favoritesOnly = !favoritesOnly"
+				>
+					<PhStar class="h-4 w-4" :weight="favoritesOnly ? 'fill' : 'regular'" />
+					<span class="hidden sm:inline">{{ $t('favorites.filterLabel') }}</span>
+				</button>
+			</AppTooltip>
 		</div>
 
-		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
+		<p v-if="favoritesEmpty" class="mt-4 text-center text-text-muted">
+			<span class="font-display text-xl font-semibold text-text">{{
+				$t('favorites.emptyTitle')
+			}}</span>
+			<br />
+			<span class="text-sm">{{ $t('favorites.emptyBody') }}</span>
+		</p>
+
+		<p v-else-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
 
 		<div v-else-if="filteredEpisodes.length === 0" class="mt-10 text-center">
-			<p class="font-display text-xl font-semibold text-text">No episodes yet</p>
+			<p class="font-display text-xl font-semibold text-text">{{ $t('episodes.emptyTitle') }}</p>
 			<p class="mt-2 text-sm text-text-muted">
-				The channel is being processed and episodes will appear here as they are downloaded.
+				{{ $t('episodes.emptyBody') }}
 			</p>
 		</div>
 
 		<div v-else class="flex w-full max-w-3xl flex-col gap-5">
-			<EpisodeCard v-for="episode in filteredEpisodes" :key="episode.id" :episode="episode" />
+			<EpisodeCard
+				v-for="episode in filteredEpisodes"
+				:key="episode.id"
+				:episode="episode"
+				:list="filteredEpisodes"
+			/>
 		</div>
 	</main>
 </template>

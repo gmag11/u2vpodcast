@@ -1,0 +1,29 @@
+## Purpose
+
+Extends the persisted episode entity with playback progress fields (`position_seconds`, `listened_at`) and the progress update path defined by the `playback-progress` capability.
+
+## ADDED Requirements
+
+### Requirement: Episode persistence stores playback position and listened time
+
+The episodes table SHALL store, per episode, the last playback position in seconds (defaulting to 0) and the timestamp of completion (`listened_at`, nullable). The existing `listen` boolean SHALL represent the played/completed mark. Reads and other updates SHALL preserve these fields.
+
+#### Scenario: New episodes store zero progress
+- **WHEN** an episode row is created by the download worker
+- **THEN** `position_seconds` is 0 and `listened_at` is null, with `listen` false
+
+#### Scenario: Existing episodes migrate with zero progress
+- **WHEN** the migration runs over a database with existing episodes
+- **THEN** all existing rows get `position_seconds` 0 and null `listened_at` without dropping data
+
+### Requirement: Progress can be updated per episode
+
+The episode model SHALL support updating both the playback position and the listened mark (with its timestamp) in a single write, returning the updated episode.
+
+#### Scenario: Position-only update
+- **WHEN** progress is saved mid-episode with a position and listened false
+- **THEN** the row's `position_seconds` updates and `listen`/`listened_at` stay as before
+
+#### Scenario: Completion update
+- **WHEN** progress is saved with the listened flag true
+- **THEN** `listen` becomes true, `listened_at` is set, and `position_seconds` stores the final position

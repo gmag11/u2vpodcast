@@ -1,5 +1,6 @@
 <script setup lang="ts">
 	import { ref } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { useRoute, useRouter } from 'vue-router';
 	import { PhLockKey, PhUser } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
@@ -14,6 +15,7 @@
 	const auth = useAuthStore();
 	const loading = useLoadingStore();
 	const notification = useNotificationStore();
+	const { t } = useI18n();
 
 	const username = ref('');
 	const password = ref('');
@@ -21,20 +23,20 @@
 
 	async function handleLogin() {
 		error.value = '';
-		loading.start('Please wait while we log you in...');
+		loading.start(t('auth.loggingIn'));
 		try {
 			const result = await api.login({ username: username.value, password: password.value });
 			if (result.ok && result.user) {
 				auth.setUser(result.user);
-				notification.show('Login successful', 'success');
+				notification.show(t('auth.success'), 'success');
 				const next = (route.query.next as string) || '/';
 				router.push(next);
 			} else {
-				error.value = result.message || 'Invalid username or password';
+				error.value = t('auth.invalidCredentials');
 			}
 		} catch (err) {
 			console.error(err);
-			error.value = 'An unexpected error occurred. Please try again.';
+			error.value = t('auth.unexpectedError');
 		} finally {
 			loading.stop();
 		}
@@ -71,7 +73,7 @@
 					</svg>
 					<span class="text-xl font-semibold tracking-wide text-white">U2VPodcast</span>
 				</div>
-				<h1 class="text-3xl font-bold text-gray-100">Login</h1>
+				<h1 class="text-3xl font-bold text-gray-100">{{ $t('auth.title') }}</h1>
 			</header>
 
 			<form class="space-y-5" @submit.prevent="handleLogin">
@@ -81,7 +83,7 @@
 					<AppInput
 						id="username"
 						v-model="username"
-						placeholder="User name"
+						:placeholder="$t('auth.username')"
 						type="text"
 						leading-icon
 						required
@@ -96,7 +98,7 @@
 					<AppInput
 						id="password"
 						v-model="password"
-						placeholder="Password"
+						:placeholder="$t('auth.password')"
 						type="password"
 						leading-icon
 						required
@@ -108,7 +110,9 @@
 				</div>
 
 				<div class="pt-2">
-					<AppButton type="submit" class="w-full py-3" variant="primary"> Login </AppButton>
+					<AppButton type="submit" class="w-full py-3" variant="primary">
+						{{ $t('auth.submit') }}
+					</AppButton>
 				</div>
 			</form>
 		</main>

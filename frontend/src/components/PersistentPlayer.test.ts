@@ -1,0 +1,1100 @@
+import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import PersistentPlayer from '@/components/PersistentPlayer.vue';
+import { usePlayerStore } from '@/stores/player';
+import { testI18n } from '@/test/i18n';
+import type { Episode } from '@/types';
+
+vi.mock('@/lib/api/client', () => ({
+	api: {
+		updateEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		getEpisodeProgress: vi.fn(() =>
+			Promise.resolve({ ok: false, data: null, user: null, status: false })
+		),
+		setChannelPlaybackSpeed: vi.fn(() =>
+			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		)
+	}
+}));
+
+class MockAudioElement {
+	src = '';
+	currentTime = 0;
+	duration = 0;
+	volume = 1;
+	muted = false;
+	playbackRate = 1;
+	// A real media element keeps the rate a load() should reset back to.
+	defaultPlaybackRate = 1;
+	paused = true;
+	preload = 'metadata';
+
+	private listeners: Record<string, Array<() => void>> = {};
+
+	play = vi.fn(async () => {
+		this.paused = false;
+	});
+	pause = vi.fn(() => {
+		this.paused = true;
+	});
+	load = vi.fn(() => {
+		this.playbackRate = this.defaultPlaybackRate;
+	});
+
+	addEventListener(event: string, listener: () => void) {
+		(this.listeners[event] ??= []).push(listener);
+	}
+	removeEventListener(event: string, listener: () => void) {
+		this.listeners[event] = (this.listeners[event] ?? []).filter((l) => l !== listener);
+	}
+}
+
+const AudioClass = MockAudioElement as unknown as typeof HTMLAudioElement;
+
+function episode(id: number, listen = false): Episode {
+	const now = new Date();
+	return {
+		id,
+		channel_id: 1,
+		channel_slug: 'c',
+		channel_title: 'Channel',
+		playback_speed: 1,
+		title: `Episode ${id}`,
+		description: '',
+		yt_id: `yt${id}`,
+		webpage_url: 'https://www.youtube.com/watch',
+		published_at: now,
+		duration: '00:10:00',
+		image: '',
+		listen,
+		position_seconds: 0,
+		listened_at: null,
+		favorite: false,
+		chapters: [],
+		sponsorblock_enabled: true,
+		created_at: now,
+		updated_at: now
+	};
+}
+
+function mockMeasurements(viewportWidth: number, textWidth: number) {
+	const clientWidth = vi
+		.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'scrolling-text-viewport' ? viewportWidth : 0;
+		});
+	const scrollWidth = vi
+		.spyOn(HTMLElement.prototype, 'scrollWidth', 'get')
+		.mockImplementation(function (this: HTMLElement) {
+			return this.dataset.testid === 'scrolling-text-text' ? textWidth : 0;
+		});
+	return () => {
+		clientWidth.mockRestore();
+		scrollWidth.mockRestore();
+	};
+}
+
+function mockReducedMotion(matches: boolean) {
+	vi.stubGlobal(
+		'matchMedia',
+		vi.fn(() => ({
+			matches,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn()
+		}))
+	);
+}
+
+describe('PersistentPlayer controls', () => {
+	let wrapper: ReturnType<typeof mount> | null = null;
+
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		localStorage.clear();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		wrapper?.unmount();
+		wrapper = null;
+		vi.useRealTimers();
+	});
+
+	async function mountBar() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+		return wrapper.get('[data-testid="player-wide"]');
+	}
+
+	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
+		player.currentEpisode = episode(1);
+		player.playing = true;
+		player.stopped = false;
+	}
+
+	it('renders the next button to the right of the stop button', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+
+		const bar = await mountBar();
+		const stopBtn = bar.get('button[aria-label="Stop"]');
+		const nextBtn = bar.get('button[aria-label="Next"]');
+
+		const stopPos = stopBtn.element.compareDocumentPosition(nextBtn.element);
+		expect(stopPos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it('enables the next button with a queue and skips on click', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+
+		const nextBtn = (await mountBar()).get('button[aria-label="Next"]');
+		expect((nextBtn.element as HTMLButtonElement).disabled).toBe(false);
+
+		await nextBtn.trigger('click');
+		await flushPromises();
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.upNext).toEqual([]);
+	});
+
+	it('disables the next button when the queue is empty', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [];
+
+		const nextBtn = (await mountBar()).get('button[aria-label="Next"]');
+		expect((nextBtn.element as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('keeps every SponsorBlock category visible with the expected colors while paused', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_segments: [
+				{ start: 60, end: 120, category: 'sponsor', rejected: true },
+				{ start: 90, end: 150, category: 'intro', rejected: false }
+			]
+		};
+		const bar = await mountBar();
+
+		player.playing = false;
+		await flushPromises();
+
+		const markers = bar.findAll('[data-testid="player-sponsorblock-segment"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].classes()).toContain('bg-sponsorblock');
+		expect(markers[1].classes()).toContain('bg-sponsorblock-other');
+		expect(markers[0].attributes('style')).toContain('left: 10%');
+		expect(markers[0].attributes('style')).toContain('width: 10%');
+	});
+
+	it('renders no SponsorBlock markers when disabled', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_enabled: false,
+			sponsorblock_segments: [{ start: 60, end: 120, category: 'sponsor', rejected: true }]
+		};
+		const bar = await mountBar();
+		expect(bar.find('[data-testid="player-sponsorblock-segment"]').exists()).toBe(false);
+	});
+
+	it('shows the current chapter in wide and between compact title and metadata', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 10, end: 150, title: 'Introduction' }]
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const compactTitle = compact.get('[data-testid="scrolling-text-viewport"]');
+		const compactChapter = compact.get('[data-testid="player-current-chapter"]');
+		const compactMetadata = compact.get('[data-testid="player-compact-metadata"]');
+		expect(compactChapter.text()).toBe('Introduction');
+		expect(compactChapter.classes()).toContain('truncate');
+		expect(
+			compactTitle.element.compareDocumentPosition(compactChapter.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			compactChapter.element.compareDocumentPosition(compactMetadata.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+
+		player.currentEpisode = { ...player.currentEpisode!, chapters: [] };
+		await flushPromises();
+		expect(bar.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+		expect(compact.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+	});
+
+	it('updates the wide chapter label when playback crosses a boundary', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 149;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		player.currentTime = 150;
+		await flushPromises();
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Main topic');
+	});
+
+	it('renders distinct chapter markers on the wide scrubber and seeks on activation', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+
+		const markers = bar.findAll('[data-testid="player-chapter-marker"]');
+		expect(markers).toHaveLength(2);
+		expect(markers[0].get('[aria-hidden="true"]').classes()).toContain('bg-chapter-marker');
+		expect(markers[0].attributes('style')).toContain('left: 0%');
+		expect(markers[1].attributes('style')).toContain('left: 25%');
+		expect(markers[1].attributes('title')).toBeUndefined();
+		const tooltip = markers[1].get('[role="tooltip"]');
+		expect(tooltip.text()).toBe('Main topic');
+		expect(tooltip.classes()).toContain('group-hover:opacity-100');
+		expect(tooltip.classes()).toContain('group-focus-visible:opacity-100');
+		expect(markers[1].attributes('aria-describedby')).toBe(tooltip.attributes('id'));
+		expect(markers[1].element.tagName).toBe('BUTTON');
+		expect(markers[1].attributes('tabindex')).toBeUndefined();
+
+		await markers[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledOnce();
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('applies SponsorBlock skipping when a chapter marker is activated', async () => {
+		const player = usePlayerStore();
+		const item = episode(1);
+		item.chapters = [{ start: 130, end: 300, title: 'Main topic' }];
+		item.sponsorblock_segments = [{ start: 120, end: 150, category: 'sponsor', rejected: true }];
+		await player.play(item);
+		const bar = await mountBar();
+
+		await bar.get('[data-testid="player-chapter-marker"]').trigger('click');
+
+		expect(player.currentTime).toBe(150);
+	});
+
+	it('previous restarts the current episode beyond 3 seconds', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentTime = 12;
+
+		const prevBtn = (await mountBar()).get('button[aria-label="Previous"]');
+		await prevBtn.trigger('click');
+		await flushPromises();
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.currentTime).toBe(0);
+	});
+
+	it('previous navigates back within 3 seconds', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+		player.playStack = [episode(0)];
+		player.currentTime = 1;
+
+		const prevBtn = (await mountBar()).get('button[aria-label="Previous"]');
+		await prevBtn.trigger('click');
+		await flushPromises();
+		expect(player.currentEpisode?.id).toBe(0);
+		expect(player.playStack).toEqual([]);
+	});
+
+	it('long press on next skips and marks listened', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+
+		const nextBtn = (await mountBar()).get('button[aria-label="Next"]');
+		await nextBtn.trigger('pointerdown');
+		await vi.advanceTimersByTimeAsync(600);
+		await flushPromises();
+
+		expect(player.currentEpisode?.id).toBe(2);
+		expect(player.playStack[0].listen).toBe(true);
+
+		// the release after a long press must not skip twice
+		await nextBtn.trigger('pointerup');
+		await nextBtn.trigger('click');
+		await flushPromises();
+		expect(player.currentEpisode?.id).toBe(2);
+	});
+
+	it('opens the queue popover and removes an item', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2), episode(3)];
+
+		const bar = await mountBar();
+		const toggle = bar.get('button[aria-label="Up next queue"]');
+		await toggle.trigger('click');
+
+		expect(bar.text()).toContain('Episode 2');
+		expect(bar.text()).toContain('Episode 3');
+
+		const remove = bar.get('button[aria-label="Remove from queue"]');
+		await remove.trigger('click');
+		expect(player.upNext.map((e) => e.id)).toEqual([3]);
+	});
+
+	it('shows an empty state in the queue popover and clears all', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2), episode(3)];
+
+		const bar = await mountBar();
+		const toggle = bar.get('button[aria-label="Up next queue"]');
+		await toggle.trigger('click');
+
+		const clear = bar.findAll('button').find((b) => b.text().includes('Clear'));
+		expect(clear).toBeDefined();
+		await clear!.trigger('click');
+
+		expect(player.upNext).toEqual([]);
+		await toggle.trigger('click');
+		expect(bar.text()).toContain('No episodes queued');
+	});
+
+	it('hides the bar after stop even while the queue is non-empty', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2), episode(3)];
+		await mountBar();
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(true);
+
+		// stop playback with items still queued -> the bar still auto-hides
+		player.playing = false;
+		player.stopped = true;
+		await flushPromises();
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(false);
+	});
+
+	it('keeps a queue-only bar hidden on reload and restores it via the reopen control', async () => {
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+
+		// queue-only stopped bar is hidden: the reopen control is the path back
+		expect(wrapper!.find('[data-testid="player-bar"]').exists()).toBe(false);
+		expect(wrapper!.find('[data-testid="player-reopen"]').exists()).toBe(true);
+
+		await wrapper!.get('[data-testid="player-reopen"]').trigger('click');
+		await flushPromises();
+		const bar = wrapper!.get('[data-testid="player-wide"]');
+		expect(bar.text()).toContain('Queue ready');
+
+		const playBtn = bar.get('button[aria-label="Play"]');
+		expect((playBtn.element as HTMLButtonElement).disabled).toBe(true);
+
+		// queue stays reachable: the popover opens without a current episode
+		await bar.get('button[aria-label="Up next queue"]').trigger('click');
+		expect(bar.text()).toContain('Episode 2');
+	});
+
+	it('renders exactly one play/pause button and a tappable thumbnail as compact controls', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const buttons = compact.findAll('button');
+		expect(buttons).toHaveLength(2);
+		expect(compact.get('button[aria-label="Pause"]')).toBeTruthy();
+		expect(compact.get('button[aria-label="Expand player"]')).toBeTruthy();
+		expect(compact.find('[role="slider"]').exists()).toBe(false);
+	});
+
+	it('shows channel and elapsed-only compact clock including hour rollover', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = { ...player.currentEpisode!, channel_title: 'VisualPolitik' };
+		player.duration = 7200;
+		player.currentTime = 669;
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		expect(compact.text()).toContain('VisualPolitik • 11:09');
+		expect(compact.text()).not.toContain(player.durationLabel);
+
+		player.currentTime = 3600;
+		await flushPromises();
+		expect(compact.text()).toContain('VisualPolitik • 1:00:00');
+	});
+
+	it('toggles playback from the compact control', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const togglePlay = vi.spyOn(player, 'togglePlay').mockImplementation(async () => {
+			player.playing = !player.playing;
+		});
+		await mountBar();
+
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Pause"]')
+			.trigger('click');
+		expect(togglePlay).toHaveBeenCalledOnce();
+		expect(player.playing).toBe(false);
+	});
+
+	it('opens the expanded now-playing view when the compact thumbnail is tapped', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(true);
+	});
+
+	it('closes the expanded view without interrupting playback', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+
+		await wrapper!.get('button[aria-label="Collapse now-playing view"]').trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+		expect(player.playing).toBe(true);
+		expect(player.currentEpisode?.id).toBe(1);
+	});
+
+	it('force-closes the expanded view when the viewport widens past 640px', async () => {
+		let changeListener: ((event: MediaQueryListEvent) => void) | null = null;
+		const mediaQueryList = {
+			matches: false,
+			addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+				changeListener = listener;
+			}),
+			removeEventListener: vi.fn()
+		};
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => mediaQueryList)
+		);
+
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		await wrapper!
+			.get('[data-testid="player-compact"] button[aria-label="Expand player"]')
+			.trigger('click');
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(true);
+
+		expect(changeListener).toBeTruthy();
+		changeListener!({ matches: true } as MediaQueryListEvent);
+		await flushPromises();
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+	});
+
+	it('renders matching SponsorBlock markers on the compact read-only track', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			sponsorblock_segments: [
+				{ start: 60, end: 120, category: 'sponsor', rejected: true },
+				{ start: 180, end: 240, category: 'intro', rejected: false }
+			]
+		};
+		player.currentTime = 90;
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const wide = wrapper!.get('[data-testid="player-wide"]');
+		const compactMarkers = compact.findAll('[data-testid="player-sponsorblock-segment"]');
+		const wideMarkers = wide.findAll('[data-testid="player-sponsorblock-segment"]');
+		expect(compactMarkers).toHaveLength(2);
+		expect(compactMarkers[0].classes()).toContain('bg-sponsorblock');
+		expect(compactMarkers[1].classes()).toContain('bg-sponsorblock-other');
+		expect(compactMarkers.map((marker) => marker.attributes('style'))).toEqual(
+			wideMarkers.map((marker) => marker.attributes('style'))
+		);
+
+		const track = compact.get('[data-testid="player-progress-compact"]');
+		expect(track.attributes('aria-hidden')).toBe('true');
+		expect(track.attributes('role')).toBeUndefined();
+		expect(track.attributes('tabindex')).toBeUndefined();
+		await track.trigger('click');
+		expect(player.currentTime).toBe(90);
+	});
+
+	it('renders matching non-interactive chapter markers on the compact track', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		await mountBar();
+
+		const compact = wrapper!.get('[data-testid="player-compact"]');
+		const wide = wrapper!.get('[data-testid="player-wide"]');
+		const compactMarkers = compact.findAll('[data-testid="player-chapter-marker"]');
+		const wideMarkers = wide.findAll('[data-testid="player-chapter-marker"]');
+		expect(compactMarkers).toHaveLength(2);
+		expect(compactMarkers[0].classes()).toContain('bg-chapter-marker');
+		expect(compactMarkers.map((marker) => marker.attributes('style'))).toEqual(
+			wideMarkers.map((marker) => marker.attributes('style'))
+		);
+		expect(compact.find('button[data-testid="player-chapter-marker"]').exists()).toBe(false);
+
+		await compactMarkers[1].trigger('click');
+		await compact.get('[data-testid="player-progress-compact"]').trigger('click');
+		expect(seekSpy).not.toHaveBeenCalled();
+	});
+
+	it('renders no chapter markers when the episode has no chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+
+		expect(wrapper!.find('[data-testid="player-chapter-marker"]').exists()).toBe(false);
+	});
+	it('leaves the wide composition entirely unaffected by the expanded view', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+
+		// Same controls as before: no expand affordance, thumbnail is not a button.
+		expect(bar.find('button[aria-label="Expand player"]').exists()).toBe(false);
+		expect(bar.get('button[aria-label="Previous"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Stop"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Next"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Playback speed"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Shuffle"]')).toBeTruthy();
+		expect(bar.get('button[aria-label="Up next queue"]')).toBeTruthy();
+		expect(bar.find('input[type="range"]').exists()).toBe(true);
+
+		// Tapping the (non-button) wide thumbnail does not open the expanded view.
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+	});
+
+	it('wide scrubber spans the full bar width with an extended hit area and seeks', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.duration = 600;
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+
+		const track = bar.get('[role="slider"]');
+		expect(track.classes()).toContain('w-full');
+		expect(track.classes()).toContain('py-2');
+		vi.spyOn(track.element, 'getBoundingClientRect').mockReturnValue({
+			left: 0,
+			width: 100
+		} as DOMRect);
+		await track.trigger('click', { clientX: 50 });
+		expect(seekSpy).toHaveBeenCalledWith(300);
+	});
+
+	it('wide time readout sits beside the thumbnail as elapsed / total', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			image: 'https://example.com/episode.jpg'
+		};
+		player.duration = 600;
+		player.currentTime = 120;
+		const bar = await mountBar();
+
+		const time = bar.get('[data-testid="player-wide-time"]');
+		expect(time.text()).toBe('2:00 / 10:00');
+		expect(time.classes()).toContain('tabular-nums');
+		expect(
+			bar.get('img').element.compareDocumentPosition(time.element) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	});
+
+	it('wide metadata shows title, chapter and channel on three lines', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [{ start: 0, end: 300, title: 'Introduction' }],
+			channel_title: 'VisualPolitik'
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		expect(bar.get('[data-testid="player-current-chapter"]').text()).toBe('Introduction');
+		expect(bar.text()).toContain('VisualPolitik');
+		expect(bar.get('[data-testid="scrolling-text-text"]').text()).toBe('Episode 1');
+
+		const chapter = bar.get('[data-testid="player-current-chapter"]');
+		const channel = bar.findAll('p').find((p) => p.text() === 'VisualPolitik');
+		expect(channel).toBeDefined();
+		expect(
+			bar
+				.get('[data-testid="scrolling-text-viewport"]')
+				.element.compareDocumentPosition(chapter.element) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			chapter.element.compareDocumentPosition(channel!.element) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	});
+
+	it('wide metadata shows channel on its own line when no chapter is active', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = { ...player.currentEpisode!, channel_title: 'VisualPolitik' };
+		const bar = await mountBar();
+
+		expect(bar.find('[data-testid="player-current-chapter"]').exists()).toBe(false);
+		expect(bar.findAll('p').some((p) => p.text() === 'VisualPolitik')).toBe(true);
+	});
+
+	it('wide thumbnail is a static non-clickable image', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			image: 'https://example.com/episode.jpg'
+		};
+		const bar = await mountBar();
+
+		const thumb = bar.get('img').element.parentElement!;
+		expect(thumb.tagName).toBe('DIV');
+		await thumb.dispatchEvent(new MouseEvent('click'));
+		expect(wrapper!.find('[data-testid="player-expanded"]').exists()).toBe(false);
+	});
+
+	it('opens the chapters popover and lists chapters with active highlight', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		player.currentTime = 60;
+		const bar = await mountBar();
+
+		const toggle = bar.get('button[aria-label="Chapters"]');
+		await toggle.trigger('click');
+		const panel = bar.get('[data-testid="player-chapters-panel"]');
+		const rows = panel.findAll('[data-testid="player-chapter-row"]');
+		expect(rows).toHaveLength(2);
+		expect(rows[0].text()).toContain('Introduction');
+		expect(rows[0].text()).toContain('0:00');
+		expect(rows[1].text()).toContain('Main topic');
+		expect(rows[0].classes()).toContain('bg-accent-600/15');
+		expect(rows[0].attributes('aria-current')).toBe('true');
+		expect(rows[1].attributes('aria-current')).toBeUndefined();
+	});
+
+	it('chapter row in the wide popover seeks to its start', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+		await bar.get('button[aria-label="Chapters"]').trigger('click');
+
+		await bar.findAll('[data-testid="player-chapter-row"]')[1].trigger('click');
+		expect(seekSpy).toHaveBeenCalledWith(150);
+	});
+
+	it('wide chapter navigation mirrors the expanded behavior', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.currentEpisode = {
+			...player.currentEpisode!,
+			chapters: [
+				{ start: 0, end: 150, title: 'Introduction' },
+				{ start: 150, end: 300, title: 'Main topic' }
+			]
+		};
+		const seekSpy = vi.spyOn(player, 'seek');
+		const bar = await mountBar();
+		await bar.get('button[aria-label="Chapters"]').trigger('click');
+
+		player.currentTime = 60;
+		await flushPromises();
+		// more than 3s into the first chapter -> previous restarts the current chapter
+		await bar.get('[data-testid="player-previous-chapter"]').trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(0);
+
+		player.currentTime = 60;
+		await flushPromises();
+		await bar.get('[data-testid="player-next-chapter"]').trigger('click');
+		expect(seekSpy).toHaveBeenLastCalledWith(150);
+	});
+
+	it('renders no chapters popover control without stored chapters', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		expect(bar.find('button[aria-label="Chapters"]').exists()).toBe(false);
+	});
+
+	it('wide title scrolls while playing and truncates when paused', async () => {
+		const restoreMeasurements = mockMeasurements(100, 200);
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await flushPromises();
+
+		const track = bar.get('[data-testid="scrolling-text-track"]');
+		expect(track.classes()).toContain('scrolling-text-track--active');
+
+		player.playing = false;
+		await flushPromises();
+		expect(track.classes()).toContain('truncate');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
+		restoreMeasurements();
+	});
+
+	it('wide title does not scroll with reduced motion', async () => {
+		const restoreMeasurements = mockMeasurements(100, 200);
+		mockReducedMotion(true);
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await flushPromises();
+
+		const track = bar.get('[data-testid="scrolling-text-track"]');
+		expect(track.classes()).toContain('truncate');
+		expect(track.classes()).not.toContain('scrolling-text-track--active');
+		restoreMeasurements();
+	});
+});
+
+describe('PersistentPlayer speed control', () => {
+	let wrapper: ReturnType<typeof mount> | null = null;
+
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		localStorage.clear();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		wrapper?.unmount();
+		wrapper = null;
+	});
+
+	async function mountBar() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+		return wrapper.get('[data-testid="player-wide"]');
+	}
+
+	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
+		player.currentEpisode = episode(1);
+		player.playing = true;
+		player.stopped = false;
+	}
+
+	function openPanel(bar: Awaited<ReturnType<typeof mountBar>>) {
+		return bar.get('button[aria-label="Playback speed"]').trigger('click');
+	}
+
+	it('adjusts the speed in half-tenth steps with the stepper', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+
+		const value = () => bar.get('[data-testid="speed-value"]').text();
+		expect(value()).toBe('1x');
+
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(value()).toBe('1.05x');
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(value()).toBe('1.1x');
+		await bar.get('button[aria-label="Decrease speed"]').trigger('click');
+		expect(value()).toBe('1.05x');
+		expect(player.speed).toBe(1.05);
+	});
+
+	it('keeps the panel open while stepping', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+		await bar.get('button[aria-label="Increase speed"]').trigger('click');
+		expect(bar.find('[data-testid="speed-panel"]').exists()).toBe(true);
+	});
+
+	it('presets are still selectable from the panel', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		await openPanel(bar);
+
+		const preset = bar
+			.findAll('[data-testid="speed-panel"] button')
+			.find((b) => b.text() === '1.5x');
+		expect(preset).toBeTruthy();
+		await preset!.trigger('click');
+		expect(player.speed).toBe(1.5);
+		// selecting a preset closes the panel
+		expect(bar.find('[data-testid="speed-panel"]').exists()).toBe(false);
+	});
+
+	it('disables the steppers at the range bounds', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		const bar = await mountBar();
+		player.speed = 0.5;
+		await openPanel(bar);
+		expect(
+			(bar.get('button[aria-label="Decrease speed"]').element as HTMLButtonElement).disabled
+		).toBe(true);
+		expect(
+			(bar.get('button[aria-label="Increase speed"]').element as HTMLButtonElement).disabled
+		).toBe(false);
+
+		// crossing the max bound while the panel stays open disables the
+		// increase stepper reactively
+		player.speed = 3;
+		await flushPromises();
+		expect(
+			(bar.get('button[aria-label="Increase speed"]').element as HTMLButtonElement).disabled
+		).toBe(true);
+		expect(
+			(bar.get('button[aria-label="Decrease speed"]').element as HTMLButtonElement).disabled
+		).toBe(false);
+	});
+
+	it('formats the displayed label trimming trailing zeros', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.speed = 1.7;
+		const bar = await mountBar();
+		expect(bar.get('button[aria-label="Playback speed"]').text()).toContain('1.7x');
+
+		await openPanel(bar);
+		expect(bar.get('[data-testid="speed-value"]').text()).toBe('1.7x');
+	});
+});
+
+describe('PersistentPlayer reopen control', () => {
+	let wrapper: ReturnType<typeof mount> | null = null;
+
+	beforeEach(() => {
+		vi.stubGlobal('HTMLAudioElement', AudioClass);
+		vi.stubGlobal('Audio', AudioClass);
+		localStorage.clear();
+		setActivePinia(createPinia());
+	});
+
+	afterEach(() => {
+		wrapper?.unmount();
+		wrapper = null;
+		vi.useRealTimers();
+	});
+
+	async function mountPlayer() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+	}
+
+	async function mountBar() {
+		wrapper = mount(PersistentPlayer, {
+			global: { plugins: [testI18n] }
+		});
+		await flushPromises();
+		return wrapper.get('[data-testid="player-wide"]');
+	}
+
+	function startPlayback(player: ReturnType<typeof usePlayerStore>) {
+		player.currentEpisode = episode(1);
+		player.playing = true;
+		player.stopped = false;
+	}
+
+	function stop(player: ReturnType<typeof usePlayerStore>) {
+		player.playing = false;
+		player.stopped = true;
+	}
+
+	const reopenControl = () => wrapper!.find('[data-testid="player-reopen"]');
+	const barEl = () => wrapper!.find('[data-testid="player-bar"]');
+
+	it('renders no reopen control while the bar is visible', async () => {
+		const player = usePlayerStore();
+		startPlayback(player);
+
+		await mountBar();
+		expect(barEl().exists()).toBe(true);
+		expect(reopenControl().exists()).toBe(false);
+	});
+
+	it('shows the reopen control once the bar auto-hides after a stop', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		expect(reopenControl().exists()).toBe(false);
+
+		stop(player);
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('restores the bar without starting playback or mutating state', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		player.upNext = [episode(2)];
+		await mountBar();
+		stop(player);
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(reopenControl().exists()).toBe(true);
+
+		await reopenControl().trigger('click');
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+		expect(player.playing).toBe(false);
+		expect(player.stopped).toBe(true);
+		expect(player.currentEpisode?.id).toBe(1);
+		expect(player.upNext.map((e) => e.id)).toEqual([2]);
+	});
+
+	it('re-arms the hide timer when reopening a stopped bar', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		startPlayback(player);
+		await mountBar();
+		stop(player);
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(reopenControl().exists()).toBe(true);
+
+		// reopening a stopped bar shows it again and arms a fresh 10 s delay
+		await reopenControl().trigger('click');
+		await flushPromises();
+		expect(barEl().exists()).toBe(true);
+		expect(player.playing).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('renders no reopen control with no current episode and an empty queue', async () => {
+		usePlayerStore();
+		await mountPlayer();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(false);
+	});
+
+	it('auto-hides a stopped queue-only bar and restores it with the queue intact', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+		await mountPlayer();
+
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+
+		await reopenControl().trigger('click');
+		await flushPromises();
+		const bar = wrapper!.get('[data-testid="player-wide"]');
+		expect(bar.text()).toContain('Queue ready');
+		expect(player.currentEpisode).toBeNull();
+		expect(player.upNext.map((e) => e.id)).toEqual([2]);
+		expect(player.playing).toBe(false);
+
+		// reopened stopped bar auto-hides again after the delay
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+
+	it('renders the bar hidden and the reopen control visible on a queue-only cold load', async () => {
+		vi.useFakeTimers();
+		const player = usePlayerStore();
+		player.currentEpisode = null;
+		player.upNext = [episode(2)];
+		player.stopped = true;
+		await mountPlayer();
+
+		// a restored stopped queue starts hidden: the reopen control is the
+		// only path back, and no hide timer reveals the bar while nothing plays
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+		expect(reopenControl().attributes('aria-label')).toBe('Show player');
+
+		await vi.advanceTimersByTimeAsync(10050);
+		await flushPromises();
+		expect(barEl().exists()).toBe(false);
+		expect(reopenControl().exists()).toBe(true);
+	});
+});

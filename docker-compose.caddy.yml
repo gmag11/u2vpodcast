@@ -1,5 +1,12 @@
 version: "3.7"
 
+# Caddy labels for the external `proxy` network. Caddy terminates TLS and
+# provisions certificates automatically for the configured ${FQDN}.
+#
+# REQUIRED for production auth: the app refuses to start in production mode
+# unless `config.yml` `url` uses https (the session cookie is `Secure` and the
+# browser only sends it over HTTPS). Set `url: https://${FQDN}` in config.yml.
+
 services:
   u2vpodcast:
     networks:

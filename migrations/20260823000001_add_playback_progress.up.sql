@@ -1,0 +1,2 @@
+ALTER TABLE episodes ADD COLUMN position_seconds INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE episodes ADD COLUMN listened_at DATETIME;

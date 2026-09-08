@@ -14,3 +14,11 @@ export const filterBySearchWords = <T>(
 		return words.every((word) => haystack.includes(word));
 	});
 };
+
+// Keeps only the items whose id is favorited per the given predicate. Views
+// pass the shared favorites store's `favoriteIdSet.has`, so a toggle in any
+// card is reflected immediately without a refetch (episode-favorites).
+export const filterByFavorites = <T extends { id: number }>(
+	items: T[],
+	isFavorite: (id: number) => boolean
+): T[] => items.filter((item) => isFavorite(item.id));

@@ -44,8 +44,7 @@ ENV UID=10001
 RUN apk add --update --no-cache \
             deno \
             ffmpeg~=8.1 \
-            python3~=3.14 \
-            py3-pip~=26.1 && \
+            python3~=3.14 && \
     rm -rf /var/cache/apk && \
     rm -rf /var/lib/app/lists*
 
@@ -70,11 +69,15 @@ RUN adduser \
 WORKDIR /app
 USER app
 
-RUN python3 -m pip install \
-            --user \
-            --upgrade \
-            --break-system-packages \
-            "yt-dlp[default]"
-            #git+https://github.com/yt-dlp/yt-dlp.git@release
+# Install the official standalone yt-dlp binary from GitHub releases. It is a
+# zipapp that runs on the system python3 (kept above). Using the standalone
+# binary lets `yt-dlp --update` self-update from the official
+# github.com/yt-dlp/yt-dlp releases channel, keeping "always latest" without a
+# PyPI pip dependency. `python3` and `deno` are the runtime requirements
+# (deno/node as the JS runtime for signature solving).
+RUN mkdir -p /app/.local/bin && \
+    wget -qO /app/.local/bin/yt-dlp \
+        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+    chmod +x /app/.local/bin/yt-dlp
 
 CMD ["/app/u2vpodcast"]

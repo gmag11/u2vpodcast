@@ -1,0 +1,1 @@
+DROP TABLE sponsorblock_cache;

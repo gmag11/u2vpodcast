@@ -6,10 +6,17 @@
 	import AppInput from '@/components/AppInput.vue';
 	import AppToggle from '@/components/AppToggle.vue';
 
-	const props = defineProps<{
-		open: boolean;
-		channel?: Channel | null;
-	}>();
+	const props = withDefaults(
+		defineProps<{
+			open: boolean;
+			channel?: Channel | null;
+			saving?: boolean;
+		}>(),
+		{
+			channel: null,
+			saving: false
+		}
+	);
 	const emit = defineEmits<{
 		(e: 'update:open', value: boolean): void;
 		(e: 'save', channel: Channel): void;
@@ -58,11 +65,15 @@
 			active: active.value,
 			description: props.channel?.description ?? '',
 			image: props.channel?.image ?? '',
+			playback_speed: props.channel?.playback_speed ?? 1,
 			first: first.value ? new Date(first.value) : new Date(),
-			max: Number(max.value) || 5,
+			max: Math.max(1, Number(max.value) || 5),
 			created_at: props.channel?.created_at ?? new Date(),
 			updated_at: new Date(),
-			last_date: props.channel?.last_date ?? null
+			last_date: props.channel?.last_date ?? null,
+			last_sync_at: props.channel?.last_sync_at ?? null,
+			last_sync_ok: props.channel?.last_sync_ok ?? null,
+			last_sync_error: props.channel?.last_sync_error ?? null
 		};
 		emit('save', channel);
 	}
@@ -76,22 +87,32 @@
 <template>
 	<AppDialog
 		:open="open"
-		:title="isEditing ? 'Edit Channel' : 'New Channel'"
+		:title="isEditing ? $t('channels.dialogEdit') : $t('channels.dialogNew')"
 		@update:open="(v: boolean) => emit('update:open', v)"
 	>
 		<form class="flex flex-col gap-5" @submit.prevent="handleSave">
 			<div v-if="isEditing" class="flex flex-col gap-1.5">
-				<label class="text-sm font-medium text-text" for="channel-title">Title</label>
-				<AppInput id="channel-title" v-model="title" placeholder="Channel title" />
+				<label class="text-sm font-medium text-text" for="channel-title">{{
+					$t('channels.fieldTitle')
+				}}</label>
+				<AppInput
+					id="channel-title"
+					v-model="title"
+					:placeholder="$t('channels.placeholderTitle')"
+				/>
 			</div>
 
 			<div class="flex items-center gap-3">
 				<AppToggle id="active-toggle" v-model="active" />
-				<label class="text-sm font-medium text-text" for="active-toggle">Active</label>
+				<label class="text-sm font-medium text-text" for="active-toggle">{{
+					$t('channels.fieldActive')
+				}}</label>
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<label class="text-sm font-medium text-text" for="channel-url">Url</label>
+				<label class="text-sm font-medium text-text" for="channel-url">{{
+					$t('channels.fieldUrl')
+				}}</label>
 				<AppInput
 					id="channel-url"
 					v-model="url"
@@ -102,24 +123,53 @@
 
 			<div class="flex flex-col gap-1.5">
 				<label class="text-sm font-medium text-text" for="max-episodes">
-					Max number of episodes
+					{{ $t('channels.fieldMax') }}
 				</label>
 				<AppInput id="max-episodes" v-model="max" type="number" min="1" />
 			</div>
 
 			<div class="flex flex-col gap-1.5">
 				<label class="text-sm font-medium text-text" for="first-episode-date">
-					First episode date
+					{{ $t('channels.fieldFirst') }}
 				</label>
 				<AppInput id="first-episode-date" v-model="first" type="date" />
 			</div>
 
 			<div class="mt-2 flex flex-col gap-3">
-				<AppButton type="submit" class="w-full py-2.5">
-					{{ isEditing ? 'Save changes' : 'Create channel' }}
+				<AppButton type="submit" class="w-full py-2.5" :disabled="saving">
+					<svg
+						v-if="saving"
+						class="h-5 w-5 animate-spin text-current"
+						viewBox="0 0 24 24"
+						fill="none"
+						aria-hidden="true"
+					>
+						<circle
+							class="opacity-25"
+							cx="12"
+							cy="12"
+							r="10"
+							stroke="currentColor"
+							stroke-width="4"
+						></circle>
+						<path
+							class="opacity-75"
+							fill="currentColor"
+							d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+						></path>
+					</svg>
+					<span v-else>{{
+						isEditing ? $t('channels.saveChanges') : $t('channels.createChannel')
+					}}</span>
 				</AppButton>
-				<AppButton type="button" variant="ghost" class="w-full py-2 text-sm" @click="handleCancel">
-					Cancel
+				<AppButton
+					type="button"
+					variant="ghost"
+					class="w-full py-2 text-sm"
+					:disabled="saving"
+					@click="handleCancel"
+				>
+					{{ $t('common.cancel') }}
 				</AppButton>
 			</div>
 		</form>

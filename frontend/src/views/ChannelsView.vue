@@ -1,5 +1,6 @@
 <script setup lang="ts">
 	import { computed, onMounted, ref } from 'vue';
+	import { useI18n } from 'vue-i18n';
 	import { useRoute, useRouter } from 'vue-router';
 	import { PhPlus } from '@phosphor-icons/vue';
 	import { api } from '@/lib/api/client';
@@ -22,6 +23,7 @@
 	const router = useRouter();
 	const auth = useAuthStore();
 	const notification = useNotificationStore();
+	const { t } = useI18n();
 
 	const channels = ref<Channel[]>([]);
 	const searchQuery = ref('');
@@ -31,6 +33,7 @@
 	const editingChannel = ref<Channel | null>(null);
 	const pendingDelete = ref<Channel | null>(null);
 	const refreshingSlug = ref<string | null>(null);
+	const saving = ref(false);
 
 	const SORT_KEY = 'channel-sort';
 
@@ -143,25 +146,32 @@
 	}
 
 	async function saveChannel(channel: Channel) {
-		if (channel.id > 0) {
-			const result = await api.updateChannel(channel.slug, channel);
-			if (result.ok) {
-				const idx = channels.value.findIndex((c) => c.id === channel.id);
-				if (idx >= 0) channels.value[idx] = channel;
-				notification.show('Channel updated', 'success');
+		saving.value = true;
+		try {
+			if (channel.id > 0) {
+				const result = await api.updateChannel(channel.slug, channel);
+				if (result.ok) {
+					const idx = channels.value.findIndex((c) => c.id === channel.id);
+					// Apply the server response so fields the backend rejected or
+					// normalized (e.g. empty title -> 400) are never flashed as saved.
+					if (idx >= 0 && result.data) channels.value[idx] = result.data;
+					notification.show(t('channels.updated'), 'success');
+				} else {
+					notification.show(t('channels.updateFailed'), 'error');
+				}
 			} else {
-				notification.show(result.message || 'Failed to update channel', 'error');
+				const result = await api.createChannel(channel);
+				if (result.ok && result.data) {
+					channels.value = [...channels.value, result.data];
+					notification.show(t('channels.created'), 'success');
+				} else {
+					notification.show(t('channels.createFailed'), 'error');
+				}
 			}
-		} else {
-			const result = await api.createChannel(channel);
-			if (result.ok && result.data) {
-				channels.value = [...channels.value, result.data];
-				notification.show('Channel created. Update started.', 'success');
-			} else {
-				notification.show(result.message || 'Failed to create channel', 'error');
-			}
+			showAddDialog.value = false;
+		} finally {
+			saving.value = false;
 		}
-		showAddDialog.value = false;
 	}
 
 	async function deletePendingChannel() {
@@ -169,9 +179,9 @@
 		const result = await api.deleteChannel(pendingDelete.value.slug);
 		if (result.ok) {
 			channels.value = channels.value.filter((c) => c.id !== pendingDelete.value?.id);
-			notification.show('Channel deleted', 'success');
+			notification.show(t('channels.deleted'), 'success');
 		} else {
-			notification.show(result.message || 'Failed to delete channel', 'error');
+			notification.show(t('channels.deleteFailed'), 'error');
 		}
 		pendingDelete.value = null;
 		showConfirmDialog.value = false;
@@ -184,9 +194,9 @@
 		if (result.ok && result.data) {
 			const idx = channels.value.findIndex((c) => c.id === channel.id);
 			if (idx >= 0) channels.value[idx] = result.data;
-			notification.show('Cover image updated', 'success');
+			notification.show(t('channels.coverUpdated'), 'success');
 		} else {
-			notification.show(result.message || 'Failed to refresh cover image', 'error');
+			notification.show(t('channels.coverRefreshFailed'), 'error');
 		}
 	}
 
@@ -224,7 +234,7 @@
 		</template>
 		<template #actions>
 			<AppButton type="button" @click="openNewDialog">
-				<span class="hidden sm:inline">Create New</span>
+				<span class="hidden sm:inline">{{ $t('channels.create') }}</span>
 				<PhPlus class="h-4 w-4" weight="regular" />
 			</AppButton>
 		</template>
@@ -232,14 +242,16 @@
 
 	<main class="mx-auto max-w-[1440px] overflow-x-clip px-5 pb-28 pt-20 md:px-16">
 		<div class="mb-12 pt-8">
-			<h1 class="mb-2 font-display text-4xl font-semibold text-text">Dashboard</h1>
-			<p class="text-lg text-text-muted">Manage your recent podcast episodes and content.</p>
+			<h1 class="mb-2 font-display text-4xl font-semibold text-text">
+				{{ $t('channels.dashboard') }}
+			</h1>
+			<p class="text-lg text-text-muted">{{ $t('channels.subtitle') }}</p>
 		</div>
 
 		<div class="mb-10 flex w-full flex-col gap-3 md:flex-row md:items-center">
 			<SearchInput
 				v-model="searchQuery"
-				placeholder="Search channels…"
+				:placeholder="$t('channels.searchPlaceholder')"
 				class="min-w-0 flex-1 md:max-w-3xl md:mx-auto"
 			/>
 			<SortControl
@@ -251,7 +263,7 @@
 			/>
 		</div>
 
-		<p v-if="noSearchResults" class="mt-4 text-text-muted">No results match your search.</p>
+		<p v-if="noSearchResults" class="mt-4 text-text-muted">{{ $t('common.noResults') }}</p>
 
 		<div v-else class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
 			<ChannelCard
@@ -273,12 +285,17 @@
 		/>
 	</main>
 
-	<AddChannelDialog v-model:open="showAddDialog" :channel="editingChannel" @save="saveChannel" />
+	<AddChannelDialog
+		v-model:open="showAddDialog"
+		:channel="editingChannel"
+		:saving="saving"
+		@save="saveChannel"
+	/>
 
 	<ConfirmDialog
 		v-model:open="showConfirmDialog"
-		title="Warning"
-		message="Are you sure you want to delete this channel?"
+		:title="$t('common.warning')"
+		:message="$t('channels.deleteConfirmMessage')"
 		@confirm="deletePendingChannel"
 	/>
 </template>
