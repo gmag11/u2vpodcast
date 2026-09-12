@@ -798,7 +798,7 @@ export const usePlayerStore = defineStore('player', () => {
 	}
 
 	function mediaUrl(episode: Episode) {
-		return `/media/${episode.channel_slug}/${episode.yt_id}.mp3`;
+		return `/media/${episode.channel_slug}/${episode.yt_id}.original.mp3`;
 	}
 
 	// Resolves once the element's metadata is available. A 5s safety net keeps

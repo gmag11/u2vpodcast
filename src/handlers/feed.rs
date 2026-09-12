@@ -234,7 +234,7 @@ fn episode_item(
 ) -> rss::Item {
     let channel_dir = audio_root.join(slug);
     let selected = episode.selected_media(&channel_dir, sponsorblock_enabled);
-    let enclosure_url = format!("{url}/media/{slug}/{}", selected.filename);
+    let enclosure_url = format!("{url}/media/{slug}/{}.mp3", episode.yt_id);
     let enclosure_length = std::fs::metadata(channel_dir.join(&selected.filename))
         .map(|metadata| metadata.len())
         .unwrap_or(0);
@@ -445,7 +445,12 @@ mod tests {
             .enclosure()
             .unwrap()
             .url()
-            .ends_with("/processed.sponsorblock.abcdef.mp3"));
+            .ends_with("/processed.mp3"));
+        assert!(!processed
+            .enclosure()
+            .unwrap()
+            .url()
+            .contains(".sponsorblock."));
         assert_eq!(processed.enclosure().unwrap().length(), "7");
         assert_eq!(processed.itunes_ext().unwrap().duration(), Some("540"));
         for yt_id in ["empty", "missing"] {

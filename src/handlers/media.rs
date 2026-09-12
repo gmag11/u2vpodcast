@@ -6,14 +6,14 @@ use std::{
 
 use actix_web::{
     http::{header, Method, StatusCode},
-    web::Path as WebPath,
+    web::{Data, Path as WebPath},
     HttpRequest, HttpResponse,
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio_util::io::ReaderStream;
 use tracing::{debug, info};
 
-use crate::models::audios_dir;
+use crate::models::{audios_dir, AppState, Episode};
 
 /// Resolves a `/media/{path:.*}` segment under the audios directory, rejecting
 /// any path traversal component.
@@ -28,6 +28,24 @@ fn resolve_media(relative: &str) -> Option<PathBuf> {
         return None;
     }
     Some(Path::new(audios_dir()).join(rel))
+}
+
+/// Returns the `yt_id` when `filename` is the plain `{yt_id}.mp3` form used by
+/// the stable feed enclosure URL. Hash-versioned derivatives
+/// (`{yt_id}.sponsorblock.{hash}.mp3`) and the `.original.mp3` alias are
+/// excluded so they keep resolving directly.
+fn stable_media_yt_id(filename: &str) -> Option<&str> {
+    let stem = filename.strip_suffix(".mp3")?;
+    if stem.contains(".sponsorblock.") || stem.ends_with(".original") {
+        return None;
+    }
+    Some(stem)
+}
+
+/// Maps a `{yt_id}.original.mp3` request to the on-disk original `{yt_id}.mp3`.
+fn original_media_filename(filename: &str) -> Option<String> {
+    let yt_id = filename.strip_suffix(".original.mp3")?;
+    Some(format!("{yt_id}.mp3"))
 }
 
 fn mime_for(path: &Path) -> &'static str {
@@ -109,7 +127,41 @@ fn validators(meta: &std::fs::Metadata) -> (String, String) {
     (etag, last_modified)
 }
 
-pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpResponse {
+/// Resolves the requested relative media path to the physical file to stream.
+/// `.original.mp3` maps to the original file; the plain `{yt_id}.mp3` form maps
+/// to the active SponsorBlock derivative when enabled and present. Hash-versioned
+/// derivative names and every other path resolve directly.
+async fn resolve_selected_media(relative: &str, full: PathBuf, data: &AppState) -> PathBuf {
+    let Some((parent, filename)) = relative.rsplit_once('/') else {
+        return full;
+    };
+    if let Some(yt_id) = stable_media_yt_id(filename) {
+        if data.config.sponsorblock_enabled {
+            if let Ok(Some(processed)) =
+                Episode::active_processed_filename(&data.pool, parent, yt_id).await
+            {
+                let candidate = full.with_file_name(&processed);
+                if tokio::fs::metadata(&candidate)
+                    .await
+                    .map(|metadata| metadata.is_file())
+                    .unwrap_or(false)
+                {
+                    debug!("media stable {} -> {}", relative, processed);
+                    return candidate;
+                }
+            }
+        }
+    } else if let Some(original) = original_media_filename(filename) {
+        return full.with_file_name(original);
+    }
+    full
+}
+
+pub async fn serve_media(
+    req: HttpRequest,
+    path: WebPath<String>,
+    data: Data<AppState>,
+) -> HttpResponse {
     let relative = path.into_inner();
     let range_hdr = req
         .headers()
@@ -128,6 +180,7 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
         debug!("media 404 {} {}", req.method(), relative);
         return HttpResponse::NotFound().finish();
     };
+    let full = resolve_selected_media(&relative, full, &data).await;
     let Ok(meta) = tokio::fs::metadata(&full).await else {
         debug!("media 404 {} {}", req.method(), relative);
         return HttpResponse::NotFound().finish();
@@ -222,14 +275,92 @@ pub async fn serve_media(req: HttpRequest, path: WebPath<String>) -> HttpRespons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{config::test_config, SponsorBlockCache};
     use actix_web::{body::to_bytes, test::TestRequest};
+    use chrono::Utc;
+    use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
+
+    async fn test_state(sponsorblock_enabled: bool) -> Data<AppState> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory pool");
+        Migrator::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .expect("load migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        let mut config = test_config();
+        config.sponsorblock_enabled = sponsorblock_enabled;
+        Data::new(AppState { config, pool })
+    }
+
+    async fn add_episode(
+        state: &Data<AppState>,
+        slug: &str,
+        yt_id: &str,
+        processed: Option<&str>,
+    ) {
+        let now = Utc::now();
+        let channel_id: i64 = sqlx::query_scalar(
+            "INSERT INTO channels (url, title, slug, active, description, image, first, max, created_at, updated_at) \
+             VALUES ('https://example.com', 'Channel', $1, TRUE, '', '', $2, 5, $2, $2) RETURNING id",
+        )
+        .bind(slug)
+        .bind(now)
+        .fetch_one(&state.pool)
+        .await
+        .expect("insert channel");
+        let episode_id: i64 = sqlx::query_scalar(
+            "INSERT INTO episodes (channel_id, title, yt_id, webpage_url, published_at, duration, created_at, updated_at) \
+             VALUES ($1, 'Episode', $2, 'https://example.com/v', $3, '00:01:00', $3, $3) RETURNING id",
+        )
+        .bind(channel_id)
+        .bind(yt_id)
+        .bind(now)
+        .fetch_one(&state.pool)
+        .await
+        .expect("insert episode");
+        if let Some(filename) = processed {
+            SponsorBlockCache::upsert_success(
+                &state.pool,
+                episode_id,
+                &[],
+                "snapshot",
+                "processing",
+                Some(filename),
+                Some(50.0),
+            )
+            .await
+            .expect("store sponsorblock cache");
+        }
+    }
+
+    fn fixture_dir(slug: &str) -> PathBuf {
+        let directory = Path::new(audios_dir()).join(slug);
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        directory
+    }
+
+    async fn get_media(state: &Data<AppState>, relative: &str) -> HttpResponse {
+        serve_media(
+            TestRequest::get()
+                .uri(&format!("/media/{relative}"))
+                .to_http_request(),
+            WebPath::from(relative.to_string()),
+            state.clone(),
+        )
+        .await
+    }
 
     #[actix_web::test]
     async fn serves_hash_versioned_mp3_with_full_head_range_and_conditional_requests() {
+        let state = test_state(true).await;
         let slug = format!("sponsorblock_media_test_{}", rand::random::<u64>());
         let relative = format!("{slug}/video.sponsorblock.abcdef0123456789.mp3");
-        let directory = Path::new(audios_dir()).join(&slug);
-        std::fs::create_dir_all(&directory).unwrap();
+        let directory = fixture_dir(&slug);
         std::fs::write(
             directory.join("video.sponsorblock.abcdef0123456789.mp3"),
             b"0123456789",
@@ -241,6 +372,7 @@ mod tests {
                 .uri(&format!("/media/{relative}"))
                 .to_http_request(),
             WebPath::from(relative.clone()),
+            state.clone(),
         )
         .await;
         assert_eq!(get.status(), StatusCode::OK);
@@ -261,6 +393,7 @@ mod tests {
                 .method(Method::HEAD)
                 .to_http_request(),
             WebPath::from(relative.clone()),
+            state.clone(),
         )
         .await;
         assert_eq!(head.status(), StatusCode::OK);
@@ -271,6 +404,7 @@ mod tests {
                 .insert_header((header::RANGE, "bytes=2-5"))
                 .to_http_request(),
             WebPath::from(relative.clone()),
+            state.clone(),
         )
         .await;
         assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
@@ -288,9 +422,195 @@ mod tests {
                 .insert_header((header::IF_MODIFIED_SINCE, modified))
                 .to_http_request(),
             WebPath::from(relative),
+            state.clone(),
         )
         .await;
         assert_eq!(conditional.status(), StatusCode::NOT_MODIFIED);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn stable_url_serves_processed_and_original_alias_serves_original() {
+        let state = test_state(true).await;
+        let slug = format!("stable_media_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("abc123.mp3"), b"original").unwrap();
+        std::fs::write(
+            directory.join("abc123.sponsorblock.abcdef.mp3"),
+            b"processed",
+        )
+        .unwrap();
+        add_episode(
+            &state,
+            &slug,
+            "abc123",
+            Some("abc123.sponsorblock.abcdef.mp3"),
+        )
+        .await;
+
+        let stable = get_media(&state, &format!("{slug}/abc123.mp3")).await;
+        assert_eq!(stable.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(stable.into_body()).await.unwrap(),
+            b"processed".as_slice()
+        );
+
+        let original = get_media(&state, &format!("{slug}/abc123.original.mp3")).await;
+        assert_eq!(original.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(original.into_body()).await.unwrap(),
+            b"original".as_slice()
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn stable_url_serves_original_when_sponsorblock_is_disabled() {
+        let state = test_state(false).await;
+        let slug = format!("stable_disabled_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("abc123.mp3"), b"original").unwrap();
+        std::fs::write(
+            directory.join("abc123.sponsorblock.abcdef.mp3"),
+            b"processed",
+        )
+        .unwrap();
+        add_episode(
+            &state,
+            &slug,
+            "abc123",
+            Some("abc123.sponsorblock.abcdef.mp3"),
+        )
+        .await;
+
+        let response = get_media(&state, &format!("{slug}/abc123.mp3")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body()).await.unwrap(),
+            b"original".as_slice()
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn stable_url_serves_original_without_a_derivative() {
+        let state = test_state(true).await;
+        let slug = format!("stable_noderiv_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("abc123.mp3"), b"original").unwrap();
+        add_episode(&state, &slug, "abc123", None).await;
+
+        let response = get_media(&state, &format!("{slug}/abc123.mp3")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body()).await.unwrap(),
+            b"original".as_slice()
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn stable_url_serves_original_when_the_derivative_is_missing() {
+        let state = test_state(true).await;
+        let slug = format!("stable_missing_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("abc123.mp3"), b"original").unwrap();
+        add_episode(
+            &state,
+            &slug,
+            "abc123",
+            Some("abc123.sponsorblock.absent.mp3"),
+        )
+        .await;
+
+        let response = get_media(&state, &format!("{slug}/abc123.mp3")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body()).await.unwrap(),
+            b"original".as_slice()
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn plain_media_file_without_an_episode_is_served() {
+        let state = test_state(true).await;
+        let slug = format!("stable_orphan_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("orphan.mp3"), b"orphan").unwrap();
+
+        let response = get_media(&state, &format!("{slug}/orphan.mp3")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body()).await.unwrap(),
+            b"orphan".as_slice()
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn stable_url_returns_404_when_no_representation_exists() {
+        let state = test_state(true).await;
+        let slug = format!("stable_404_{}", rand::random::<u64>());
+        add_episode(
+            &state,
+            &slug,
+            "abc123",
+            Some("abc123.sponsorblock.absent.mp3"),
+        )
+        .await;
+
+        let response = get_media(&state, &format!("{slug}/abc123.mp3")).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let alias = get_media(&state, &format!("{slug}/abc123.original.mp3")).await;
+        assert_eq!(alias.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn media_route_injects_app_state_and_resolves_stable_url() {
+        use actix_web::{test, web, App};
+
+        let state = test_state(true).await;
+        let slug = format!("stable_route_{}", rand::random::<u64>());
+        let directory = fixture_dir(&slug);
+        std::fs::write(directory.join("abc123.mp3"), b"original").unwrap();
+        std::fs::write(
+            directory.join("abc123.sponsorblock.abcdef.mp3"),
+            b"processed",
+        )
+        .unwrap();
+        add_episode(
+            &state,
+            &slug,
+            "abc123",
+            Some("abc123.sponsorblock.abcdef.mp3"),
+        )
+        .await;
+
+        let app = test::init_service(
+            App::new()
+                .app_data(state.clone())
+                .route("/media/{path:.*}", web::get().to(serve_media)),
+        )
+        .await;
+
+        let response = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri(&format!("/media/{slug}/abc123.mp3"))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = test::read_body(response).await;
+        assert_eq!(body, b"processed".as_slice());
+
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

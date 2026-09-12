@@ -378,6 +378,31 @@ impl Episode {
             .ok_or_else(|| Error::new_with_status_code("episode not found", StatusCode::NOT_FOUND))
     }
 
+    /// Resolves the active SponsorBlock-processed filename recorded for the
+    /// episode identified by its channel slug and public `yt_id`, if any.
+    /// Returns `None` when the episode is unknown or has no active derivative.
+    pub async fn active_processed_filename(
+        pool: &SqlitePool,
+        channel_slug: &str,
+        yt_id: &str,
+    ) -> Result<Option<String>, Error> {
+        info!("active_processed_filename");
+        let sql = "SELECT sc.processed_filename AS processed_filename \
+                   FROM episodes e JOIN channels c ON c.id = e.channel_id \
+                   LEFT JOIN sponsorblock_cache sc ON sc.episode_id = e.id \
+                   WHERE c.slug = $1 AND e.yt_id = $2 ORDER BY e.id LIMIT 1";
+        let row = query(sql)
+            .bind(channel_slug)
+            .bind(yt_id)
+            .map(|row: SqliteRow| {
+                row.try_get::<Option<String>, _>("processed_filename")
+                    .unwrap_or(None)
+            })
+            .fetch_optional(pool)
+            .await?;
+        Ok(row.flatten())
+    }
+
     pub async fn exists(pool: &SqlitePool, channel_id: i64, yt_id: &str) -> bool {
         let sql = "SELECT count(*) FROM episodes WHERE channel_id = $1 AND yt_id = $2";
         match query(sql)
