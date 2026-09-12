@@ -232,8 +232,12 @@ fn episode_item(
     title: String,
     sponsorblock_enabled: bool,
 ) -> rss::Item {
-    let selected = episode.selected_media(&audio_root.join(slug), sponsorblock_enabled);
+    let channel_dir = audio_root.join(slug);
+    let selected = episode.selected_media(&channel_dir, sponsorblock_enabled);
     let enclosure_url = format!("{url}/media/{slug}/{}", selected.filename);
+    let enclosure_length = std::fs::metadata(channel_dir.join(&selected.filename))
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     let chapters_url = format!(
         "{url}/channels/{slug}/episodes/{}/chapters.json",
         episode.yt_id
@@ -248,6 +252,7 @@ fn episode_item(
         .build();
     let enclosure = EnclosureBuilder::default()
         .url(enclosure_url)
+        .length(enclosure_length.to_string())
         .mime_type("audio/mpeg".to_string())
         .build();
     let mut item = ItemBuilder::default()
@@ -441,6 +446,7 @@ mod tests {
             .unwrap()
             .url()
             .ends_with("/processed.sponsorblock.abcdef.mp3"));
+        assert_eq!(processed.enclosure().unwrap().length(), "7");
         assert_eq!(processed.itunes_ext().unwrap().duration(), Some("540"));
         for yt_id in ["empty", "missing"] {
             let item = items
@@ -452,6 +458,7 @@ mod tests {
                 .unwrap()
                 .url()
                 .ends_with(&format!("/{yt_id}.mp3")));
+            assert_eq!(item.enclosure().unwrap().length(), "0");
             assert_eq!(item.itunes_ext().unwrap().duration(), Some("600"));
         }
 
