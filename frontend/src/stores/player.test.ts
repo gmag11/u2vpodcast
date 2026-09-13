@@ -594,7 +594,7 @@ describe('player store queue', () => {
 
 		await player.togglePlay();
 		const el = MockAudioElement.instances[0];
-		expect(el.src).toBe('/media/c/yt1.mp3');
+		expect(el.src).toBe('/media/c/yt1.original.mp3');
 		expect(el.load).toHaveBeenCalled();
 		expect(el.play).toHaveBeenCalled();
 		expect(player.stopped).toBe(false);
