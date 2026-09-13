@@ -45,7 +45,7 @@ The app SHALL own exactly one `<audio>` element managed by a global audio player
 
 #### Scenario: Starting playback loads the shared element
 - **WHEN** the user presses play on any episode
-- **THEN** the shared store sets that episode as the current source, loads its `/media/{slug}/{yt_id}.mp3` URL into the single `<audio>` element, and playback starts
+- **THEN** the shared store sets that episode as the current source, loads its `/media/{slug}/{yt_id}.original.mp3` URL into the single `<audio>` element, and playback starts
 
 #### Scenario: Playing a second episode swaps the source
 - **WHEN** the user presses play on a different episode while another is playing
@@ -326,7 +326,7 @@ The persistent player bar SHALL expose shuffle and repeat controls reflecting th
 - **THEN** a repeat control is shown that cycles through none, all, and one, visually indicating the active state
 
 ### Requirement: Web playback skips configured rejected intervals on the original timeline
-The shared player SHALL continue loading the original `/media/{slug}/{yt_id}.mp3` source. When SponsorBlock is enabled, it SHALL use the normalized categorized SponsorBlock segments included in the episode payload. Whenever the playhead enters a segment marked as rejected, the player SHALL seek to the end of the complete overlapping rejected interval. Segments not marked as rejected SHALL remain playable. Playback position, duration, seeking, completion, and persisted progress SHALL remain expressed on the original MP3 timeline. Episode-card and persistent-player progress tracks SHALL display all SponsorBlock segments whenever enabled data is available, including before playback and while paused; this applies to both the interactive wide-composition scrubber and the read-only compact-composition track, which SHALL use the same segment colors and positions. `sponsor` segments SHALL use the existing sponsor color and every other category SHALL use a second color distinct from both sponsor markers and playback progress. When SponsorBlock is disabled, the player SHALL perform no SponsorBlock skips and SHALL render no SponsorBlock markers.
+The shared player SHALL continue loading the original `/media/{slug}/{yt_id}.original.mp3` source. When SponsorBlock is enabled, it SHALL use the normalized categorized SponsorBlock segments included in the episode payload. Whenever the playhead enters a segment marked as rejected, the player SHALL seek to the end of the complete overlapping rejected interval. Segments not marked as rejected SHALL remain playable. Playback position, duration, seeking, completion, and persisted progress SHALL remain expressed on the original MP3 timeline. Episode-card and persistent-player progress tracks SHALL display all SponsorBlock segments whenever enabled data is available, including before playback and while paused; this applies to both the interactive wide-composition scrubber and the read-only compact-composition track, which SHALL use the same segment colors and positions. `sponsor` segments SHALL use the existing sponsor color and every other category SHALL use a second color distinct from both sponsor markers and playback progress. When SponsorBlock is disabled, the player SHALL perform no SponsorBlock skips and SHALL render no SponsorBlock markers.
 
 #### Scenario: Playback enters a rejected interval
 - **WHEN** normal playback reaches a segment marked as rejected from original-media time 120 to 150
