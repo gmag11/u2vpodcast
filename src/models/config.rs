@@ -42,6 +42,12 @@ pub struct Config {
     pub sponsorblock_enabled: bool,
     #[serde(default = "default_sponsorblock_rejected_categories")]
     pub sponsorblock_rejected_categories: Vec<String>,
+    #[serde(default = "default_share_ttl_days")]
+    pub share_ttl_days: u64,
+}
+
+fn default_share_ttl_days() -> u64 {
+    30
 }
 
 fn default_sponsorblock_rejected_categories() -> Vec<String> {
@@ -139,6 +145,11 @@ impl Config {
             .filter(|category| configured.contains(**category))
             .map(|category| (*category).to_string())
             .collect();
+        // A zero share lifetime would make every minted link instantly expire;
+        // treat it as "unset" and fall back to the default (add-public-episode-share).
+        if self.share_ttl_days == 0 {
+            self.share_ttl_days = default_share_ttl_days();
+        }
         Ok(self)
     }
 
@@ -263,6 +274,21 @@ mod tests {
     }
 
     #[test]
+    fn share_ttl_days_defaults_to_30_and_accepts_overrides() {
+        let defaulted = Config::from_yaml(&yaml("")).unwrap();
+        assert_eq!(defaulted.share_ttl_days, 30);
+
+        let overridden = Config::from_yaml(&yaml("share_ttl_days: 7\n")).unwrap();
+        assert_eq!(overridden.share_ttl_days, 7);
+    }
+
+    #[test]
+    fn zero_share_ttl_days_falls_back_to_the_default() {
+        let zeroed = Config::from_yaml(&yaml("share_ttl_days: 0\n")).unwrap();
+        assert_eq!(zeroed.share_ttl_days, 30);
+    }
+
+    #[test]
     fn sponsorblock_rejects_unknown_categories() {
         let error =
             Config::from_yaml(&yaml("sponsorblock_rejected_categories: [sponser]\n")).unwrap_err();
@@ -289,6 +315,7 @@ mod tests {
             cooldown_seconds: 3,
             sponsorblock_enabled: false,
             sponsorblock_rejected_categories: vec!["sponsor".to_string()],
+            share_ttl_days: 30,
         };
         let redacted = redact_secrets(content, &config);
         assert!(!redacted.contains("super-secret-key-value"));

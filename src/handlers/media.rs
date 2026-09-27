@@ -157,6 +157,121 @@ async fn resolve_selected_media(relative: &str, full: PathBuf, data: &AppState) 
     full
 }
 
+/// Streams an already-resolved on-disk file with the media route's byte-range,
+/// `ETag`/`Last-Modified`, conditional-request, and HEAD semantics. When
+/// `cache_control` is set it is added to every content response; the public
+/// share route passes `private` so a shared proxy never serves one visitor's
+/// capability response to another.
+pub(crate) async fn stream_file(
+    req: &HttpRequest,
+    full: &Path,
+    cache_control: Option<&str>,
+) -> HttpResponse {
+    let Ok(meta) = tokio::fs::metadata(full).await else {
+        debug!("media 404 {} {}", req.method(), full.display());
+        return HttpResponse::NotFound().finish();
+    };
+    if !meta.is_file() {
+        debug!("media 404 {} {}", req.method(), full.display());
+        return HttpResponse::NotFound().finish();
+    }
+    let (etag, last_modified) = validators(&meta);
+    let total = meta.len();
+    let mime = mime_for(full);
+    let is_head = req.method() == Method::HEAD;
+    let range_hdr = req
+        .headers()
+        .get(header::RANGE)
+        .map(|v| v.to_str().unwrap_or("?").to_string());
+    let range = range_hdr
+        .as_deref()
+        .and_then(|value| parse_range(value, total));
+
+    // Satisfiable single range (open-ended included) → always 206.
+    if let Some((start, end)) = range {
+        let length = end - start + 1;
+        let mut builder = HttpResponse::build(StatusCode::PARTIAL_CONTENT);
+        builder.insert_header((header::ACCEPT_RANGES, "bytes"));
+        builder.insert_header((
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{total}"),
+        ));
+        builder.insert_header((header::CONTENT_TYPE, mime));
+        builder.insert_header((header::CONTENT_LENGTH, length));
+        builder.insert_header((header::LAST_MODIFIED, last_modified.clone()));
+        builder.insert_header((header::ETAG, etag.clone()));
+        if let Some(cache_control) = cache_control {
+            builder.insert_header((header::CACHE_CONTROL, cache_control));
+        }
+        if is_head {
+            debug!("media 206 HEAD {} {}", req.method(), full.display());
+            return builder.finish();
+        }
+        let Ok(mut file) = tokio::fs::File::open(full).await else {
+            debug!("media 404 open {}", full.display());
+            return HttpResponse::NotFound().finish();
+        };
+        if file.seek(SeekFrom::Start(start)).await.is_err() {
+            return HttpResponse::InternalServerError().finish();
+        }
+        debug!(
+            "media 206 {} {} bytes {start}-{end}/{total}",
+            req.method(),
+            full.display()
+        );
+        return builder.streaming(ReaderStream::new(file.take(length)));
+    }
+
+    // A malformed/unsatisfiable Range header is still answered 416 when the
+    // header is present but not satisfiable.
+    if range_hdr.is_some() {
+        debug!("media 416 {} {}", req.method(), full.display());
+        return HttpResponse::build(StatusCode::RANGE_NOT_SATISFIABLE)
+            .insert_header((header::CONTENT_RANGE, format!("bytes */{total}")))
+            .finish();
+    }
+
+    // Conditional GET: let the media cache revalidate instead of re-serving a
+    // stale prefix (304 carries no body).
+    {
+        let ims = req
+            .headers()
+            .get(header::IF_MODIFIED_SINCE)
+            .and_then(|v| v.to_str().ok());
+        if !is_head && ims == Some(last_modified.as_str()) {
+            debug!("media 304 {} {}", req.method(), full.display());
+            let mut resp = HttpResponse::build(StatusCode::NOT_MODIFIED);
+            resp.insert_header((header::LAST_MODIFIED, last_modified));
+            resp.insert_header((header::ETAG, etag));
+            if let Some(cache_control) = cache_control {
+                resp.insert_header((header::CACHE_CONTROL, cache_control));
+            }
+            return resp.finish();
+        }
+    }
+
+    // No Range header → the full file.
+    let mut builder = HttpResponse::Ok();
+    builder.insert_header((header::ACCEPT_RANGES, "bytes"));
+    builder.insert_header((header::CONTENT_TYPE, mime));
+    builder.insert_header((header::CONTENT_LENGTH, total));
+    builder.insert_header((header::LAST_MODIFIED, last_modified));
+    builder.insert_header((header::ETAG, etag));
+    if let Some(cache_control) = cache_control {
+        builder.insert_header((header::CACHE_CONTROL, cache_control));
+    }
+    if is_head {
+        debug!("media 200 HEAD {}", full.display());
+        return builder.finish();
+    }
+    let Ok(file) = tokio::fs::File::open(full).await else {
+        debug!("media 404 open {}", full.display());
+        return HttpResponse::NotFound().finish();
+    };
+    debug!("media 200 {} {total} bytes", req.method());
+    builder.streaming(ReaderStream::new(file))
+}
+
 pub async fn serve_media(
     req: HttpRequest,
     path: WebPath<String>,
@@ -181,95 +296,7 @@ pub async fn serve_media(
         return HttpResponse::NotFound().finish();
     };
     let full = resolve_selected_media(&relative, full, &data).await;
-    let Ok(meta) = tokio::fs::metadata(&full).await else {
-        debug!("media 404 {} {}", req.method(), relative);
-        return HttpResponse::NotFound().finish();
-    };
-    if !meta.is_file() {
-        debug!("media 404 {} {}", req.method(), relative);
-        return HttpResponse::NotFound().finish();
-    }
-    let (etag, last_modified) = validators(&meta);
-    let total = meta.len();
-    let mime = mime_for(&full);
-    let is_head = req.method() == Method::HEAD;
-
-    let range = range_hdr.as_deref().and_then(|v| parse_range(v, total));
-
-    // Satisfiable single range (open-ended included) → always 206.
-    if let Some((start, end)) = range {
-        let length = end - start + 1;
-        let mut builder = HttpResponse::build(StatusCode::PARTIAL_CONTENT);
-        builder.insert_header((header::ACCEPT_RANGES, "bytes"));
-        builder.insert_header((
-            header::CONTENT_RANGE,
-            format!("bytes {start}-{end}/{total}"),
-        ));
-        builder.insert_header((header::CONTENT_TYPE, mime));
-        builder.insert_header((header::CONTENT_LENGTH, length));
-        builder.insert_header((header::LAST_MODIFIED, last_modified.clone()));
-        builder.insert_header((header::ETAG, etag.clone()));
-        if is_head {
-            debug!("media 206 HEAD {} {}", req.method(), relative);
-            return builder.finish();
-        }
-        let Ok(mut file) = tokio::fs::File::open(&full).await else {
-            debug!("media 404 open {}", relative);
-            return HttpResponse::NotFound().finish();
-        };
-        if file.seek(SeekFrom::Start(start)).await.is_err() {
-            return HttpResponse::InternalServerError().finish();
-        }
-        debug!(
-            "media 206 {} {} bytes {start}-{end}/{total}",
-            req.method(),
-            relative
-        );
-        return builder.streaming(ReaderStream::new(file.take(length)));
-    }
-
-    // A malformed/unsatisfiable Range header is still answered 416 when the
-    // header is present but not satisfiable.
-    if range_hdr.is_some() {
-        debug!("media 416 {} {}", req.method(), relative);
-        return HttpResponse::build(StatusCode::RANGE_NOT_SATISFIABLE)
-            .insert_header((header::CONTENT_RANGE, format!("bytes */{total}")))
-            .finish();
-    }
-
-    // Conditional GET: let the media cache revalidate instead of re-serving a
-    // stale prefix (304 carries no body).
-    {
-        let ims = req
-            .headers()
-            .get(header::IF_MODIFIED_SINCE)
-            .and_then(|v| v.to_str().ok());
-        if !is_head && ims == Some(last_modified.as_str()) {
-            debug!("media 304 {} {}", req.method(), relative);
-            let mut resp = HttpResponse::build(StatusCode::NOT_MODIFIED);
-            resp.insert_header((header::LAST_MODIFIED, last_modified));
-            resp.insert_header((header::ETAG, etag));
-            return resp.finish();
-        }
-    }
-
-    // No Range header → the full file.
-    let mut builder = HttpResponse::Ok();
-    builder.insert_header((header::ACCEPT_RANGES, "bytes"));
-    builder.insert_header((header::CONTENT_TYPE, mime));
-    builder.insert_header((header::CONTENT_LENGTH, total));
-    builder.insert_header((header::LAST_MODIFIED, last_modified));
-    builder.insert_header((header::ETAG, etag));
-    if is_head {
-        debug!("media 200 HEAD {}", relative);
-        return builder.finish();
-    }
-    let Ok(file) = tokio::fs::File::open(&full).await else {
-        debug!("media 404 open {}", relative);
-        return HttpResponse::NotFound().finish();
-    };
-    debug!("media 200 {} {total} bytes", req.method());
-    builder.streaming(ReaderStream::new(file))
+    stream_file(&req, &full, None).await
 }
 
 #[cfg(test)]

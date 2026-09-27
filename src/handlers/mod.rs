@@ -7,6 +7,7 @@ mod logout;
 mod media;
 mod options;
 mod playlists;
+mod share;
 mod status;
 mod users;
 
@@ -55,6 +56,10 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                                 .service(episodes::update_progress)
                                 .service(episodes::update_favorite)
                                 .service(episodes::refresh_sponsorblock)
+                                .service(
+                                    web::resource("/episodes/{yt_id}/share/")
+                                        .route(web::post().to(share::create_share)),
+                                )
                                 .service(channels::create)
                                 .service(channels::update_episodes)
                                 .service(channels::refresh_image)
@@ -75,6 +80,21 @@ pub fn config_services(cfg: &mut web::ServiceConfig) {
                 web::scope("/images")
                     .wrap(SessionOrBasicAuth)
                     .service(af::Files::new("", images_dir())),
+            )
+            // Public episode-share surface. Deliberately outside every
+            // credential-wrapped scope: each route authorizes itself with the
+            // signed share token and answers 404 when it is invalid.
+            .service(
+                web::scope("/s")
+                    .service(
+                        web::resource("/{token}/episode.json")
+                            .route(web::get().to(share::get_shared_episode)),
+                    )
+                    .service(
+                        web::resource("/{token}/audio.mp3")
+                            .route(web::get().to(share::get_shared_audio))
+                            .route(web::head().to(share::get_shared_audio)),
+                    ),
             ),
     );
 }

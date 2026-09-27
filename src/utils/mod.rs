@@ -1,6 +1,7 @@
 pub mod csrf;
 pub mod middleware;
 pub mod rate_limit;
+pub mod share;
 pub mod sponsorblock;
 pub mod throttle;
 pub mod token_utils;
