@@ -91,13 +91,11 @@ export interface SharedEpisode {
 	image: string;
 	duration: string;
 	published_at: string;
-	expires_at: string;
 	audio_url: string;
 }
 
 export interface ShareLink {
 	url: string;
-	expires_at: string;
 }
 
 export interface LoginRequestBody {

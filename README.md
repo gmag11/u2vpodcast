@@ -63,7 +63,7 @@ You need to modify `config.yml`. Change the params as you need, and add all the 
 | `admin_username` | string | — | Username of the admin user. Only used when both `admin_username` and `admin_password` are set: in that case the admin is recreated from these values on every startup. |
 | `admin_password` | string | — | Password of the admin user. Only used when both `admin_username` and `admin_password` are set. The database never stores it in plaintext, only its hash. |
 | `with_authentication` | boolean | `true` | When `true`, the RSS feed (`/channels/{channel_id}/feed.xml`) and the media files (`/media/**`) require HTTP Basic Auth using the admin credentials. When `false`, they are served without authentication. |
-| `share_ttl_days` | integer | `30` | Lifetime, in days, of a public episode share link minted from an episode card. Rotating `secret_key` (and restarting) invalidates every outstanding link; there is no per-link revocation. `0` is treated as the default. |
+| `share_secret` | string | `secret_key` | Optional secret used to sign the permanent public episode share links (`/app/share/...`). When absent or empty, `secret_key` is used. Set a distinct random value to rotate public links without invalidating login sessions. Links never expire: they stop working only when their episode is deleted or this secret changes. |
 | `cooldown_seconds` | integer | `3` | Pause (in seconds) between consecutive YouTube connections imposed by the single-connection throttle: metadata fetches, cover image fetches, and every `yt-dlp` run are serialized and separated by this gap. |
 | `sponsorblock_enabled` | boolean | `false` | Master switch for SponsorBlock. When false, retrieval, reconciliation, processing, API data, refresh controls, playback skipping, timeline markers, and processed feed media are all bypassed. Existing installations must set this to `true` to retain SponsorBlock behavior after upgrading. |
 | `sponsorblock_rejected_categories` | string list | `[sponsor]` | Categories cut from derived feed audio and skipped by the web player when enabled. Supported values are `sponsor`, `selfpromo`, `interaction`, `intro`, `outro`, `preview`, `music_offtopic`, and `filler`. Duplicates have no additional effect; unsupported values prevent startup. An explicit `[]` rejects nothing while still showing all available categories. |
@@ -87,6 +87,8 @@ After that, go to `https://u2vpodcast.tuservidor.com` and you can find a list of
 
 1. The channel: https://u2vpodcast.tuservidor.com/linux_y_tapas?page=1
 2. The feed: https://u2vpodcast.tuservidor.com/linux_y_tapas/feed.xml
+
+Every `<item>` in the feed includes a `<link>` to that episode's permanent public page (`https://u2vpodcast.tuservidor.com/app/share/...`). The link is deterministic (it never changes between feed builds) and opens the episode in a browser without needing the media credentials; it stops working only when the episode is deleted or `share_secret` is rotated.
 
 ### SponsorBlock processing
 

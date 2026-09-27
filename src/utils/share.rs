@@ -1,50 +1,36 @@
-use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
-/// Domain-separation label. The share signing key is derived from the session
-/// `secret_key`, so no additional secret has to be provisioned or rotated; the
-/// label keeps share signatures from being confusable with any other keyed use
-/// of that secret.
-const SIGNING_LABEL: &[u8] = b"u2vpodcast/share/v1";
-/// Payload version prefix, so the token format can evolve without ambiguity.
-const PAYLOAD_VERSION: &str = "v1";
-/// A HMAC-SHA256 signature is 32 bytes, i.e. 64 lowercase hex characters.
-const SIGNATURE_HEX_LEN: usize = 64;
+/// Domain-separation label mixed into every share hash, so the same secret can
+/// never be confused across purposes.
+const LABEL: &str = "u2vpodcast/share/v1";
+/// A HMAC-SHA256 hash is 32 bytes, i.e. 64 lowercase hex characters.
+const HASH_HEX_LEN: usize = 64;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The episode and expiry a token resolves to once its signature and lifetime
-/// have been verified.
-#[derive(Debug, Clone, PartialEq)]
-pub struct VerifiedShare {
-    pub yt_id: String,
-    pub expires_at: DateTime<Utc>,
+/// A parsed share token: the episode's public `yt_id` and the hash of its URI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShareToken<'a> {
+    pub yt_id: &'a str,
+    pub hash: &'a str,
 }
 
-fn signing_key(secret_key: &str) -> Vec<u8> {
+fn mac(secret: &str, webpage_url: &str) -> HmacSha256 {
     let mut mac =
-        HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC accepts any key length");
-    mac.update(SIGNING_LABEL);
-    mac.finalize().into_bytes().to_vec()
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(LABEL.as_bytes());
+    mac.update(b"|");
+    mac.update(webpage_url.as_bytes());
+    mac
 }
 
-fn payload(yt_id: &str, exp: i64) -> String {
-    format!("{PAYLOAD_VERSION}|{yt_id}|{exp}")
-}
-
-fn sign_hex(key: &[u8], payload: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
-    mac.update(payload.as_bytes());
-    mac.finalize()
-        .into_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
-    if value.len() != SIGNATURE_HEX_LEN {
+    if value.len() != HASH_HEX_LEN {
         return None;
     }
     (0..value.len())
@@ -53,47 +39,33 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// Mints a share token for one episode and returns it with its expiry instant.
-/// The token loads as `{exp}-{yt_id}-{signature}`; `yt_id` characters are
-/// URL-safe and the signature is lowercase hex, so the token needs no encoding.
-pub fn mint_token(secret_key: &str, yt_id: &str, ttl_days: u64) -> (String, DateTime<Utc>) {
-    let expires_at = Utc::now() + Duration::days(ttl_days as i64);
-    (
-        mint_token_with_exp(secret_key, yt_id, expires_at.timestamp()),
-        expires_at,
-    )
+/// The permanent, deterministic share token for one episode: `{yt_id}-{hash}`,
+/// where `{hash}` is the hex HMAC-SHA256 of the episode's canonical URI under
+/// the effective share secret. The same inputs always produce the same token.
+pub fn token_for(secret: &str, yt_id: &str, webpage_url: &str) -> String {
+    let hash = mac(secret, webpage_url).finalize().into_bytes();
+    format!("{yt_id}-{}", encode_hex(&hash))
 }
 
-/// Mints a token for an explicit expiry instant. Kept crate-visible so tests
-/// can exercise expired-token paths deterministically.
-pub(crate) fn mint_token_with_exp(secret_key: &str, yt_id: &str, exp: i64) -> String {
-    let signature = sign_hex(&signing_key(secret_key), &payload(yt_id, exp));
-    format!("{exp}-{yt_id}-{signature}")
-}
-
-/// Verifies a token's signature (in constant time) and expiry. Returns the
-/// bound episode and expiry, or `None` for a malformed, forged, or expired
-/// token. Rotating the signing secret makes every previously minted token fail
-/// here, because the recomputed signature no longer matches.
-pub fn verify_token(secret_key: &str, token: &str, now: i64) -> Option<VerifiedShare> {
-    let (exp_str, rest) = token.split_once('-')?;
-    let (yt_id, signature) = rest.rsplit_once('-')?;
+/// Splits a token into its `yt_id` and hash, rejecting a missing/empty `yt_id`
+/// and a hash that is not 64 hex characters. `yt_id` values may contain `-`:
+/// the hash never does, so the last `-` is the separator.
+pub fn parse_token(token: &str) -> Option<ShareToken<'_>> {
+    let (yt_id, hash) = token.rsplit_once('-')?;
     if yt_id.is_empty() {
         return None;
     }
-    let exp = exp_str.parse::<i64>().ok()?;
-    let expected = decode_hex(signature)?;
-    let mut mac = HmacSha256::new_from_slice(&signing_key(secret_key)).ok()?;
-    mac.update(payload(yt_id, exp).as_bytes());
-    mac.verify_slice(&expected).ok()?;
-    if now > exp {
-        return None;
-    }
-    let expires_at = DateTime::<Utc>::from_timestamp(exp, 0)?;
-    Some(VerifiedShare {
-        yt_id: yt_id.to_string(),
-        expires_at,
-    })
+    decode_hex(hash)?;
+    Some(ShareToken { yt_id, hash })
+}
+
+/// Verifies, in constant time, that `provided_hash` is the share hash of
+/// `webpage_url` under `secret`.
+pub fn verify_token(secret: &str, provided_hash: &str, webpage_url: &str) -> bool {
+    let Some(provided) = decode_hex(provided_hash) else {
+        return false;
+    };
+    mac(secret, webpage_url).verify_slice(&provided).is_ok()
 }
 
 #[cfg(test)]
@@ -101,61 +73,65 @@ mod tests {
     use super::*;
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const URI: &str = "https://www.youtube.com/watch?v=abc123";
 
     #[test]
-    fn minted_token_verifies_and_reports_the_episode_and_expiry() {
-        let (token, expires_at) = mint_token(SECRET, "abc123", 30);
-        let now = Utc::now().timestamp();
-        let verified = verify_token(SECRET, &token, now).expect("valid token must verify");
-        assert_eq!(verified.yt_id, "abc123");
-        // The token only carries second precision, so compare timestamps.
-        assert_eq!(
-            verified.expires_at.timestamp(),
-            expires_at.timestamp()
-        );
+    fn tokens_are_deterministic_and_url_safe() {
+        let first = token_for(SECRET, "abc123", URI);
+        let second = token_for(SECRET, "abc123", URI);
+        assert_eq!(first, second);
+        assert!(first.starts_with("abc123-"));
+        assert_eq!(parse_token(&first).unwrap().hash.len(), 64);
     }
 
     #[test]
-    fn tampered_signature_is_rejected() {
-        let (token, _) = mint_token(SECRET, "abc123", 30);
+    fn a_valid_token_parses_and_verifies() {
+        let token = token_for(SECRET, "abc123", URI);
+        let parsed = parse_token(&token).expect("valid token must parse");
+        assert_eq!(parsed.yt_id, "abc123");
+        assert!(verify_token(SECRET, parsed.hash, URI));
+    }
+
+    #[test]
+    fn a_tampered_hash_is_rejected() {
+        let token = token_for(SECRET, "abc123", URI);
         let mut tampered = token.clone();
         let last = tampered.pop().unwrap();
         tampered.push(if last == '0' { '1' } else { '0' });
-        assert!(verify_token(SECRET, &tampered, Utc::now().timestamp()).is_none());
+        let parsed = parse_token(&tampered).expect("still parseable");
+        assert!(!verify_token(SECRET, parsed.hash, URI));
     }
 
     #[test]
-    fn changing_the_bound_episode_is_rejected() {
-        let (token, _) = mint_token(SECRET, "abc123", 30);
-        // The signature only covers the payload, so swapping the episode in the
-        // middle of the token must invalidate it.
-        let swapped = token.replace("abc123", "zzz999");
-        assert!(verify_token(SECRET, &swapped, Utc::now().timestamp()).is_none());
+    fn a_changed_uri_or_secret_is_rejected() {
+        let token = token_for(SECRET, "abc123", URI);
+        let parsed = parse_token(&token).unwrap();
+        assert!(!verify_token(
+            SECRET,
+            parsed.hash,
+            "https://www.youtube.com/watch?v=other"
+        ));
+        let other_secret = "f".repeat(64);
+        assert!(!verify_token(&other_secret, parsed.hash, URI));
     }
 
     #[test]
-    fn a_different_secret_is_rejected() {
-        let (token, _) = mint_token(SECRET, "abc123", 30);
-        let other = "f".repeat(64);
-        assert!(verify_token(&other, &token, Utc::now().timestamp()).is_none());
-    }
-
-    #[test]
-    fn expired_token_is_rejected() {
-        let (token, expires_at) = mint_token(SECRET, "abc123", 1);
-        let after = (expires_at + Duration::seconds(1)).timestamp();
-        assert!(verify_token(SECRET, &token, after).is_none());
-        // A boundary value is still valid because validity is `now <= exp`.
-        assert!(verify_token(SECRET, &token, expires_at.timestamp()).is_some());
+    fn yt_ids_containing_a_dash_round_trip() {
+        let token = token_for(SECRET, "a-b_c", URI);
+        let parsed = parse_token(&token).unwrap();
+        assert_eq!(parsed.yt_id, "a-b_c");
+        assert!(verify_token(SECRET, parsed.hash, URI));
     }
 
     #[test]
     fn malformed_tokens_are_rejected() {
-        assert!(verify_token(SECRET, "", Utc::now().timestamp()).is_none());
-        assert!(verify_token(SECRET, "not-a-token", Utc::now().timestamp()).is_none());
-        assert!(verify_token(SECRET, "123-only-two-parts", Utc::now().timestamp()).is_none());
-        assert!(verify_token(SECRET, "-abc-00", Utc::now().timestamp()).is_none());
-        // Future expiry, valid length, but not a valid signature.
-        assert!(verify_token(SECRET, "9999999999-abc123-00", Utc::now().timestamp()).is_none());
+        assert!(parse_token("").is_none());
+        assert!(parse_token("abc").is_none());
+        assert!(parse_token("-0123456789").is_none());
+        assert!(parse_token("abc-").is_none());
+        assert!(parse_token(&format!("abc-{}", "0".repeat(63))).is_none());
+        assert!(parse_token(&format!("abc-{}", "z".repeat(64))).is_none());
+        assert!(!verify_token(SECRET, "not-hex", URI));
+        assert!(!verify_token(SECRET, &"0".repeat(63), URI));
     }
 }

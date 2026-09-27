@@ -26,7 +26,6 @@ describe('ShareView', () => {
 			image: 'https://images.example.com/cover.jpg',
 			duration: '00:10:00',
 			published_at: '2026-01-01T00:00:00Z',
-			expires_at: '2026-02-01T00:00:00Z',
 			audio_url: '/s/tok/audio.mp3'
 		});
 		const wrapper = mountView();

@@ -12,6 +12,7 @@ use tracing::{error, info};
 
 use crate::models::{audios_dir, Channel, Episode, SponsorBlockCache};
 use crate::utils::middleware::SessionOrBasicAuth;
+use crate::utils::share::token_for;
 use crate::utils::sponsorblock::{
     parse_duration_seconds, rejected_intervals, retained_intervals, translate_chapters,
 };
@@ -139,6 +140,7 @@ async fn get_global_feed(data: Data<AppState>) -> impl Responder {
                 FsPath::new(audios_dir()),
                 episodes,
                 data.config.sponsorblock_enabled,
+                data.config.share_secret(),
             );
             let link = format!("{url}/rss");
             let itunes = ITunesChannelExtensionBuilder::default()
@@ -199,6 +201,7 @@ async fn build_feed(data: &Data<AppState>, channel: Channel) -> HttpResponse {
                 &channel.slug,
                 episodes,
                 data.config.sponsorblock_enabled,
+                data.config.share_secret(),
             );
             let link = format!("{url}/rss");
             let itunes = ITunesChannelExtensionBuilder::default()
@@ -231,6 +234,7 @@ fn episode_item(
     episode: Episode,
     title: String,
     sponsorblock_enabled: bool,
+    share_secret: &str,
 ) -> rss::Item {
     let channel_dir = audio_root.join(slug);
     let selected = episode.selected_media(&channel_dir, sponsorblock_enabled);
@@ -241,6 +245,12 @@ fn episode_item(
     let chapters_url = format!(
         "{url}/channels/{slug}/episodes/{}/chapters.json",
         episode.yt_id
+    );
+    // Permanent, deterministic public page for this episode: the same token is
+    // produced on every feed build (add-share-link-to-feed).
+    let share_url = format!(
+        "{url}/app/share/{}",
+        token_for(share_secret, &episode.yt_id, &episode.webpage_url)
     );
     let description = format!("{}\n\n{}", episode.webpage_url, episode.description);
     let itunes = ITunesItemExtensionBuilder::default()
@@ -258,6 +268,7 @@ fn episode_item(
     let mut item = ItemBuilder::default()
         .title(Some(title))
         .description(Some(description))
+        .link(Some(share_url))
         .enclosure(Some(enclosure))
         .guid(Some(
             GuidBuilder::default()
@@ -292,12 +303,21 @@ fn channel_items(
     slug: &str,
     episodes: Vec<Episode>,
     sponsorblock_enabled: bool,
+    share_secret: &str,
 ) -> Vec<rss::Item> {
     episodes
         .into_iter()
         .map(|episode| {
             let title = episode.title.clone();
-            episode_item(url, audio_root, slug, episode, title, sponsorblock_enabled)
+            episode_item(
+                url,
+                audio_root,
+                slug,
+                episode,
+                title,
+                sponsorblock_enabled,
+                share_secret,
+            )
         })
         .collect()
 }
@@ -307,6 +327,7 @@ fn global_items(
     audio_root: &FsPath,
     episodes: Vec<Episode>,
     sponsorblock_enabled: bool,
+    share_secret: &str,
 ) -> Vec<rss::Item> {
     episodes
         .into_iter()
@@ -318,7 +339,15 @@ fn global_items(
             } else {
                 format!("{}: {}", episode.channel_title, episode.title)
             };
-            episode_item(url, audio_root, &slug, episode, title, sponsorblock_enabled)
+            episode_item(
+                url,
+                audio_root,
+                &slug,
+                episode,
+                title,
+                sponsorblock_enabled,
+                share_secret,
+            )
         })
         .collect()
 }
@@ -332,6 +361,10 @@ mod tests {
     use chrono::{Duration, Utc};
     use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::process::Command;
+
+    /// Secret used by the feed tests; the link assertions recompute the same
+    /// deterministic token with it.
+    const SHARE_SECRET: &str = "test-share-secret";
 
     async fn fixture() -> (sqlx::SqlitePool, i64, std::path::PathBuf) {
         let pool = SqlitePoolOptions::new()
@@ -439,6 +472,7 @@ mod tests {
             "channel_slug",
             channel_episodes,
             true,
+            SHARE_SECRET,
         );
         let processed = items
             .iter()
@@ -456,6 +490,39 @@ mod tests {
             .contains(".sponsorblock."));
         assert_eq!(processed.enclosure().unwrap().length(), "7");
         assert_eq!(processed.itunes_ext().unwrap().duration(), Some("540"));
+        // Every item carries the permanent, deterministic public share page.
+        let expected_link = format!(
+            "http://backend/app/share/{}",
+            token_for(SHARE_SECRET, "processed", "https://example.com/processed")
+        );
+        assert_eq!(processed.link().unwrap(), expected_link);
+        for item in &items {
+            let yt_id = item.guid().unwrap().value();
+            assert_eq!(
+                item.link().unwrap(),
+                format!(
+                    "http://backend/app/share/{}",
+                    token_for(SHARE_SECRET, yt_id, &format!("https://example.com/{yt_id}"))
+                )
+            );
+        }
+        // Deterministic: rebuilding the same feed yields identical links.
+        let built_twice = channel_items(
+            "http://backend",
+            &root,
+            "channel_slug",
+            Episode::read_episodes_for_channel(&pool, channel_id)
+                .await
+                .unwrap(),
+            true,
+            SHARE_SECRET,
+        );
+        let links = |list: &[rss::Item]| {
+            list.iter()
+                .map(|item| item.link().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(links(&built_twice), links(&items));
         for yt_id in ["empty", "missing"] {
             let item = items
                 .iter()
@@ -475,11 +542,16 @@ mod tests {
             &root,
             Episode::read_all_with_channels(&pool).await.unwrap(),
             true,
+            SHARE_SECRET,
         );
         assert_eq!(global.len(), 3);
         assert!(global
             .iter()
             .all(|item| item.title().unwrap().starts_with("Channel title: ")));
+        assert!(global.iter().all(|item| item
+            .link()
+            .unwrap()
+            .starts_with("http://backend/app/share/")));
         assert_eq!(processed.guid().unwrap().value(), "processed");
 
         let disabled_channel = channel_items(
@@ -490,6 +562,7 @@ mod tests {
                 .await
                 .unwrap(),
             false,
+            SHARE_SECRET,
         );
         let disabled = disabled_channel
             .iter()
@@ -507,6 +580,7 @@ mod tests {
             &root,
             Episode::read_all_with_channels(&pool).await.unwrap(),
             false,
+            SHARE_SECRET,
         );
         let disabled = disabled_global
             .iter()
@@ -748,5 +822,58 @@ mod tests {
 
         std::fs::remove_dir_all(directory).unwrap();
         std::fs::remove_dir_all(fixture_root).unwrap();
+    }
+
+    #[actix_web::test]
+    async fn feeds_expose_the_same_deterministic_share_link() {
+        let (pool, _channel_id, root) = fixture().await;
+        let mut config = test_config();
+        // The share surface is public; turn off feed credentials so the test can
+        // exercise the real routes without a session.
+        config.with_authentication = false;
+        let share_secret = config.share_secret().to_string();
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(AppState {
+                    config,
+                    pool: pool.clone(),
+                }))
+                .configure(web_feed),
+        )
+        .await;
+
+        let channel = test::call_and_read_body(
+            &app,
+            test::TestRequest::get()
+                .uri("/channels/channel_slug/feed.xml")
+                .to_request(),
+        )
+        .await;
+        let legacy = test::call_and_read_body(
+            &app,
+            test::TestRequest::get()
+                .uri("/channel_slug/feed.xml")
+                .to_request(),
+        )
+        .await;
+        let global =
+            test::call_and_read_body(&app, test::TestRequest::get().uri("/feed.xml").to_request())
+                .await;
+
+        let channel = String::from_utf8(channel.to_vec()).unwrap();
+        let legacy = String::from_utf8(legacy.to_vec()).unwrap();
+        let global = String::from_utf8(global.to_vec()).unwrap();
+
+        // The legacy alias returns the identical feed (the share link is
+        // deterministic, so it does not break the identity guarantee).
+        assert_eq!(channel, legacy);
+        let expected = format!(
+            "<link>http://localhost:6996/app/share/{}",
+            token_for(&share_secret, "processed", "https://example.com/processed")
+        );
+        assert!(channel.contains(&expected));
+        assert!(global.contains(&expected));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

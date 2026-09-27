@@ -31,11 +31,13 @@ admin_password: nimda
 # (/media/**) require HTTP Basic Auth using the admin credentials above.
 # When false, they are served without authentication. Defaults to true if omitted.
 with_authentication: true
-# Lifetime of public episode share links, in days. A share link becomes invalid
-# once this many days have passed since it was minted. Rotating `secret_key`
-# (and restarting) revokes every outstanding link; there is no per-link
-# revocation. Defaults to 30 if omitted; 0 is treated as the default.
-share_ttl_days: 30
+# Optional secret used to sign public episode share links (the /app/share/...
+# links). When absent or empty, the session `secret_key` above is used instead.
+# Set a distinct random value to be able to rotate public links by changing only
+# this value, without invalidating login sessions. Share links never expire:
+# they stop working only when their episode is deleted or this secret changes.
+# Generate one with: openssl rand -base64 48 | tr -d '\n'
+# share_secret: "REPLACE_WITH_A_RANDOM_SECRET"
 # Log level for the application. One of: TRACE, DEBUG, INFO, WARN, ERROR.
 # Defaults to INFO if omitted. The RUST_LOG environment variable, when set,
 # takes precedence over this value.
