@@ -88,6 +88,8 @@ After that, go to `https://u2vpodcast.tuservidor.com` and you can find a list of
 1. The channel: https://u2vpodcast.tuservidor.com/linux_y_tapas?page=1
 2. The feed: https://u2vpodcast.tuservidor.com/linux_y_tapas/feed.xml
 
+Every `<item>` in the feed includes a `<link>` to that episode's permanent public page (`https://u2vpodcast.tuservidor.com/app/share/...`). The link is deterministic (it never changes between feed builds) and opens the episode in a browser without needing the media credentials; it stops working only when the episode is deleted or `share_secret` is rotated.
+
 ### SponsorBlock processing
 
 SponsorBlock is disabled by default. Set `sponsorblock_enabled: true` to opt in; this is also required after upgrading an installation that previously used SponsorBlock. When disabled, u2vpodcast performs no SponsorBlock retrieval, reconciliation, processing, API exposure, manual refresh, player skipping, marker rendering, or processed-feed selection. Existing cached snapshots and derivatives are retained but ignored.
