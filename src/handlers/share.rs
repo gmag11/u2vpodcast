@@ -12,17 +12,16 @@ use super::{
     super::models::{audios_dir, CResponse, Episode},
     AppState,
 };
-use crate::utils::share::{mint_token, verify_token};
+use crate::utils::share::{parse_token, token_for, verify_token};
 
 #[derive(Serialize)]
 struct ShareLink {
     url: String,
-    expires_at: DateTime<Utc>,
 }
 
-/// Authenticated endpoint that mints a public share link for one episode.
-/// Registered under the JSON API session guard, so reaching it implies a valid
-/// session; the link itself is later redeemed without any credentials.
+/// Authenticated endpoint that mints the permanent public share link for one
+/// episode. Registered under the JSON API session guard, so reaching it implies
+/// a valid session; the link itself is later redeemed without any credentials.
 pub async fn create_share(
     data: Data<AppState>,
     session: Session,
@@ -31,11 +30,10 @@ pub async fn create_share(
     info!("create_share");
     let yt_id = yt_id.into_inner();
     match Episode::read_by_yt_id_with_channel(&data.pool, &yt_id).await {
-        Ok(_) => {
-            let (token, expires_at) =
-                mint_token(&data.config.secret_key, &yt_id, data.config.share_ttl_days);
+        Ok(episode) => {
+            let token = token_for(data.config.share_secret(), &yt_id, &episode.webpage_url);
             let url = format!("{}/app/share/{}", data.config.url, token);
-            CResponse::ok(session, ShareLink { url, expires_at })
+            CResponse::ok(session, ShareLink { url })
         }
         Err(e) => {
             error!("Error minting share link for {yt_id}: {e}");
@@ -44,9 +42,27 @@ pub async fn create_share(
     }
 }
 
+/// Resolves a share token to its episode, or `None` when the token is
+/// malformed, its `yt_id` does not resolve, or its hash does not match the
+/// episode's URI.
+async fn resolve_shared_episode(data: &Data<AppState>, token: &str) -> Option<Episode> {
+    let parsed = parse_token(token)?;
+    let episode = Episode::read_by_yt_id_with_channel(&data.pool, parsed.yt_id)
+        .await
+        .ok()?;
+    if !verify_token(
+        data.config.share_secret(),
+        parsed.hash,
+        &episode.webpage_url,
+    ) {
+        return None;
+    }
+    Some(episode)
+}
+
 /// Minimal metadata exposed to an anonymous visitor through a share token.
-/// Deliberately narrow: no user, progress, favorite, chapter, or SponsorBlock
-/// fields, and no other episode.
+/// Deliberately narrow: no expiry, user, progress, favorite, chapter, or
+/// SponsorBlock fields, and no other episode.
 #[derive(Serialize)]
 struct SharedEpisode {
     title: String,
@@ -55,34 +71,26 @@ struct SharedEpisode {
     image: String,
     duration: String,
     published_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
     audio_url: String,
 }
 
 /// Public metadata for the share page. Authorized solely by the token; a
-/// malformed, forged, or expired token is answered `404` like an unknown path.
+/// malformed, forged, or unresolvable token is answered `404` like an unknown
+/// path.
 pub async fn get_shared_episode(data: Data<AppState>, token: Path<String>) -> HttpResponse {
     info!("get_shared_episode");
     let token = token.into_inner();
-    let Some(verified) = verify_token(&data.config.secret_key, &token, Utc::now().timestamp())
-    else {
-        return HttpResponse::NotFound().finish();
-    };
-    match Episode::read_by_yt_id_with_channel(&data.pool, &verified.yt_id).await {
-        Ok(episode) => HttpResponse::Ok().json(SharedEpisode {
+    match resolve_shared_episode(&data, &token).await {
+        Some(episode) => HttpResponse::Ok().json(SharedEpisode {
             title: episode.title,
             channel_title: episode.channel_title,
             description: episode.description,
             image: episode.image,
             duration: episode.duration,
             published_at: episode.published_at,
-            expires_at: verified.expires_at,
             audio_url: format!("{}/s/{}/audio.mp3", data.config.url, token),
         }),
-        Err(e) => {
-            info!("shared episode unavailable: {e}");
-            HttpResponse::NotFound().finish()
-        }
+        None => HttpResponse::NotFound().finish(),
     }
 }
 
@@ -96,14 +104,7 @@ pub async fn get_shared_audio(
     token: Path<String>,
 ) -> HttpResponse {
     info!("get_shared_audio");
-    let Some(verified) = verify_token(
-        &data.config.secret_key,
-        &token.into_inner(),
-        Utc::now().timestamp(),
-    ) else {
-        return HttpResponse::NotFound().finish();
-    };
-    let Ok(episode) = Episode::read_by_yt_id_with_channel(&data.pool, &verified.yt_id).await else {
+    let Some(episode) = resolve_shared_episode(&data, &token.into_inner()).await else {
         return HttpResponse::NotFound().finish();
     };
     if episode.channel_slug.is_empty() {
@@ -121,7 +122,7 @@ mod tests {
     use crate::models::config::test_config;
     use crate::models::SponsorBlockCache;
     use crate::utils::middleware::RequireSession;
-    use crate::utils::share::{mint_token_with_exp, verify_token};
+    use crate::utils::share::{parse_token, verify_token};
     use actix_session::{storage::CookieSessionStore, SessionExt, SessionMiddleware};
     use actix_web::{
         body::to_bytes,
@@ -131,6 +132,8 @@ mod tests {
     };
     use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::path::Path as FsPath;
+
+    const WEBPAGE_URL: &str = "https://example.com/v";
 
     async fn fixture() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -155,9 +158,10 @@ mod tests {
         .unwrap();
         sqlx::query(
             "INSERT INTO episodes (channel_id, title, yt_id, webpage_url, published_at, duration, created_at, updated_at) \
-             VALUES ($1, 'Episode', 'abc123', 'https://example.com/v', $2, '00:10:00', $2, $2)",
+             VALUES ($1, 'Episode', 'abc123', $2, $3, '00:10:00', $3, $3)",
         )
         .bind(channel_id)
+        .bind(WEBPAGE_URL)
         .bind(now)
         .execute(&pool)
         .await
@@ -215,26 +219,27 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn mint_returns_a_public_url_and_expiry_for_a_stored_episode() {
-        let response = create_share(
-            state(fixture().await),
-            session(),
-            Path::from("abc123".to_string()),
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = json(response).await;
+    async fn mint_returns_a_permanent_url_with_no_expiry() {
+        let state = state(fixture().await);
+        let first = create_share(state.clone(), session(), Path::from("abc123".to_string())).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        let body = json(first).await;
+        assert!(body["data"].get("expires_at").is_none());
         let url = body["data"]["url"].as_str().unwrap();
         assert!(url.starts_with("http://localhost:6996/app/share/"));
-        assert!(body["data"]["expires_at"].is_string());
         let token = url.rsplit('/').next().unwrap();
-        let verified = verify_token(
-            &test_config().secret_key,
-            token,
-            Utc::now().timestamp(),
-        )
-        .expect("minted token must verify");
-        assert_eq!(verified.yt_id, "abc123");
+        let parsed = parse_token(token).expect("minted token must parse");
+        assert_eq!(parsed.yt_id, "abc123");
+        assert!(verify_token(
+            state.config.share_secret(),
+            parsed.hash,
+            WEBPAGE_URL
+        ));
+
+        // Deterministic: a second mint returns the identical URL.
+        let second = create_share(state, session(), Path::from("abc123".to_string())).await;
+        let second_body = json(second).await;
+        assert_eq!(second_body["data"]["url"], body["data"]["url"]);
     }
 
     #[actix_web::test]
@@ -259,14 +264,9 @@ mod tests {
                         .cookie_secure(false)
                         .build(),
                 )
-                .service(
-                    web::scope("")
-                        .wrap(RequireSession)
-                        .service(
-                            web::resource("/episodes/{yt_id}/share/")
-                                .route(web::post().to(create_share)),
-                        ),
-                ),
+                .service(web::scope("").wrap(RequireSession).service(
+                    web::resource("/episodes/{yt_id}/share/").route(web::post().to(create_share)),
+                )),
         )
         .await;
 
@@ -283,44 +283,37 @@ mod tests {
     #[actix_web::test]
     async fn metadata_exposes_only_public_fields_for_a_valid_token() {
         let state = state(fixture().await);
-        let (token, _) = mint_token(&state.config.secret_key, "abc123", 30);
+        let token = token_for(state.config.share_secret(), "abc123", WEBPAGE_URL);
         let response = get_shared_episode(state, Path::from(token.clone())).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = json(response).await;
         assert_eq!(body["title"], "Episode");
         assert_eq!(body["channel_title"], "Channel");
-        assert!(body.get("user").is_none());
-        assert!(body.get("progress").is_none());
-        assert!(body.get("favorite").is_none());
-        assert!(body
-            .get("audio_url")
-            .and_then(|value| value.as_str())
-            .unwrap()
-            .ends_with("/audio.mp3"));
+        for absent in ["expires_at", "user", "progress", "favorite"] {
+            assert!(body.get(absent).is_none(), "{absent} must not be exposed");
+        }
+        assert!(body["audio_url"].as_str().unwrap().ends_with("/audio.mp3"));
     }
 
     #[actix_web::test]
-    async fn metadata_rejects_malformed_forged_and_expired_tokens() {
+    async fn metadata_rejects_malformed_forged_and_unresolvable_tokens() {
         let state = state(fixture().await);
-        let secret = state.config.secret_key.clone();
-        let now = Utc::now().timestamp();
 
         let malformed = get_shared_episode(state.clone(), Path::from("garbage".to_string())).await;
         assert_eq!(malformed.status(), StatusCode::NOT_FOUND);
 
+        // Well-formed but wrong hash: parses, the episode loads, the hash fails.
         let forged = get_shared_episode(
             state.clone(),
-            Path::from(format!("{}-abc123-{}", now + 3600, "0".repeat(64))),
+            Path::from(format!("abc123-{}", "0".repeat(64))),
         )
         .await;
         assert_eq!(forged.status(), StatusCode::NOT_FOUND);
 
-        let expired = get_shared_episode(
-            state,
-            Path::from(mint_token_with_exp(&secret, "abc123", now - 10)),
-        )
-        .await;
-        assert_eq!(expired.status(), StatusCode::NOT_FOUND);
+        // Well-formed token whose yt_id does not resolve.
+        let unresolvable = token_for(state.config.share_secret(), "missing", WEBPAGE_URL);
+        let response = get_shared_episode(state, Path::from(unresolvable)).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[actix_web::test]
@@ -330,9 +323,10 @@ mod tests {
         let pool = fixture().await;
         set_channel_slug(&pool, &slug).await;
         let state = state(pool);
-        let (token, _) = mint_token(&state.config.secret_key, "abc123", 30);
+        let token = token_for(state.config.share_secret(), "abc123", WEBPAGE_URL);
 
-        let full = get_shared_audio(media_request(), state.clone(), Path::from(token.clone())).await;
+        let full =
+            get_shared_audio(media_request(), state.clone(), Path::from(token.clone())).await;
         assert_eq!(full.status(), StatusCode::OK);
         assert_eq!(
             full.headers().get(header::CACHE_CONTROL).unwrap(),
@@ -343,9 +337,12 @@ mod tests {
             b"0123456789".as_slice()
         );
 
-        let ranged =
-            get_shared_audio(media_request_with_range("bytes=2-5"), state.clone(), Path::from(token.clone()))
-                .await;
+        let ranged = get_shared_audio(
+            media_request_with_range("bytes=2-5"),
+            state.clone(),
+            Path::from(token.clone()),
+        )
+        .await;
         assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(
             ranged.headers().get(header::CONTENT_RANGE).unwrap(),
@@ -392,7 +389,7 @@ mod tests {
         let mut config = test_config();
         config.sponsorblock_enabled = true;
         let state = state_with(pool, config);
-        let (token, _) = mint_token(&state.config.secret_key, "abc123", 30);
+        let token = token_for(state.config.share_secret(), "abc123", WEBPAGE_URL);
 
         let response = get_shared_audio(media_request(), state, Path::from(token)).await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -405,19 +402,18 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn audio_rejects_expired_tokens_and_missing_media() {
+    async fn audio_rejects_invalid_tokens_and_missing_media() {
         let state = state(fixture().await);
-        let expired = mint_token_with_exp(
-            &state.config.secret_key,
-            "abc123",
-            Utc::now().timestamp() - 10,
-        );
-        let response =
-            get_shared_audio(media_request(), state.clone(), Path::from(expired)).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let forged = get_shared_audio(
+            media_request(),
+            state.clone(),
+            Path::from(format!("abc123-{}", "0".repeat(64))),
+        )
+        .await;
+        assert_eq!(forged.status(), StatusCode::NOT_FOUND);
 
-        // Valid, unexpired token, but no media file on disk for the episode.
-        let (valid, _) = mint_token(&state.config.secret_key, "abc123", 30);
+        // Valid token, but no media file on disk for the episode.
+        let valid = token_for(state.config.share_secret(), "abc123", WEBPAGE_URL);
         let missing = get_shared_audio(media_request(), state, Path::from(valid)).await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
@@ -432,7 +428,7 @@ mod tests {
         // The point of the share surface: it must work while the rest of the
         // deployment is credential-protected.
         assert!(state.config.with_authentication);
-        let (token, _) = mint_token(&state.config.secret_key, "abc123", 30);
+        let token = token_for(state.config.share_secret(), "abc123", WEBPAGE_URL);
 
         let app = test::init_service(
             App::new().app_data(state).service(

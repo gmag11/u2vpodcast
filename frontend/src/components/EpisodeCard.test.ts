@@ -38,8 +38,7 @@ vi.mock('@/lib/api/client', () => ({
 			Promise.resolve({
 				ok: true,
 				data: {
-					url: 'https://podcasts.example.com/app/share/token',
-					expires_at: '2026-01-01T00:00:00Z'
+					url: 'https://podcasts.example.com/app/share/token'
 				},
 				user: null,
 				status: true
@@ -846,8 +845,7 @@ describe('EpisodeCard share action', () => {
 		vi.mocked(api.createShareLink).mockResolvedValue({
 			ok: true,
 			data: {
-				url: 'https://podcasts.example.com/app/share/token',
-				expires_at: '2026-01-01T00:00:00Z'
+				url: 'https://podcasts.example.com/app/share/token'
 			},
 			user: null,
 			status: true

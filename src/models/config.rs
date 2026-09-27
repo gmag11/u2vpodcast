@@ -42,12 +42,9 @@ pub struct Config {
     pub sponsorblock_enabled: bool,
     #[serde(default = "default_sponsorblock_rejected_categories")]
     pub sponsorblock_rejected_categories: Vec<String>,
-    #[serde(default = "default_share_ttl_days")]
-    pub share_ttl_days: u64,
-}
-
-fn default_share_ttl_days() -> u64 {
-    30
+    /// Optional secret used to sign public episode share links. When absent or
+    /// empty, `secret_key` is used instead (add-public-episode-share).
+    pub share_secret: Option<String>,
 }
 
 fn default_sponsorblock_rejected_categories() -> Vec<String> {
@@ -145,12 +142,19 @@ impl Config {
             .filter(|category| configured.contains(**category))
             .map(|category| (*category).to_string())
             .collect();
-        // A zero share lifetime would make every minted link instantly expire;
-        // treat it as "unset" and fall back to the default (add-public-episode-share).
-        if self.share_ttl_days == 0 {
-            self.share_ttl_days = default_share_ttl_days();
-        }
         Ok(self)
+    }
+
+    /// The secret that signs public episode share links: the configured
+    /// `share_secret` when present and non-empty, otherwise `secret_key`. A
+    /// dedicated secret lets an operator rotate public links without
+    /// invalidating session cookies.
+    pub fn share_secret(&self) -> &str {
+        self.share_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&self.secret_key)
     }
 
     pub fn admin_credentials_present(&self) -> bool {
@@ -200,6 +204,11 @@ fn redact_secrets(content: &str, config: &Config) -> String {
     let mut out = content.to_string();
     if !config.secret_key.is_empty() {
         out = out.replace(&config.secret_key, "***");
+    }
+    if let Some(share_secret) = config.share_secret.as_deref() {
+        if !share_secret.trim().is_empty() {
+            out = out.replace(share_secret, "***");
+        }
     }
     if let Some(password) = config.admin_password.as_deref() {
         if !password.is_empty() {
@@ -274,18 +283,16 @@ mod tests {
     }
 
     #[test]
-    fn share_ttl_days_defaults_to_30_and_accepts_overrides() {
+    fn share_secret_falls_back_to_the_session_secret() {
         let defaulted = Config::from_yaml(&yaml("")).unwrap();
-        assert_eq!(defaulted.share_ttl_days, 30);
+        assert_eq!(defaulted.share_secret(), defaulted.secret_key);
 
-        let overridden = Config::from_yaml(&yaml("share_ttl_days: 7\n")).unwrap();
-        assert_eq!(overridden.share_ttl_days, 7);
-    }
+        let blank = Config::from_yaml(&yaml("share_secret: \"  \"\n")).unwrap();
+        assert_eq!(blank.share_secret(), blank.secret_key);
 
-    #[test]
-    fn zero_share_ttl_days_falls_back_to_the_default() {
-        let zeroed = Config::from_yaml(&yaml("share_ttl_days: 0\n")).unwrap();
-        assert_eq!(zeroed.share_ttl_days, 30);
+        let dedicated = Config::from_yaml(&yaml("share_secret: public-links-secret\n")).unwrap();
+        assert_eq!(dedicated.share_secret(), "public-links-secret");
+        assert_ne!(dedicated.share_secret(), dedicated.secret_key);
     }
 
     #[test]
@@ -315,13 +322,22 @@ mod tests {
             cooldown_seconds: 3,
             sponsorblock_enabled: false,
             sponsorblock_rejected_categories: vec!["sponsor".to_string()],
-            share_ttl_days: 30,
+            share_secret: Some("share-secret-value".to_string()),
         };
         let redacted = redact_secrets(content, &config);
         assert!(!redacted.contains("super-secret-key-value"));
         assert!(!redacted.contains("nimda"));
         assert!(redacted.contains("admin_username: admin"));
         assert!(redacted.contains("port: 6996"));
+        assert!(redacted.contains("***"));
+    }
+
+    #[test]
+    fn redact_secrets_hides_the_share_secret_when_present() {
+        let content = "secret_key: \"session-key\"\nshare_secret: \"share-key\"";
+        let config = Config::from_yaml(&yaml("share_secret: share-key\n")).unwrap();
+        let redacted = redact_secrets(content, &config);
+        assert!(!redacted.contains("share-key"));
         assert!(redacted.contains("***"));
     }
 }
