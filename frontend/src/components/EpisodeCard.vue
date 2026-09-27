@@ -11,6 +11,7 @@
 		PhPause,
 		PhPlay,
 		PhPlaylist,
+		PhShareNetwork,
 		PhStar,
 		PhStop
 	} from '@phosphor-icons/vue';
@@ -211,6 +212,24 @@
 				: t('favorites.failed'),
 			result.ok ? 'success' : 'error'
 		);
+	}
+
+	// Mint a public share link for this episode and copy it. The link is a
+	// bearer capability minted server-side; the card only receives the URL.
+	async function shareEpisode() {
+		try {
+			const result = await api.createShareLink(props.episode.yt_id);
+			const url = result.data?.url;
+			if (!result.ok || !url) {
+				notification.show(t('share.failed'), 'error');
+				return;
+			}
+			await navigator.clipboard.writeText(url);
+			notification.show(t('share.copied'), 'success');
+		} catch (err) {
+			console.error(err);
+			notification.show(t('share.failed'), 'error');
+		}
 	}
 
 	async function resetProgress() {
@@ -697,6 +716,25 @@
 								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 							>
 								{{ inPlaylist ? $t('playlist.remove') : $t('playlist.add') }}
+							</span>
+						</span>
+						<span class="group relative">
+							<button
+								type="button"
+								class="flex h-8 w-8 items-center justify-center rounded-md border border-outline text-text-muted transition-colors hover:text-text"
+								data-testid="card-share"
+								:aria-label="$t('share.action')"
+								:aria-describedby="`card-share-tooltip-${episode.id}`"
+								@click="shareEpisode"
+							>
+								<PhShareNetwork class="h-4 w-4" weight="regular" />
+							</button>
+							<span
+								:id="`card-share-tooltip-${episode.id}`"
+								role="tooltip"
+								class="pointer-events-none absolute right-0 bottom-full z-30 mb-2 w-max rounded-md bg-surface-high px-2 py-1 text-xs font-medium text-text opacity-0 shadow-card transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+							>
+								{{ $t('share.action') }}
 							</span>
 						</span>
 						<time class="shrink-0 text-sm text-text-muted">

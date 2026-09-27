@@ -33,6 +33,17 @@ vi.mock('@/lib/api/client', () => ({
 		),
 		refreshEpisodeSponsorBlock: vi.fn(() =>
 			Promise.resolve({ ok: true, data: null, user: null, status: true })
+		),
+		createShareLink: vi.fn(() =>
+			Promise.resolve({
+				ok: true,
+				data: {
+					url: 'https://podcasts.example.com/app/share/token',
+					expires_at: '2026-01-01T00:00:00Z'
+				},
+				user: null,
+				status: true
+			})
 		)
 	}
 }));
@@ -803,5 +814,64 @@ describe('EpisodeCard favorite toggle', () => {
 		expect(wrapper.find('[aria-label="Add to favorites"]').exists()).toBe(true);
 		const notification = useNotificationStore();
 		expect(notification.current?.message).toBe('Could not update favorites');
+	});
+});
+
+describe('EpisodeCard share action', () => {
+	function mountCardWith(ep: Episode) {
+		const pinia = createPinia();
+		useNotificationStore(pinia);
+		return mount(EpisodeCard, {
+			props: { episode: ep },
+			global: { plugins: [pinia, testI18n], stubs: { RouterLink: true } }
+		});
+	}
+
+	function stubClipboard() {
+		const writeText = vi.fn(() => Promise.resolve());
+		Object.defineProperty(navigator, 'clipboard', {
+			value: { writeText },
+			configurable: true
+		});
+		return writeText;
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		vi.clearAllMocks();
+	});
+
+	it('mints a link, copies it, and notifies', async () => {
+		const writeText = stubClipboard();
+		vi.mocked(api.createShareLink).mockResolvedValue({
+			ok: true,
+			data: {
+				url: 'https://podcasts.example.com/app/share/token',
+				expires_at: '2026-01-01T00:00:00Z'
+			},
+			user: null,
+			status: true
+		} as never);
+		const wrapper = mountCardWith(episode());
+		await wrapper.find('[data-testid="card-share"]').trigger('click');
+		await flushPromises();
+		expect(api.createShareLink).toHaveBeenCalledWith('yt1');
+		expect(writeText).toHaveBeenCalledWith('https://podcasts.example.com/app/share/token');
+		expect(useNotificationStore().current?.message).toBe('Share link copied');
+	});
+
+	it('notifies without copying when minting fails', async () => {
+		const writeText = stubClipboard();
+		vi.mocked(api.createShareLink).mockResolvedValue({
+			ok: false,
+			data: null,
+			user: null,
+			status: false
+		} as never);
+		const wrapper = mountCardWith(episode());
+		await wrapper.find('[data-testid="card-share"]').trigger('click');
+		await flushPromises();
+		expect(writeText).not.toHaveBeenCalled();
+		expect(useNotificationStore().current?.message).toBe('Could not create the share link');
 	});
 });
