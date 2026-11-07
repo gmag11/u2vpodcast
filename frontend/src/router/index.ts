@@ -8,7 +8,7 @@ const router = createRouter({
 			path: '/login',
 			name: 'login',
 			component: () => import('@/views/LoginView.vue'),
-			meta: { public: true }
+			meta: { guestOnly: true }
 		},
 		{
 			path: '/',
@@ -29,6 +29,14 @@ const router = createRouter({
 			path: '/:channelId(\\d+)',
 			name: 'episodes',
 			component: () => import('@/views/EpisodesView.vue')
+		},
+		{
+			// Public share page: reachable without a session, and an already
+			// authenticated visitor is not redirected away from it.
+			path: '/share/:token',
+			name: 'share',
+			component: () => import('@/views/ShareView.vue'),
+			meta: { public: true }
 		}
 	]
 });
@@ -36,11 +44,11 @@ const router = createRouter({
 router.beforeEach((to) => {
 	const auth = useAuthStore();
 
-	if (to.meta.public && auth.isAuthenticated) {
+	if (to.meta.guestOnly && auth.isAuthenticated) {
 		return { name: 'channels' };
 	}
 
-	if (!to.meta.public && !auth.isAuthenticated) {
+	if (!to.meta.public && !to.meta.guestOnly && !auth.isAuthenticated) {
 		return {
 			name: 'login',
 			query: { next: to.fullPath }

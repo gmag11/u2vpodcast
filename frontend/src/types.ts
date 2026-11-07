@@ -84,6 +84,20 @@ export interface ConfigResponse {
 	};
 }
 
+export interface SharedEpisode {
+	title: string;
+	channel_title: string;
+	description: string;
+	image: string;
+	duration: string;
+	published_at: string;
+	audio_url: string;
+}
+
+export interface ShareLink {
+	url: string;
+}
+
 export interface LoginRequestBody {
 	username: string;
 	password: string;

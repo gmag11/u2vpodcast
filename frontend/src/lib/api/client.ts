@@ -5,6 +5,8 @@ import type {
 	EpisodeProgress,
 	LoginRequestBody,
 	Response,
+	ShareLink,
+	SharedEpisode,
 	User
 } from '@/types';
 
@@ -171,5 +173,21 @@ export const api = {
 
 	async getConfig() {
 		return request<ConfigResponse>('/api/1.0/config/');
+	},
+
+	async createShareLink(ytId: string) {
+		return request<ShareLink>(`/api/1.0/episodes/${ytId}/share/`, { method: 'POST' });
+	},
+
+	// Public share metadata. This endpoint is not part of the authenticated
+	// JSON API contract: it returns plain JSON (no CustomResponse envelope) and
+	// `null` when the token is malformed, forged, expired, or the episode is
+	// gone, so the share page can render an unavailable state.
+	async getSharedEpisode(token: string): Promise<SharedEpisode | null> {
+		const response = await fetch(`${baseEndpoint}/s/${encodeURIComponent(token)}/episode.json`, {
+			headers: { Accept: 'application/json' }
+		});
+		if (!response.ok) return null;
+		return (await response.json()) as SharedEpisode;
 	}
 };

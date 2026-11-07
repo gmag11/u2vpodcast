@@ -185,5 +185,14 @@
 		"filterLabel": "Favorites only",
 		"emptyTitle": "No favorites yet",
 		"emptyBody": "Episodes you mark with the star will appear here."
+	},
+	"share": {
+		"loading": "Loading shared episode…",
+		"unavailableTitle": "This link is unavailable",
+		"unavailableBody": "It may have expired or been mistyped.",
+		"audioUnsupported": "Your browser does not support audio playback.",
+		"action": "Share episode",
+		"copied": "Share link copied",
+		"failed": "Could not create the share link"
 	}
 }

@@ -185,5 +185,14 @@
 		"filterLabel": "Solo favoritos",
 		"emptyTitle": "Aún no hay favoritos",
 		"emptyBody": "Los episodios que marques con la estrella aparecerán aquí."
+	},
+	"share": {
+		"loading": "Cargando episodio compartido…",
+		"unavailableTitle": "Este enlace no está disponible",
+		"unavailableBody": "Puede que haya caducado o esté mal escrito.",
+		"audioUnsupported": "Tu navegador no admite la reproducción de audio.",
+		"action": "Compartir episodio",
+		"copied": "Enlace copiado",
+		"failed": "No se pudo crear el enlace para compartir"
 	}
 }
