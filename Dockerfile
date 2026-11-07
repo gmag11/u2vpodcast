@@ -20,7 +20,12 @@ RUN cargo build --release && \
 ###############################################################################
 ## Frontend builder
 ###############################################################################
-FROM node:24-alpine AS frontend_base
+# The frontend produces static assets (JS/CSS), so its output is identical for
+# every target architecture. Pin these stages to the build platform so the
+# install/test/build pipeline runs once, natively, instead of being repeated
+# under QEMU for each target. Emulated runs are ~10x slower and make the vitest
+# suite hit its per-test timeout on the slow first lazy route import.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend_base
 ENV PNPM_HOME=/pnpm
 ENV PATH="${PNPM_HOME}:${PATH}"
 RUN corepack enable
